@@ -5,8 +5,11 @@ This allows the detector to use CUDA streams without interference.
 import os
 import tempfile
 from pathlib import Path
-from multiprocessing import Process, Queue
+import multiprocessing as mp
 from typing import Optional
+
+# Use spawn context for clean CUDA initialization in child process
+_ctx = mp.get_context('spawn')
 
 # Fix /tmp issue before importing NeMo
 _tmp_dir = Path.home() / "tmp"
@@ -17,7 +20,7 @@ os.environ["TMP"] = str(_tmp_dir)
 tempfile.tempdir = str(_tmp_dir)
 
 
-def _tts_worker(queue: Queue, sample_rate_out: Queue):
+def _tts_worker(queue, sample_rate_out):
     """Worker process for NeMo TTS. Has its own CUDA context."""
     import numpy as np
     import sounddevice as sd
@@ -84,17 +87,17 @@ class TTSProcess:
     """Manages a separate process for NeMo TTS."""
 
     def __init__(self):
-        self.queue: Optional[Queue] = None
-        self.process: Optional[Process] = None
+        self.queue = None
+        self.process = None
         self.sample_rate: int = 22050
         self._ready = False
 
     def start(self):
         """Start the TTS process."""
-        self.queue = Queue()
-        sample_rate_out = Queue()
+        self.queue = _ctx.Queue()
+        sample_rate_out = _ctx.Queue()
 
-        self.process = Process(
+        self.process = _ctx.Process(
             target=_tts_worker,
             args=(self.queue, sample_rate_out),
             daemon=True
