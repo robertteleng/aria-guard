@@ -225,9 +225,98 @@ pyttsx3>=2.90
 Pillow>=10.0.0
 ```
 
+## Roadmap: VLM + Control por Voz
+
+Próxima integración: FastVLM para descripciones de escena + comandos de voz.
+
+### Arquitectura Completa (Planned)
+
+```mermaid
+graph TB
+    subgraph Input["Entrada"]
+        CAM[Camera/Video/Aria]
+        MIC[Micrófono]
+    end
+
+    subgraph RealTime["Real-Time Loop (~20 FPS)"]
+        YOLO[YOLO26s]
+        DEPTH[Depth Anything V2]
+        GAZE[Meta Eye Gaze]
+        BEEP[Spatial Beeps]
+    end
+
+    subgraph OnDemand["On-Demand (~400ms)"]
+        VLM[FastVLM-0.5B]
+        TTS[TTS Descripción]
+    end
+
+    subgraph Voice["Control de Voz"]
+        WHISPER[Whisper/Vosk]
+        CMD{Comando}
+    end
+
+    CAM --> YOLO
+    CAM --> DEPTH
+    CAM --> GAZE
+    CAM --> VLM
+
+    YOLO --> BEEP
+    DEPTH --> BEEP
+    GAZE --> BEEP
+
+    MIC --> WHISPER
+    WHISPER --> CMD
+
+    CMD -->|"describe"| VLM
+    CMD -->|"stop"| BEEP
+    CMD -->|"resume"| BEEP
+
+    VLM --> TTS
+```
+
+### Flujo de Voz
+
+```mermaid
+sequenceDiagram
+    participant U as Usuario
+    participant W as Whisper
+    participant S as Sistema
+    participant V as FastVLM
+    participant T as TTS
+
+    U->>W: "describe"
+    W->>S: Comando reconocido
+    S->>V: Frame actual
+    V->>V: Genera descripción (~400ms)
+    V->>T: "Office space with person at desk..."
+    T->>U: Audio descripción
+
+    Note over S: Loop real-time continúa<br/>sin interrupción
+```
+
+### Modelos y VRAM
+
+```mermaid
+pie title VRAM Usage (~2.7GB total)
+    "YOLO26s" : 0.5
+    "Depth Anything V2" : 0.8
+    "Meta Eye Gaze" : 0.2
+    "FastVLM-0.5B" : 1.2
+```
+
+### Comandos de Voz (Planned)
+
+| Comando | Acción |
+|---------|--------|
+| "describe" / "scan" | Descripción VLM detallada |
+| "stop" | Pausar alertas de audio |
+| "resume" | Reanudar alertas |
+| "help" | Listar comandos disponibles |
+
 ## Créditos
 
 - [Ultralytics YOLO](https://github.com/ultralytics/ultralytics)
 - [Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2)
 - [Meta Project Aria](https://www.projectaria.com/)
 - [projectaria_eyetracking](https://github.com/facebookresearch/projectaria_eyetracking)
+- [FastVLM](https://github.com/apple/ml-fastvlm) (planned)
