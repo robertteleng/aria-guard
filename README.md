@@ -37,7 +37,7 @@ graph TB
     subgraph Output
         DASH[dashboard.py<br/>Visual Rendering]
         AUD[audio.py<br/>Spatial Audio + TTS]
-        SRV[server.py<br/>MJPEG Streaming]
+        SRV[main.py<br/>MJPEG Streaming]
     end
 
     ARIA --> OBS
@@ -127,8 +127,7 @@ graph LR
 
 ```
 aria-demo/
-├── demo.py          # Script principal (Gradio/OpenCV UI)
-├── server.py        # Servidor MJPEG para streaming web
+├── main.py          # Servidor MJPEG + UI web
 ├── observer.py      # Captura de frames (Aria/Webcam/Video)
 ├── detector.py      # YOLO + Depth + Gaze (CUDA streams)
 ├── dashboard.py     # Renderizado visual con OpenCV
@@ -158,37 +157,12 @@ sudo apt-get install -y libportaudio2 portaudio19-dev espeak-ng
 
 ## Uso
 
-### Modo Interactivo (Gradio)
-
 ```bash
-python demo.py                    # Menú interactivo
-python demo.py --webcam           # Webcam directa
-python demo.py --video video.mp4  # Video
-python demo.py --aria             # Gafas Aria
+python main.py                    # Usar webcam (default)
+python main.py test_video.mp4     # Usar archivo de video
 ```
 
-### Servidor Web (MJPEG Streaming)
-
-```bash
-python server.py test_video.mp4   # Streaming en http://localhost:5000
-```
-
-### Opciones
-
-| Opción | Descripción |
-|--------|-------------|
-| `--aria` | Conectar con gafas Meta Aria |
-| `--webcam` | Usar webcam del sistema |
-| `--video PATH` | Usar archivo de video |
-| `--no-audio` | Desactivar feedback de audio |
-| `--no-depth` | Desactivar estimación de profundidad |
-| `--opencv` | Usar OpenCV en vez de Gradio |
-| `--share` | Compartir Gradio públicamente |
-
-## Controles
-
-- `q` - Salir
-- `s` - Scan de escena (anuncia todos los objetos)
+Abre http://localhost:5000 en el navegador.
 
 ## Detecciones
 

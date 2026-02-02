@@ -25,66 +25,72 @@ HTML = """
 <head>
     <title>ARIA Demo</title>
     <style>
-        body { background: #1a1a1a; color: white; font-family: sans-serif; margin: 20px; }
-        h1 { color: #4a9eff; margin-bottom: 20px; }
-        .container { display: flex; gap: 20px; flex-wrap: wrap; }
-        .video-box img { max-width: 640px; border: 2px solid #333; border-radius: 4px; }
-        .eye-box {
-            width: 320px;
-            height: 120px;
-            background: #252525;
-            border: 2px solid #333;
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #666;
-        }
-        .status-box {
-            background: #252525;
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #0a0a0a; color: white; font-family: sans-serif; height: 100vh; overflow: hidden; }
+        .main-container { display: flex; height: calc(100vh - 120px); }
+        .video-area { flex: 1; padding: 10px; display: flex; align-items: center; justify-content: center; }
+        .video-area img { max-width: 100%; max-height: 100%; border: 2px solid #333; border-radius: 4px; }
+        .panel {
+            width: 280px;
+            background: #151515;
             padding: 15px;
-            border-radius: 8px;
-            min-width: 280px;
-            font-family: monospace;
-            border: 2px solid #333;
+            border-left: 2px solid #333;
+            overflow-y: auto;
         }
-        .fps { font-size: 28px; color: #4aff4a; margin-bottom: 10px; }
-        .section-title { color: #888; font-size: 12px; margin-top: 15px; margin-bottom: 5px; }
-        .detection { padding: 5px 8px; margin: 2px 0; border-radius: 4px; background: #333; }
+        .panel h2 { color: #4a9eff; font-size: 14px; margin-bottom: 15px; }
+        .fps { font-size: 32px; color: #4aff4a; margin-bottom: 15px; font-weight: bold; }
+        .section-title { color: #666; font-size: 11px; margin-top: 20px; margin-bottom: 8px; text-transform: uppercase; }
+        .detection { padding: 8px 10px; margin: 4px 0; border-radius: 4px; background: #222; font-size: 13px; }
         .very_close { border-left: 3px solid #ff4a4a; }
         .close { border-left: 3px solid #ffa54a; }
         .medium { border-left: 3px solid #ffff4a; }
         .far { border-left: 3px solid #4aff4a; }
-        .gaze-info { margin-top: 15px; padding: 10px; background: #333; border-radius: 4px; }
-        .gaze-dot { display: inline-block; width: 10px; height: 10px; background: #ff4aff; border-radius: 50%; margin-right: 8px; }
+        .gazed { background: #2a2a3a; }
+        .gaze-row {
+            height: 120px;
+            background: #151515;
+            border-top: 2px solid #333;
+            display: flex;
+            align-items: center;
+            padding: 0 30px;
+            gap: 40px;
+        }
+        .gaze-indicator {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .gaze-dot { width: 18px; height: 18px; background: #ff4aff; border-radius: 50%; }
+        .gaze-coords { font-family: monospace; font-size: 18px; color: #ccc; }
+        .eye-status { color: #666; font-size: 13px; }
+        .legend { display: flex; gap: 15px; margin-left: auto; }
+        .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #888; }
+        .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
     </style>
 </head>
 <body>
-    <h1>🎯 ARIA Demo - Streaming</h1>
-    <div class="container">
-        <div class="video-box">
-            <h3>RGB + Detecciones</h3>
+    <div class="main-container">
+        <div class="video-area">
             <img src="/video_feed" />
         </div>
-        <div class="video-box">
-            <h3>Profundidad</h3>
-            <img src="/depth_feed" />
-        </div>
-        <div>
-            <h3>Eye Tracking</h3>
-            <div class="eye-box" id="eye-box">
-                <span>Sin datos de eye tracking</span>
-            </div>
-            <div class="gaze-info" id="gaze-info" style="display:none;">
-                <span class="gaze-dot"></span>
-                <span id="gaze-text">Gaze: --</span>
-            </div>
-        </div>
-        <div class="status-box">
+        <div class="panel">
+            <h2>ARIA DEMO</h2>
             <div class="fps" id="fps">-- FPS</div>
-            <div class="section-title">OBJETOS DETECTADOS</div>
-            <p>Total: <span id="count">0</span></p>
+            <div class="section-title">Objetos detectados (<span id="count">0</span>)</div>
             <div id="detections"></div>
+        </div>
+    </div>
+    <div class="gaze-row">
+        <div class="gaze-indicator">
+            <div class="gaze-dot"></div>
+            <span class="gaze-coords" id="gaze-text">Gaze: --</span>
+        </div>
+        <div class="eye-status" id="eye-status">Sin eye tracking</div>
+        <div class="legend">
+            <div class="legend-item"><div class="legend-dot" style="background:#ff4a4a"></div>Muy cerca</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#ffa54a"></div>Cerca</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#ffff4a"></div>Medio</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#4aff4a"></div>Lejos</div>
         </div>
     </div>
     <script>
@@ -95,18 +101,18 @@ HTML = """
             document.getElementById('count').textContent = data.detections.length;
 
             let html = '';
-            data.detections.slice(0, 8).forEach(d => {
-                const gazeIcon = d.is_gazed ? '👁️ ' : '';
-                html += `<div class="detection ${d.distance}">${gazeIcon}${d.name} - ${d.zone} (${d.distance})</div>`;
+            data.detections.slice(0, 10).forEach(d => {
+                const gazeClass = d.is_gazed ? ' gazed' : '';
+                const gazeIcon = d.is_gazed ? '👁 ' : '';
+                html += `<div class="detection ${d.distance}${gazeClass}">${gazeIcon}${d.name} - ${d.zone}</div>`;
             });
             document.getElementById('detections').innerHTML = html;
 
             if (data.gaze) {
-                document.getElementById('gaze-info').style.display = 'block';
                 document.getElementById('gaze-text').textContent =
                     `Gaze: (${data.gaze[0].toFixed(2)}, ${data.gaze[1].toFixed(2)})`;
-                document.getElementById('eye-box').innerHTML =
-                    `<span style="color:#4aff4a;">Eye tracking activo</span>`;
+                document.getElementById('eye-status').textContent = 'Eye tracking activo';
+                document.getElementById('eye-status').style.color = '#4aff4a';
             }
         }, 200);
     </script>
