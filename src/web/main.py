@@ -1,4 +1,12 @@
-"""Server MJPEG simple para streaming de video con audio feedback."""
+"""Server MJPEG simple para streaming de video con audio feedback.
+
+Architecture (aria-nav pattern):
+    Main Process (NO CUDA)     DetectorProcess (spawn)     TTSProcess (spawn)
+    - Aria SDK                 - YOLO                      - NeMo TTS
+    - Flask                    - Depth Anything
+    - Dashboard                - Eye Gaze
+    - AudioFeedback wrapper
+"""
 import sys
 from pathlib import Path
 
@@ -11,8 +19,14 @@ import time
 import threading
 from flask import Flask, Response, render_template
 
-from src.core import MockObserver, AriaDemoObserver, AriaDatasetObserver, ParallelDetector, Dashboard, AudioFeedback
+# NO CUDA imports here - main process must be CUDA-free for Aria SDK compatibility
+from src.core import Dashboard, DetectorProcess
+from src.core import MockObserver, AriaDemoObserver, AriaDatasetObserver
 from src.core.alert_engine import AlertDecisionEngine
+from src.core.tracker import SimpleTracker
+
+# AudioFeedback is safe - TTS runs in separate process
+from src.core.audio import AudioFeedback
 
 app = Flask(__name__)
 
@@ -54,10 +68,23 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
 
     print(f"[SERVER] Iniciando con fuente: {source}, modo: {mode}")
 
-    # Seleccionar observer según fuente
+    # Start CUDA in separate process FIRST (before any Aria SDK)
+    print("[SERVER] Iniciando DetectorProcess (CUDA en proceso separado)...")
+    detector = DetectorProcess(mode=mode, enable_depth=True)
+    if not detector.start(timeout=120):
+        print("[SERVER] ✗ Failed to start DetectorProcess")
+        return
+
+    # Non-CUDA components in main process
+    dashboard = Dashboard()
+    audio = AudioFeedback(enabled=enable_audio)
+    alert_engine = AlertDecisionEngine()
+    tracker = SimpleTracker()
+    print("[SERVER] ✓ Componentes inicializados")
+
+    # NOW create observer (Aria SDK in main process - safe because no CUDA here)
     use_precomputed_gaze = False
     if source.startswith("dataset:"):
-        # Parse dataset:vrs_path:gaze_csv
         parts = source.split(":", 2)
         vrs_path = parts[1]
         gaze_csv = parts[2] if len(parts) > 2 and parts[2] else None
@@ -65,65 +92,66 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
         observer = AriaDatasetObserver(vrs_path, gaze_csv, target_fps=10.0)
         use_precomputed_gaze = gaze_csv is not None
     elif source == "aria" or source == "aria:usb":
-        print("[SERVER] Conectando con gafas Aria (USB)...")
+        print("[SERVER] Conectando con Aria (USB)...")
         observer = AriaDemoObserver(interface="usb")
     elif source.startswith("aria:wifi"):
-        # aria:wifi o aria:wifi:<ARIA_IP>
         parts = source.split(":")
         ip = parts[2] if len(parts) > 2 else None
-        print(f"[SERVER] Conectando con gafas Aria (WiFi{': ' + ip if ip else ''})...")
+        print(f"[SERVER] Conectando con Aria (WiFi{': ' + ip if ip else ''})...")
         observer = AriaDemoObserver(interface="wifi", ip_address=ip)
     elif source == "webcam":
         observer = MockObserver(source="webcam")
     else:
         observer = MockObserver(source="video", video_path=source)
-    print("[SERVER] Cargando detector...")
-    detector = ParallelDetector(enable_depth=True, mode=mode)
-    dashboard = Dashboard()
-    audio = AudioFeedback(enabled=enable_audio)
-    alert_engine = AlertDecisionEngine()
+
+    print("[SERVER] ✓ Observer listo")
     print("[SERVER] Iniciando procesamiento...")
 
     frame_count = 0
     start_time = time.time()
 
     while True:
+        # Get frame from observer
         rgb = observer.get_frame("rgb")
         if rgb is None:
             time.sleep(0.01)
             continue
 
-        # Get eye tracking frame (None for video/webcam, available with Aria)
         eye_frame = observer.get_frame("eye")
 
+        # Send frame to DetectorProcess
+        detector.send_frame(rgb, eye_frame)
+
+        # Get results from DetectorProcess (non-blocking)
+        result = detector.get_result()
+
+        detections = []
+        depth_map = None
+        gaze_point = None
+
+        if result:
+            detections = result.get("detections", [])
+            depth_map = result.get("depth")
+            gaze_point = result.get("gaze")
+
         # Check for precomputed gaze from dataset
-        precomputed_gaze = None
         if use_precomputed_gaze and hasattr(observer, 'get_precomputed_gaze'):
             gaze_data = observer.get_precomputed_gaze()
             if gaze_data:
-                # Convert (yaw, pitch, depth) to normalized 2D coords
-                # Aria RGB camera has ~120 degree FOV
                 import math
-                yaw, pitch, depth = gaze_data
-                fov_h = math.pi * 2 / 3  # ~120 degrees
+                yaw, pitch, depth_val = gaze_data
+                fov_h = math.pi * 2 / 3
                 fov_v = math.pi * 2 / 3
-                gaze_x = 0.5 + yaw / fov_h
-                gaze_y = 0.5 - pitch / fov_v
-                # Clamp to [0, 1]
-                gaze_x = max(0, min(1, gaze_x))
-                gaze_y = max(0, min(1, gaze_y))
-                precomputed_gaze = (gaze_x, gaze_y)
+                gaze_x = max(0, min(1, 0.5 + yaw / fov_h))
+                gaze_y = max(0, min(1, 0.5 - pitch / fov_v))
+                gaze_point = (gaze_x, gaze_y)
 
-        # Process all in parallel (YOLO + Depth + Gaze + Tracking)
-        detections, depth_map, gaze_point, tracked = detector.process(rgb, eye_frame)
-
-        # Use precomputed gaze if available
-        if precomputed_gaze:
-            gaze_point = precomputed_gaze
+        # Update tracker (gaze info is already in detections)
+        tracked = tracker.update(detections)
 
         # Audio feedback via decision engine
         if tracked:
-            vehicle_alert, other_alert = alert_engine.decide(detector.tracker)
+            vehicle_alert, other_alert = alert_engine.decide(tracker)
 
             if vehicle_alert and vehicle_alert.should_alert:
                 obj = vehicle_alert.object
@@ -131,7 +159,8 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
                     object_name=obj.name,
                     zone=obj.zone,
                     distance=obj.distance,
-                    user_looking=obj.is_gazed
+                    user_looking=obj.is_gazed,
+                    force_tts=True
                 )
             elif other_alert and other_alert.should_alert:
                 obj = other_alert.object
@@ -142,7 +171,7 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
                     user_looking=obj.is_gazed
                 )
 
-        # Renderizar
+        # Render dashboard - ALWAYS update frame even without detections
         rgb_out, depth_out, _, _ = dashboard.render(
             rgb, depth_map, eye_frame, detections, gaze_point, fps
         )
@@ -158,7 +187,7 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
         if frame_count % 30 == 0:
             elapsed = time.time() - start_time
             fps = frame_count / elapsed if elapsed > 0 else 0
-            print(f"[SERVER] Frame {frame_count}, {fps:.1f} FPS, {len(detections)} objetos")
+            print(f"[SERVER] Frame {frame_count}, {fps:.1f} FPS")
 
 
 @app.route('/')
@@ -198,7 +227,6 @@ def status():
 if __name__ == '__main__':
     import sys
 
-    # Parsear source desde argumentos
     source = sys.argv[1] if len(sys.argv) > 1 else "webcam"
 
     print()
@@ -209,15 +237,9 @@ if __name__ == '__main__':
     print()
     print(f"  Fuente: {source}")
     print()
-    print("  Selecciona el modo de detección:")
-    print()
-    print("    [1] Indoor  - persona, silla, sofá, mesa, tv, puerta...")
-    print("    [2] Outdoor - persona, coche, bici, moto, bus, semáforo...")
-    print("    [3] All     - todas las clases (80 objetos)")
-    print()
 
     while True:
-        choice = input("  Modo [1/2/3]: ").strip()
+        choice = input("  Modo [1=Indoor/2=Outdoor/3=All]: ").strip()
         if choice == "1":
             mode = "indoor"
             break
@@ -228,13 +250,11 @@ if __name__ == '__main__':
             mode = "all"
             break
         else:
-            print("  Opción no válida. Introduce 1, 2 o 3.")
+            print("  Opción no válida.")
 
-    print()
-    print(f"  → Modo seleccionado: {mode.upper()}")
+    print(f"  → Modo: {mode.upper()}")
     print()
 
-    # Iniciar procesamiento en background
     thread = threading.Thread(target=process_loop, args=(source, mode), daemon=True)
     thread.start()
 

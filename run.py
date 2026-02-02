@@ -1,9 +1,25 @@
 #!/usr/bin/env python3
-"""Entry point for ARIA Demo."""
+"""
+Entry point for ARIA Demo.
+
+CRITICAL: This wrapper sets multiprocessing spawn method BEFORE importing
+any torch/CUDA modules. This prevents CUDA context conflicts with Aria SDK.
+Pattern borrowed from aria-nav.
+
+The order is critical:
+1. Set mp.set_start_method('spawn') FIRST
+2. Only then import modules that load torch/CUDA
+3. Then run the application
+"""
 import os
 import sys
 import tempfile
 from pathlib import Path
+
+# CRITICAL: Disable ALL CUDA in main process BEFORE any imports
+# cv2.cuda and numba.cuda conflict with Aria SDK's FastDDS
+os.environ["CUDA_VISIBLE_DEVICES"] = ""  # Hide GPUs from main process
+os.environ["NUMBA_DISABLE_CUDA"] = "1"   # Disable numba CUDA
 
 # Force TMPDIR to /home to avoid disk space issues on /
 # NeMo uses tempfile module directly, so we must patch tempfile.tempdir too
@@ -18,11 +34,23 @@ tempfile.tempdir = str(_tmp_dir)
 PROJECT_ROOT = Path(__file__).parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.web.main import app, process_loop
-import threading
-
 
 if __name__ == '__main__':
+    # CRITICAL: Set spawn method BEFORE any torch/CUDA imports
+    # Use standard multiprocessing (NOT torch.multiprocessing) to avoid loading torch in main process
+    import multiprocessing as mp
+    try:
+        mp.set_start_method('spawn', force=True)
+    except RuntimeError:
+        pass  # Already set
+
+    # Match aria-nav pattern for Qt
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
+    # NOW safe to import modules that load torch/CUDA
+    from src.web.main import app, process_loop
+    import threading
+
     # Parsear source desde argumentos
     source = sys.argv[1] if len(sys.argv) > 1 else "webcam"
 
@@ -49,7 +77,7 @@ if __name__ == '__main__':
             source = f"dataset:{vrs_path}:{gaze_csv}"
         else:
             source = f"dataset:{vrs_path}:"
-    elif source not in ("webcam", "aria"):
+    elif source not in ("webcam", "aria", "aria:usb") and not source.startswith("aria:wifi"):
         # Regular video file
         video_path = Path(source)
         if not video_path.is_absolute():
@@ -71,6 +99,10 @@ if __name__ == '__main__':
 
     if source.startswith("dataset:"):
         print(f"  Fuente: Aria Dataset (VRS + Eye Gaze)")
+    elif source == "aria" or source == "aria:usb":
+        print(f"  Fuente: Aria Glasses (USB)")
+    elif source.startswith("aria:wifi"):
+        print(f"  Fuente: Aria Glasses (WiFi)")
     else:
         print(f"  Fuente: {source}")
     print()

@@ -187,9 +187,15 @@ class AudioFeedback:
         object_name: str,
         zone: str,
         distance: str,
-        user_looking: bool
+        user_looking: bool,
+        force_tts: bool = False
     ) -> None:
-        """Alert user about a dangerous/close object."""
+        """
+        Alert user about a dangerous/close object.
+
+        Args:
+            force_tts: If True, always speak TTS (for vehicles)
+        """
         is_critical = distance in ("very_close", "close")
 
         self.play_spatial_beep(
@@ -199,7 +205,8 @@ class AudioFeedback:
             is_unnoticed_danger=is_critical and not user_looking
         )
 
-        if is_critical and not user_looking:
+        # TTS: speak if forced (vehicles) OR if close and not looking
+        if force_tts or (is_critical and not user_looking):
             zone_word = {"left": "left", "right": "right", "center": "straight"}.get(zone, "")
             self.speak(f"{object_name} {zone_word}")
 

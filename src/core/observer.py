@@ -251,6 +251,7 @@ class AriaDemoObserver(BaseObserver):
 
         if camera_id == self._aria.CameraId.Rgb:
             processed = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+            processed = cv2.cvtColor(processed, cv2.COLOR_RGB2BGR)  # Aria gives RGB, OpenCV needs BGR
             key = "rgb"
         elif camera_id == self._aria.CameraId.EyeTrack:
             processed = np.rot90(image, 2)  # 180 grados

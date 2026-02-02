@@ -1,16 +1,17 @@
-from .detector import ParallelDetector, Detection, CLASS_FILTERS
+# Non-CUDA imports (safe for main process with Aria SDK)
 from .observer import BaseObserver, MockObserver, AriaDemoObserver, AriaDatasetObserver
 from .dashboard import Dashboard
-from .audio import AudioFeedback
+from .detector_process import DetectorProcess
+
+# NOTE: ParallelDetector, AudioFeedback use CUDA - import only in DetectorProcess
+# from .detector import ParallelDetector, Detection, CLASS_FILTERS
+# from .audio import AudioFeedback
 
 __all__ = [
-    "ParallelDetector",
-    "Detection",
-    "CLASS_FILTERS",
     "BaseObserver",
     "MockObserver",
     "AriaDemoObserver",
     "AriaDatasetObserver",
     "Dashboard",
-    "AudioFeedback",
+    "DetectorProcess",
 ]

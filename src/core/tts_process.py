@@ -36,6 +36,11 @@ PRECACHE_PHRASES = [
 
 def _tts_worker(queue, sample_rate_out):
     """Worker process for NeMo TTS. Has its own CUDA context."""
+    import os
+    # Restore CUDA visibility BEFORE importing torch (main process hides it for FastDDS)
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ.pop("NUMBA_DISABLE_CUDA", None)
+
     import numpy as np
     import sounddevice as sd
     import torch
