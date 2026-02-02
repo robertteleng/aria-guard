@@ -30,3 +30,9 @@ Thumbs.db
 
 # Temp
 *.tmp
+
+# Videos (test files)
+*.mp4
+*.avi
+*.mov
+*.mkv
