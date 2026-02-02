@@ -64,9 +64,15 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
         print(f"[SERVER] Cargando Aria Dataset: {vrs_path}")
         observer = AriaDatasetObserver(vrs_path, gaze_csv, target_fps=10.0)
         use_precomputed_gaze = gaze_csv is not None
-    elif source == "aria":
-        print("[SERVER] Conectando con gafas Aria...")
-        observer = AriaDemoObserver()
+    elif source == "aria" or source == "aria:usb":
+        print("[SERVER] Conectando con gafas Aria (USB)...")
+        observer = AriaDemoObserver(interface="usb")
+    elif source.startswith("aria:wifi"):
+        # aria:wifi o aria:wifi:<ARIA_IP>
+        parts = source.split(":")
+        ip = parts[2] if len(parts) > 2 else None
+        print(f"[SERVER] Conectando con gafas Aria (WiFi{': ' + ip if ip else ''})...")
+        observer = AriaDemoObserver(interface="wifi", ip_address=ip)
     elif source == "webcam":
         observer = MockObserver(source="webcam")
     else:

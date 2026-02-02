@@ -102,13 +102,13 @@ class AlertDecisionEngine:
             return False
 
         # Alert conditions for vehicles:
-        # 1. Close distance
+        # Vehicles are dangerous - alert if close OR approaching
+        # Gaze = direction user will walk, so looking at vehicle = collision risk
         if obj.distance in ("very_close", "close"):
-            return not obj.is_gazed  # Only if user not looking
+            return True  # Always alert for close vehicles
 
-        # 2. Approaching at medium distance
         if obj.is_approaching and obj.distance == "medium":
-            return not obj.is_gazed
+            return True  # Alert for approaching vehicles
 
         return False
 

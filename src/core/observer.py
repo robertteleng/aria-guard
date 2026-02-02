@@ -127,13 +127,41 @@ class MockObserver(BaseObserver):
 
 
 class AriaDemoObserver(BaseObserver):
-    """Observer para gafas Meta Aria con eye tracking."""
+    """
+    Observer para gafas Meta Aria con eye tracking.
 
-    def __init__(self):
-        """Inicializa conexión con Aria."""
+    Soporta conexión USB y WiFi, captura de RGB + SLAM + Eye + IMU.
+
+    Uso:
+        # USB (por defecto)
+        observer = AriaDemoObserver()
+
+        # WiFi
+        observer = AriaDemoObserver(interface="wifi", ip_address="<ARIA_IP>")
+    """
+
+    # Streaming profiles
+    PROFILE_USB = "profile28"   # 30 FPS USB
+    PROFILE_WIFI = "profile18"  # 30 FPS WiFi
+
+    def __init__(
+        self,
+        interface: str = "usb",
+        ip_address: Optional[str] = None,
+        enable_slam: bool = True
+    ):
+        """
+        Inicializa conexión con Aria.
+
+        Args:
+            interface: "usb" o "wifi"
+            ip_address: IP para WiFi (ej: "<ARIA_IP>")
+            enable_slam: Si True, captura también cámaras SLAM laterales
+        """
         try:
             import aria.sdk as aria
-            from projectaria_tools.core.sensor_data import ImageDataRecord
+            from projectaria_tools.core.sensor_data import ImageDataRecord, MotionData
+            from projectaria_tools.core.calibration import device_calibration_from_json_string
         except ImportError:
             raise ImportError(
                 "Aria SDK no instalado. Instala con:\n"
@@ -143,6 +171,7 @@ class AriaDemoObserver(BaseObserver):
         self._aria = aria
         self._lock = threading.Lock()
         self._stop = False
+        self._enable_slam = enable_slam
 
         # Storage de frames
         self._frames = {
@@ -154,31 +183,67 @@ class AriaDemoObserver(BaseObserver):
         self._frame_counts = {k: 0 for k in self._frames}
         self._start_time = time.time()
 
-        # Conectar con Aria
-        print("[OBSERVER] Conectando con Aria...")
-        self._device_client = aria.DeviceClient()
-        self._device = self._device_client.connect()
+        # IMU data
+        from collections import deque
+        self._imu_history = deque(maxlen=50)
+        self._motion_state = "unknown"
 
-        # Configurar streaming
-        streaming_manager = self._device.streaming_manager
-        streaming_client = streaming_manager.streaming_client
+        # Calibraciones (para 3D si se necesita)
+        self._rgb_calib = None
+        self._slam1_calib = None
+        self._slam2_calib = None
+
+        # === CONEXIÓN ===
+        print(f"[OBSERVER] Conectando con Aria ({interface.upper()})...")
+        self._device_client = aria.DeviceClient()
+
+        # Configurar IP si es WiFi
+        if interface.lower() == "wifi":
+            if not ip_address:
+                ip_address = "<ARIA_IP>"  # Default
+            client_config = aria.DeviceClientConfig()
+            client_config.ip_v4_address = ip_address
+            self._device_client.set_client_config(client_config)
+            print(f"[OBSERVER] WiFi target: {ip_address}")
+
+        self._device = self._device_client.connect()
+        print("[OBSERVER] ✓ Conectado")
+
+        # === STREAMING ===
+        self._streaming_manager = self._device.streaming_manager
 
         config = aria.StreamingConfig()
-        config.profile_name = "profile18"  # RGB + SLAM + Eye
+        if interface.lower() == "wifi":
+            config.profile_name = self.PROFILE_WIFI
+            config.streaming_interface = aria.StreamingInterface.WifiStation
+        else:
+            config.profile_name = self.PROFILE_USB
+            config.streaming_interface = aria.StreamingInterface.Usb
+
         config.security_options.use_ephemeral_certs = True
-        streaming_manager.streaming_config = config
+        self._streaming_manager.streaming_config = config
 
-        # Registrar callbacks
-        streaming_client.set_streaming_client_observer(self)
+        self._streaming_manager.start_streaming()
+        print(f"[OBSERVER] ✓ Streaming iniciado ({config.profile_name})")
 
-        # Iniciar streaming
-        streaming_manager.start_streaming()
-        streaming_client.subscribe()
+        # === CALIBRACIONES ===
+        try:
+            sensors_json = self._streaming_manager.sensors_calibration()
+            sensors_calib = device_calibration_from_json_string(sensors_json)
+            self._rgb_calib = sensors_calib.get_camera_calib("camera-rgb")
+            self._slam1_calib = sensors_calib.get_camera_calib("camera-slam-left")
+            self._slam2_calib = sensors_calib.get_camera_calib("camera-slam-right")
+            print("[OBSERVER] ✓ Calibraciones obtenidas")
+        except Exception as e:
+            print(f"[OBSERVER WARN] No se pudieron obtener calibraciones: {e}")
 
-        self._streaming_manager = streaming_manager
-        self._streaming_client = streaming_client
+        # === REGISTRAR OBSERVER ===
+        self._streaming_client = self._streaming_manager.streaming_client
+        self._streaming_client.set_streaming_client_observer(self)
+        self._streaming_client.subscribe()
 
-        print("[OBSERVER] AriaDemoObserver conectado")
+        print("[OBSERVER] ✓ AriaDemoObserver listo")
+        print(f"[OBSERVER] Cámaras: RGB + Eye" + (" + SLAM1 + SLAM2" if enable_slam else ""))
 
     def on_image_received(self, image: np.ndarray, record) -> None:
         """Callback del SDK para nuevas imágenes."""
@@ -192,12 +257,12 @@ class AriaDemoObserver(BaseObserver):
             if len(processed.shape) == 2:
                 processed = cv2.cvtColor(processed, cv2.COLOR_GRAY2BGR)
             key = "eye"
-        elif camera_id == self._aria.CameraId.Slam1:
+        elif camera_id == self._aria.CameraId.Slam1 and self._enable_slam:
             processed = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
             if len(processed.shape) == 2:
                 processed = cv2.cvtColor(processed, cv2.COLOR_GRAY2BGR)
             key = "slam1"
-        elif camera_id == self._aria.CameraId.Slam2:
+        elif camera_id == self._aria.CameraId.Slam2 and self._enable_slam:
             processed = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
             if len(processed.shape) == 2:
                 processed = cv2.cvtColor(processed, cv2.COLOR_GRAY2BGR)
@@ -209,19 +274,51 @@ class AriaDemoObserver(BaseObserver):
             self._frames[key] = processed
             self._frame_counts[key] += 1
 
+        # Log periódico
+        if self._frame_counts[key] % 300 == 0:
+            elapsed = time.time() - self._start_time
+            fps = self._frame_counts[key] / elapsed if elapsed > 0 else 0
+            print(f"[OBSERVER] {key.upper()}: {self._frame_counts[key]} frames ({fps:.1f} FPS)")
+
     def on_imu_received(self, samples, imu_idx: int) -> None:
-        """Callback IMU (no usado en demo simple)."""
-        pass
+        """Callback IMU para detección de movimiento."""
+        if not samples or imu_idx != 0:
+            return
+
+        sample = samples[0]
+        accel = sample.accel_msec2
+        magnitude = (accel[0]**2 + accel[1]**2 + accel[2]**2)**0.5
+
+        with self._lock:
+            self._imu_history.append(magnitude)
+
+            # Estimar estado de movimiento
+            if len(self._imu_history) >= 10:
+                std = np.std(list(self._imu_history)[-20:])
+                if std < 0.3:
+                    self._motion_state = "stationary"
+                elif std > 0.6:
+                    self._motion_state = "walking"
+                # else: mantener estado anterior (histéresis)
 
     def on_streaming_client_failure(self, reason, message: str) -> None:
-        """Callback de error."""
-        print(f"[OBSERVER ERROR] {reason}: {message}")
+        """Callback de error del SDK."""
+        print(f"[OBSERVER ERROR] Streaming failure: {reason} - {message}")
 
     def get_frame(self, camera: str = "rgb") -> Optional[np.ndarray]:
         """Obtiene frame de una cámara específica."""
         with self._lock:
             frame = self._frames.get(camera)
             return frame.copy() if frame is not None else None
+
+    def get_motion_state(self) -> str:
+        """Obtiene estado de movimiento estimado del IMU."""
+        with self._lock:
+            return self._motion_state
+
+    def get_calibrations(self) -> tuple:
+        """Obtiene calibraciones de cámaras (rgb, slam1, slam2)."""
+        return self._rgb_calib, self._slam1_calib, self._slam2_calib
 
     def get_stats(self) -> Dict[str, Any]:
         elapsed = time.time() - self._start_time
@@ -230,17 +327,34 @@ class AriaDemoObserver(BaseObserver):
                 "source": "aria",
                 "frames": dict(self._frame_counts),
                 "fps": {k: v / elapsed for k, v in self._frame_counts.items()},
+                "motion_state": self._motion_state,
                 "uptime": elapsed
             }
 
     def stop(self):
+        """Desconexión limpia de Aria."""
         self._stop = True
         try:
-            self._streaming_client.unsubscribe()
-            self._streaming_manager.stop_streaming()
-            self._device_client.disconnect(self._device)
+            if self._streaming_client:
+                self._streaming_client.unsubscribe()
+                print("[OBSERVER] ✓ Unsubscribed")
         except Exception as e:
-            print(f"[OBSERVER] Error al desconectar: {e}")
+            print(f"[OBSERVER WARN] Unsubscribe error: {e}")
+
+        try:
+            if self._streaming_manager:
+                self._streaming_manager.stop_streaming()
+                print("[OBSERVER] ✓ Streaming stopped")
+        except Exception as e:
+            print(f"[OBSERVER WARN] Stop streaming error: {e}")
+
+        try:
+            if self._device_client and self._device:
+                self._device_client.disconnect(self._device)
+                print("[OBSERVER] ✓ Disconnected")
+        except Exception as e:
+            print(f"[OBSERVER WARN] Disconnect error: {e}")
+
         print("[OBSERVER] AriaDemoObserver detenido")
 
 

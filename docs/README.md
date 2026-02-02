@@ -504,9 +504,16 @@ sudo apt-get install -y libportaudio2 portaudio19-dev espeak-ng
 ```bash
 source .venv/bin/activate
 
-python run.py webcam      # Webcam
-python run.py video.mp4   # Video file
-python run.py dataset     # VRS sample
+# Desarrollo (sin gafas)
+python run.py webcam           # Webcam
+python run.py video.mp4        # Video file
+python run.py dataset          # VRS sample (data/aria_sample/)
+
+# Gafas Aria reales
+python run.py aria             # USB (por defecto)
+python run.py aria:usb         # USB explícito
+python run.py aria:wifi        # WiFi (IP por defecto: <ARIA_IP>)
+python run.py aria:wifi:<ARIA_IP>  # WiFi con IP específica
 ```
 
 Selecciona modo de detección:
@@ -515,6 +522,38 @@ Selecciona modo de detección:
 - **[3] All** - 80 clases COCO
 
 Abre http://localhost:5000
+
+## Conexión Meta Aria Glasses
+
+### Requisitos
+```bash
+pip install projectaria-tools aria-glasses
+```
+
+### Streaming Profiles
+| Interfaz | Profile | FPS | Notas |
+|----------|---------|-----|-------|
+| USB | profile28 | 30 | Recomendado, más estable |
+| WiFi | profile18 | 30 | Requiere IP del dispositivo |
+
+### Cámaras Disponibles
+| Cámara | Resolución | Stream |
+|--------|-----------|--------|
+| RGB (centro) | 1408×1408 | Siempre activo |
+| Eye Track | - | Siempre activo |
+| SLAM1 (izquierda) | 640×480 | Opcional |
+| SLAM2 (derecha) | 640×480 | Opcional |
+
+### Troubleshooting
+
+**"Connection refused"**: Verifica que Aria esté en modo streaming
+```bash
+# En el móvil: Aria App → Streaming → Start
+```
+
+**WiFi lento**: Usa USB si es posible, más estable y menor latencia
+
+**"No se pudo obtener calibraciones"**: Normal si las gafas no están en modo correcto, continúa funcionando
 
 ## Rendimiento
 
@@ -548,9 +587,15 @@ pie title VRAM (~2.5GB total)
 
 ## Roadmap
 
+### Completado
+- ✅ Conexión Meta Aria Glasses (USB + WiFi)
+- ✅ Sistema de tracking con priorización
+- ✅ AlertDecisionEngine para alertas inteligentes
+- ✅ NeMo TTS en proceso separado
+
 ### Próximo
-- Conexión Meta Aria Glasses en tiempo real
-- Ajuste fino de umbrales de alerta
+- Ajuste fino de umbrales de alerta con usuarios reales
+- Uso de cámaras SLAM laterales para detección periférica
 
 ### Futuro
 - FastVLM para descripciones de escena
