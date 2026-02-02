@@ -12,6 +12,7 @@ import threading
 from flask import Flask, Response, render_template
 
 from src.core import MockObserver, AriaDemoObserver, AriaDatasetObserver, ParallelDetector, Dashboard, AudioFeedback
+from src.core.alert_engine import AlertDecisionEngine
 
 app = Flask(__name__)
 
@@ -74,6 +75,7 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
     detector = ParallelDetector(enable_depth=True, mode=mode)
     dashboard = Dashboard()
     audio = AudioFeedback(enabled=enable_audio)
+    alert_engine = AlertDecisionEngine()
     print("[SERVER] Iniciando procesamiento...")
 
     frame_count = 0
@@ -113,15 +115,25 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
         if precomputed_gaze:
             gaze_point = precomputed_gaze
 
-        # Audio feedback: only alert for top priority object
+        # Audio feedback via decision engine
         if tracked:
-            top = tracked[0]  # Highest priority (sorted by tracker)
-            if top.distance in ("very_close", "close"):
+            vehicle_alert, other_alert = alert_engine.decide(detector.tracker)
+
+            if vehicle_alert and vehicle_alert.should_alert:
+                obj = vehicle_alert.object
                 audio.alert_danger(
-                    object_name=top.name,
-                    zone=top.zone,
-                    distance=top.distance,
-                    user_looking=top.is_gazed
+                    object_name=obj.name,
+                    zone=obj.zone,
+                    distance=obj.distance,
+                    user_looking=obj.is_gazed
+                )
+            elif other_alert and other_alert.should_alert:
+                obj = other_alert.object
+                audio.alert_danger(
+                    object_name=obj.name,
+                    zone=obj.zone,
+                    distance=obj.distance,
+                    user_looking=obj.is_gazed
                 )
 
         # Renderizar

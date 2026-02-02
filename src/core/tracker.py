@@ -264,3 +264,19 @@ class SimpleTracker:
     def get_approaching_objects(self) -> List[TrackedObject]:
         """Get objects that are approaching."""
         return [t for t in self.tracks.values() if t.is_approaching]
+
+    def get_top_vehicle(self) -> Optional[TrackedObject]:
+        """Get highest priority vehicle (car, truck, bus, motorcycle, bicycle)."""
+        vehicles = {"car", "truck", "bus", "motorcycle", "bicycle"}
+        vehicle_tracks = [t for t in self.tracks.values() if t.name in vehicles]
+        if not vehicle_tracks:
+            return None
+        return max(vehicle_tracks, key=lambda t: t.priority)
+
+    def get_top_non_vehicle(self) -> Optional[TrackedObject]:
+        """Get highest priority non-vehicle (person, obstacle, etc)."""
+        vehicles = {"car", "truck", "bus", "motorcycle", "bicycle"}
+        other_tracks = [t for t in self.tracks.values() if t.name not in vehicles]
+        if not other_tracks:
+            return None
+        return max(other_tracks, key=lambda t: t.priority)

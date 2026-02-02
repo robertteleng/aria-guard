@@ -1,73 +1,95 @@
 # ARIA Demo
 
-Demo de asistencia visual para gafas Meta Aria: detección de objetos en tiempo real + estimación de profundidad + eye tracking + feedback audio espacial.
+Demo de asistencia visual para gafas Meta Aria: detección de objetos en tiempo real + estimación de profundidad + eye tracking + tracking temporal + alertas inteligentes.
 
 ## Características
 
 - **YOLO26s** - Detección de objetos con GPU (TensorRT/PyTorch)
 - **Depth Anything V2** - Estimación de profundidad monocular (FP16/torch.compile)
-- **Meta Eye Gaze** - Modelo oficial de Meta para estimación de mirada (`projectaria_eyetracking`)
-- **NeMo TTS** - Síntesis de voz de alta calidad (FastPitch + HiFiGAN) en GPU
-- **Audio Espacial** - Beeps direccionales (izq/centro/der) según posición del objeto
-- **CUDA Streams** - YOLO, Depth y Gaze ejecutándose en paralelo (3 streams)
-- **Gaze-Aware Alerts** - Alertas más intensas para objetos no vistos por el usuario
-- **AriaDatasetObserver** - Reproducción de grabaciones VRS con eye gaze sincronizado
-- **Modos de detección** - Indoor, Outdoor o All (80 clases COCO)
+- **Meta Eye Gaze** - Modelo oficial de Meta para estimación de mirada
+- **SimpleTracker** - Tracking de objetos entre frames con IoU matching
+- **AlertDecisionEngine** - Sistema de decisión de alertas con priorización
+- **NeMo TTS** - Síntesis de voz en proceso separado (aislamiento CUDA)
+- **Audio Espacial** - Beeps direccionales (izq/centro/der) según posición
+- **Gaze-Aware Alerts** - Alertas solo para objetos no vistos por el usuario
 
-## Arquitectura
+## Arquitectura General
 
 ```mermaid
 graph TB
-    subgraph Input
+    subgraph Input["Entrada"]
         ARIA[Meta Aria Glasses]
         VRS[VRS Dataset]
-        WEB[Webcam]
+        WEB[Webcam/Video]
     end
 
-    subgraph Observer
-        OBS[observer.py<br/>Frame Capture]
-        DOBS[AriaDatasetObserver<br/>VRS + Eye Gaze CSV]
+    subgraph Observer["Observer Layer"]
+        OBS[MockObserver<br/>Webcam/Video]
+        AOBS[AriaDemoObserver<br/>Aria Glasses]
+        DOBS[AriaDatasetObserver<br/>VRS + Gaze CSV]
     end
 
-    subgraph Detector["Detector (3 CUDA Streams)"]
-        DET[detector.py]
-        subgraph Streams
-            S1[Stream 1: YOLO26s]
-            S2[Stream 2: Depth Anything V2]
-            S3[Stream 3: Meta Eye Gaze]
+    subgraph Detection["Detection Layer (GPU)"]
+        DET[ParallelDetector]
+        subgraph Models["CUDA Streams"]
+            YOLO[YOLO26s<br/>TensorRT]
+            DEPTH[Depth Anything V2<br/>FP16 + torch.compile]
+            GAZE[Meta Eye Gaze]
         end
     end
 
-    subgraph Audio["Audio (Thread)"]
-        AUD[audio.py]
-        NEMO[NeMo TTS<br/>FastPitch + HiFiGAN]
-        BEEP[Spatial Beeps]
+    subgraph Tracking["Tracking Layer"]
+        TRK[SimpleTracker<br/>IoU Matching]
+        PRI[Priority Calculation<br/>type × distance × approaching × gaze]
     end
 
-    subgraph Output
-        DASH[dashboard.py<br/>Visual Rendering]
-        SRV[main.py<br/>MJPEG Streaming]
+    subgraph Decision["Decision Layer"]
+        ADE[AlertDecisionEngine]
+        VEH[Vehicle Priority<br/>car, bus, truck, bike]
+        OTH[Non-Vehicle<br/>person, chair, etc]
     end
 
-    ARIA --> OBS
-    WEB --> OBS
+    subgraph Audio["Audio Layer (Separate Process)"]
+        AUD[AudioFeedback]
+        TTS[TTSProcess<br/>NeMo FastPitch+HiFiGAN]
+        BEEP[Spatial Beeps<br/>Stereo Panning]
+    end
+
+    subgraph Output["Output Layer"]
+        DASH[Dashboard<br/>Visual Rendering]
+        SRV[Flask Server<br/>MJPEG Streaming]
+    end
+
+    ARIA --> AOBS
     VRS --> DOBS
+    WEB --> OBS
 
-    OBS -->|RGB + Eye Frame| DET
-    DOBS -->|RGB + Eye Frame + Gaze| DET
+    OBS --> DET
+    AOBS --> DET
+    DOBS --> DET
 
-    DET --> S1
-    DET --> S2
-    DET --> S3
+    DET --> YOLO
+    DET --> DEPTH
+    DET --> GAZE
 
-    S1 -->|Detections| DASH
-    S2 -->|Depth Map| DASH
-    S3 -->|Gaze Point| DASH
+    YOLO --> TRK
+    DEPTH --> TRK
+    GAZE --> TRK
 
-    S1 -->|Danger Objects| AUD
-    S3 -->|User Looking?| AUD
-    AUD --> NEMO
+    TRK --> PRI
+    PRI --> ADE
+
+    ADE --> VEH
+    ADE --> OTH
+
+    VEH --> AUD
+    OTH --> AUD
+
+    AUD --> TTS
     AUD --> BEEP
+
+    TRK --> DASH
+    DASH --> SRV
 ```
 
 ## Pipeline de Procesamiento
@@ -76,69 +98,351 @@ graph TB
 sequenceDiagram
     participant O as Observer
     participant D as Detector
-    participant G as Gaze Model
+    participant T as Tracker
+    participant E as AlertEngine
     participant A as Audio
-    participant V as Dashboard
+    participant TTS as TTS Process
 
-    loop Every Frame
-        O->>D: RGB Frame
-        O->>G: Eye Frame
+    loop Every Frame (~15-30 FPS)
+        O->>D: RGB Frame + Eye Frame
 
-        par CUDA Stream 1
+        par CUDA Parallel
             D->>D: YOLO Detection
-        and CUDA Stream 2
             D->>D: Depth Estimation
+            D->>D: Gaze Estimation
         end
 
-        G->>G: Estimate Gaze (yaw, pitch)
+        D->>D: Combine Detections + Depth + Gaze
+        D->>T: List[Detection]
 
-        D->>D: Combine Detections + Depth
-        D->>D: Check Gaze on Detections
+        T->>T: IoU Match with existing tracks
+        T->>T: Update depth history
+        T->>T: Calculate approach speed
+        T->>T: Calculate priority scores
 
-        alt Danger Object Detected
-            D->>A: Alert (object, zone, distance, is_gazed)
-            A->>A: Spatial Beep
-            alt User Not Looking
-                A->>A: Double Beep + TTS Warning
-            end
+        T->>E: TrackedObjects (sorted by priority)
+
+        E->>E: Get top vehicle
+        E->>E: Get top non-vehicle
+        E->>E: Check cooldowns
+
+        alt Vehicle close OR approaching
+            E->>A: Alert vehicle
+            A->>TTS: "car left" (async)
+            A->>A: Spatial beep
+        else No vehicle, person close
+            E->>A: Alert person
+            A->>TTS: "person right" (async)
+            A->>A: Spatial beep
         end
-
-        D->>V: Render Frame
     end
+```
+
+## Sistema de Tracking
+
+### SimpleTracker
+
+Tracking de objetos entre frames usando IoU (Intersection over Union):
+
+```mermaid
+graph LR
+    subgraph Frame_N["Frame N"]
+        D1[Detection 1<br/>person @ 100,200]
+        D2[Detection 2<br/>car @ 300,150]
+    end
+
+    subgraph Tracker["SimpleTracker"]
+        IOU[IoU Matching<br/>threshold=0.3]
+        HIST[Depth History<br/>deque maxlen=10]
+        SPEED[Approach Speed<br/>linear regression]
+    end
+
+    subgraph Frame_N1["Frame N+1"]
+        T1[Track 1<br/>person ID=0<br/>frames_seen=5]
+        T2[Track 2<br/>car ID=1<br/>is_approaching=true]
+    end
+
+    D1 --> IOU
+    D2 --> IOU
+    IOU --> HIST
+    HIST --> SPEED
+    SPEED --> T1
+    SPEED --> T2
+```
+
+### TrackedObject
+
+```python
+@dataclass
+class TrackedObject:
+    id: int                    # Unique track ID
+    name: str                  # Object class (person, car, etc)
+    bbox: Tuple[int,int,int,int]  # x, y, w, h
+    zone: str                  # left, center, right
+    distance: str              # very_close, close, medium, far
+    depth_value: float         # Normalized depth (0-1)
+    confidence: float          # Detection confidence
+    is_gazed: bool             # User looking at object?
+
+    # Tracking state
+    depth_history: deque       # Last 10 depth values
+    frames_seen: int           # Consecutive frames tracked
+    frames_missing: int        # Frames since last detection
+
+    # Computed
+    is_approaching: bool       # Depth increasing = approaching
+    approach_speed: float      # Rate of approach
+    priority: float            # Alert priority score
+```
+
+### Detección de Aproximación
+
+```mermaid
+graph TB
+    subgraph DepthHistory["Depth History (últimos 10 frames)"]
+        F1[Frame 1: 0.3]
+        F2[Frame 2: 0.32]
+        F3[Frame 3: 0.35]
+        F4[Frame 4: 0.38]
+        F5[Frame 5: 0.42]
+    end
+
+    subgraph Analysis["Análisis"]
+        REG[Linear Regression<br/>slope = polyfit]
+        THR[Threshold<br/>slope > 0.01]
+    end
+
+    subgraph Result["Resultado"]
+        APP[is_approaching = True<br/>approach_speed = 0.03]
+    end
+
+    F1 --> REG
+    F2 --> REG
+    F3 --> REG
+    F4 --> REG
+    F5 --> REG
+    REG --> THR
+    THR --> APP
+
+    style APP fill:#f96
+```
+
+**Nota**: Depth Anything V2 usa profundidad inversa (mayor valor = más cerca). Si `depth_value` aumenta entre frames, el objeto se acerca.
+
+### Cálculo de Prioridad
+
+```python
+priority = type_priority × distance_mult × approach_mult × gaze_mult
+```
+
+```mermaid
+graph LR
+    subgraph TypePriority["Tipo de Objeto"]
+        CAR[car/truck/bus: 10]
+        MOTO[motorcycle: 9]
+        BIKE[bicycle: 8]
+        PERSON[person: 6]
+        DOG[dog: 5]
+        CHAIR[chair: 3]
+    end
+
+    subgraph DistanceMult["Distancia ×"]
+        VC[very_close: 4.0]
+        CL[close: 2.0]
+        MD[medium: 1.0]
+        FR[far: 0.5]
+    end
+
+    subgraph ApproachMult["Aproximación ×"]
+        YES[approaching: 2.0]
+        NO[static: 1.0]
+    end
+
+    subgraph GazeMult["Gaze ×"]
+        NL[not looking: 1.5]
+        LK[looking: 1.0]
+    end
+
+    TypePriority --> DistanceMult
+    DistanceMult --> ApproachMult
+    ApproachMult --> GazeMult
+```
+
+**Ejemplo**: Coche acercándose, no visto:
+```
+10 (car) × 2.0 (close) × 2.0 (approaching) × 1.5 (not gazed) = 60
+```
+
+**Ejemplo**: Persona muy cerca, vista:
+```
+6 (person) × 4.0 (very_close) × 1.0 (static) × 1.0 (gazed) = 24
+```
+
+## Sistema de Decisión de Alertas
+
+### AlertDecisionEngine
+
+Centraliza toda la lógica de alertas:
+
+```mermaid
+flowchart TD
+    START[Tracked Objects] --> VEH{Top Vehicle?}
+
+    VEH -->|Yes| VCLOSE{Close OR<br/>Approaching?}
+    VEH -->|No| OTHER
+
+    VCLOSE -->|Yes| VGAZE{User Looking?}
+    VCLOSE -->|No| OTHER
+
+    VGAZE -->|No| VCOOL{Cooldown OK?}
+    VGAZE -->|Yes| OTHER
+
+    VCOOL -->|Yes| VALERT[ALERT VEHICLE]
+    VCOOL -->|No| OTHER
+
+    OTHER{Top Non-Vehicle?} -->|Yes| OCLOSE{Close?}
+    OTHER -->|No| NONE[No Alert]
+
+    OCLOSE -->|Yes| OGAZE{User Looking?}
+    OCLOSE -->|No| NONE
+
+    OGAZE -->|No| OCOOL{Cooldown OK?}
+    OGAZE -->|Yes| NONE
+
+    OCOOL -->|Yes| OALERT[ALERT OTHER]
+    OCOOL -->|No| NONE
+
+    style VALERT fill:#f66
+    style OALERT fill:#fa0
+    style NONE fill:#6f6
+```
+
+### Priorización Vehículo vs No-Vehículo
+
+**Problema resuelto**: Un coche a distancia media era ignorado porque personas muy cercanas tenían más prioridad numérica.
+
+**Solución**: Los vehículos tienen **prioridad absoluta** sobre no-vehículos:
+
+```mermaid
+graph TB
+    subgraph Scene["Escena"]
+        P1[Person 1<br/>very_close<br/>priority=24]
+        P2[Person 2<br/>close<br/>priority=12]
+        CAR[Car<br/>medium, approaching<br/>priority=20]
+    end
+
+    subgraph OldLogic["Lógica Antigua"]
+        OLD[Top = Person 1<br/>Alerta: person]
+    end
+
+    subgraph NewLogic["Lógica Nueva"]
+        NEW1[Top Vehicle = Car<br/>approaching = true]
+        NEW2[Alerta: car]
+    end
+
+    Scene --> OldLogic
+    Scene --> NewLogic
+
+    style OLD fill:#f66
+    style NEW2 fill:#6f6
+```
+
+### Cooldowns
+
+```python
+vehicle_cooldown = 1.5s      # Entre alertas de vehículos
+other_cooldown = 2.0s        # Entre alertas de no-vehículos
+same_object_cooldown = 3.0s  # Antes de re-alertar mismo objeto
 ```
 
 ## Sistema de Audio
 
-### NeMo TTS (NVIDIA)
+### Arquitectura TTS (Aislamiento CUDA)
 
-Síntesis de voz de alta calidad usando:
-- **FastPitch** - Generación de espectrogramas mel
-- **HiFiGAN** - Vocoder neuronal
+**Problema resuelto**: NeMo TTS crasheaba con "double free or corruption" al usar CUDA junto con YOLO TensorRT.
 
-Corre en un **thread separado** con GPU (CUDA default stream). Cache automático de frases comunes.
+**Solución**: NeMo corre en un **proceso separado** con `mp.get_context('spawn')` para aislar contextos CUDA:
 
-Alertas: `"Warning, [objeto] [dirección]"` cuando hay peligro cercano que el usuario NO está mirando.
+```mermaid
+graph TB
+    subgraph MainProcess["Proceso Principal"]
+        DET[Detector]
+        YOLO[YOLO TensorRT<br/>CUDA Context A]
+        DEPTH[Depth FP16<br/>CUDA Context A]
+        AUDIO[AudioFeedback]
+        QUEUE[Queue<br/>multiprocessing]
+    end
+
+    subgraph TTSProcess["Proceso TTS (spawn)"]
+        TTS[TTSProcess]
+        NEMO[NeMo<br/>FastPitch + HiFiGAN]
+        CUDA_B[CUDA Context B]
+        CACHE[Audio Cache<br/>30 phrases]
+    end
+
+    DET --> YOLO
+    DET --> DEPTH
+    AUDIO -->|text| QUEUE
+    QUEUE -->|text| TTS
+    TTS --> NEMO
+    NEMO --> CUDA_B
+    TTS --> CACHE
+
+    style MainProcess fill:#e8f4ea
+    style TTSProcess fill:#e8e4f4
+```
+
+### Pre-caching de Frases
+
+Para latencia mínima, las frases comunes se pre-generan al iniciar:
+
+```python
+PRECACHE_PHRASES = [
+    "person left", "person right", "person straight",
+    "car left", "car right", "car straight",
+    "bicycle left", "bicycle right", "bicycle straight",
+    "motorcycle left", "motorcycle right", "motorcycle straight",
+    "bus left", "bus right", "bus straight",
+    "truck left", "truck right", "truck straight",
+    # ... 30 frases total
+]
+```
+
+**Latencia**:
+- Frase cacheada: **<10ms** (solo playback)
+- Frase nueva: **~200ms** (generación + playback)
+
+### Skip de Mensajes Antiguos
+
+Si hay mensajes acumulados en la cola, solo se reproduce el **más reciente**:
+
+```python
+# En _tts_worker:
+while not queue.empty():
+    newer_msg = queue.get_nowait()
+    msg = newer_msg  # Usar el más reciente
+```
 
 ### Beeps Espaciales
 
 ```mermaid
 graph LR
-    subgraph Distance
-        VC[very_close<br/>100% vol]
-        CL[close<br/>70% vol]
-        MD[medium<br/>45% vol]
-        FR[far<br/>25% vol]
+    subgraph Distance["Volumen por Distancia"]
+        VC[very_close<br/>100%]
+        CL[close<br/>70%]
+        MD[medium<br/>45%]
+        FR[far<br/>25%]
     end
 
-    subgraph Frequency
+    subgraph Frequency["Frecuencia"]
         CRIT[Critical<br/>1000 Hz]
         NORM[Normal<br/>500 Hz]
     end
 
-    subgraph Panning
-        LEFT[Left<br/>L:100% R:20%]
-        CENTER[Center<br/>L:100% R:100%]
-        RIGHT[Right<br/>L:20% R:100%]
+    subgraph Panning["Stereo Panning"]
+        LEFT[Left Zone<br/>L:100% R:20%]
+        CENTER[Center Zone<br/>L:100% R:100%]
+        RIGHT[Right Zone<br/>L:20% R:100%]
     end
 
     VC --> CRIT
@@ -151,18 +455,24 @@ graph LR
 
 ```
 aria-demo/
-├── run.py                 # Entry point con selector de modo
+├── run.py                      # Entry point
 ├── src/
 │   ├── core/
-│   │   ├── observer.py    # Captura: Aria/Webcam/AriaDatasetObserver
-│   │   ├── detector.py    # YOLO + Depth + Gaze (CUDA streams)
-│   │   ├── dashboard.py   # Renderizado visual con OpenCV
-│   │   └── audio.py       # NeMo TTS + beeps espaciales (CUDA stream)
+│   │   ├── __init__.py
+│   │   ├── observer.py         # Frame capture (Aria/Webcam/VRS)
+│   │   ├── detector.py         # YOLO + Depth + Gaze (CUDA)
+│   │   ├── tracker.py          # SimpleTracker + TrackedObject
+│   │   ├── alert_engine.py     # AlertDecisionEngine
+│   │   ├── audio.py            # AudioFeedback + Beeps
+│   │   ├── tts_process.py      # NeMo en proceso separado
+│   │   └── dashboard.py        # Visual rendering
 │   └── web/
-│       └── main.py        # Flask server + MJPEG streaming
+│       ├── main.py             # Flask + MJPEG streaming
+│       └── templates/
+│           └── index.html
 ├── data/
-│   └── aria_sample/       # VRS recordings + eye_gaze CSV
-├── models/                # YOLO weights (.pt, .engine)
+│   └── aria_sample/            # VRS recordings + gaze CSV
+├── models/                     # YOLO weights (.pt, .engine)
 ├── docs/
 │   └── README.md
 └── requirements.txt
@@ -171,7 +481,6 @@ aria-demo/
 ## Instalación
 
 ```bash
-# Clonar/crear entorno
 cd aria-demo
 python -m venv .venv
 source .venv/bin/activate
@@ -179,7 +488,11 @@ source .venv/bin/activate
 # Dependencias base
 pip install -r requirements.txt
 
-# Meta Eye Gaze Model (opcional, para gafas Aria)
+# NeMo TTS (requiere CUDA)
+pip install nemo_toolkit[tts]
+
+# Meta Eye Gaze (opcional)
+pip install projectaria-tools
 pip install git+https://github.com/facebookresearch/projectaria_eyetracking.git
 
 # Audio en Linux
@@ -189,185 +502,65 @@ sudo apt-get install -y libportaudio2 portaudio19-dev espeak-ng
 ## Uso
 
 ```bash
-cd ~/Projects/aria/aria-demo
 source .venv/bin/activate
 
-python run.py webcam      # Webcam en tiempo real
-python run.py dataset     # Reproducir VRS sample (data/aria_sample/)
-python run.py video.mp4   # Archivo de video
+python run.py webcam      # Webcam
+python run.py video.mp4   # Video file
+python run.py dataset     # VRS sample
 ```
 
-Al arrancar, selecciona el modo de detección:
-- **[1] Indoor** - persona, silla, sofá, mesa, tv, puerta...
-- **[2] Outdoor** - persona, coche, bici, moto, bus, semáforo...
-- **[3] All** - todas las clases (80 objetos COCO)
+Selecciona modo de detección:
+- **[1] Indoor** - persona, silla, sofá, mesa, tv...
+- **[2] Outdoor** - persona, coche, bici, moto, bus...
+- **[3] All** - 80 clases COCO
 
-Abre http://localhost:5000 en el navegador.
-
-## Detecciones
-
-Cada objeto detectado incluye:
-
-| Campo | Descripción |
-|-------|-------------|
-| `name` | Clase del objeto (person, chair, etc.) |
-| `confidence` | Confianza de detección (0.0-1.0) |
-| `bbox` | Bounding box (x, y, w, h) |
-| `zone` | Zona espacial (left, center, right) |
-| `distance` | Categoría de distancia (very_close, close, medium, far) |
-| `depth_value` | Valor de profundidad normalizado (0.0-1.0) |
-| `is_gazed` | True si el usuario está mirando el objeto |
+Abre http://localhost:5000
 
 ## Rendimiento
 
 Probado en RTX 3090:
-- **15-19 FPS** con YOLO + Depth + Gaze (PyTorch)
-- **~30 FPS** con TensorRT habilitado
-- **~25 FPS** sin profundidad
-- **~40 FPS** solo YOLO TensorRT
 
-### Optimizaciones GPU
+| Configuración | FPS |
+|--------------|-----|
+| YOLO + Depth + Gaze + Tracking | 15-19 |
+| Con TensorRT | ~30 |
+| Sin profundidad | ~25 |
+| Solo YOLO TensorRT | ~40 |
 
-El sistema usa automáticamente:
-- **TensorRT** para YOLO (exporta .engine si no existe)
-- **TensorRT/torch.compile** para Depth
-- **OpenCV CUDA** para resize/cvtColor (si está disponible)
-- **3 CUDA Streams** para ejecución paralela:
-  - Stream 1: YOLO detección
-  - Stream 2: Depth estimation
-  - Stream 3: Eye gaze inference
-- **NeMo TTS** en thread separado (CUDA default stream)
+### Optimizaciones
+
+- **TensorRT** para YOLO (auto-exporta .engine)
+- **torch.compile** para Depth Anything V2
 - **FP16** para todos los modelos
+- **CUDA Streams** para ejecución paralela
+- **NeMo en proceso separado** (evita conflictos CUDA)
+- **Pre-caching TTS** para latencia mínima
 
-## Dependencias
+## VRAM Usage
 
-```
-numpy>=1.24.0
-opencv-python>=4.8.0
-torch>=2.0.0
-ultralytics>=8.0.0
-transformers>=4.35.0
-flask>=3.0.0
-sounddevice>=0.4.6
-Pillow>=10.0.0
-nemo_toolkit[tts]>=2.0.0    # NeMo TTS (FastPitch + HiFiGAN)
-```
-
-### Opcionales
-
-```bash
-# TensorRT (más rendimiento)
-pip install tensorrt torch-tensorrt
-
-# Meta Eye Gaze (para Aria glasses)
-pip install projectaria-tools
-pip install git+https://github.com/facebookresearch/projectaria_eyetracking.git
-
-# Fallback TTS (si no hay GPU para NeMo)
-pip install pyttsx3
-
-# OpenCV CUDA requiere compilar desde fuente
+```mermaid
+pie title VRAM (~2.5GB total)
+    "YOLO26s TensorRT" : 0.4
+    "Depth Anything V2" : 0.8
+    "Meta Eye Gaze" : 0.2
+    "NeMo TTS (proceso separado)" : 1.1
 ```
 
 ## Roadmap
 
-### Próximo: Conexión Meta Aria Glasses
-Integrar streaming en tiempo real desde las gafas Meta Aria físicas.
+### Próximo
+- Conexión Meta Aria Glasses en tiempo real
+- Ajuste fino de umbrales de alerta
 
-### Futuro: FastVLM + Control por Voz
-FastVLM para descripciones de escena + comandos de voz (después de conectar Aria).
-
-### Arquitectura Completa (Planned)
-
-```mermaid
-graph TB
-    subgraph Input["Entrada"]
-        CAM[Camera/Video/Aria]
-        MIC[Micrófono]
-    end
-
-    subgraph RealTime["Real-Time Loop (~20 FPS)"]
-        YOLO[YOLO26s]
-        DEPTH[Depth Anything V2]
-        GAZE[Meta Eye Gaze]
-        BEEP[Spatial Beeps]
-    end
-
-    subgraph OnDemand["On-Demand (~400ms)"]
-        VLM[FastVLM-0.5B]
-        TTS[TTS Descripción]
-    end
-
-    subgraph Voice["Control de Voz"]
-        WHISPER[Whisper/Vosk]
-        CMD{Comando}
-    end
-
-    CAM --> YOLO
-    CAM --> DEPTH
-    CAM --> GAZE
-    CAM --> VLM
-
-    YOLO --> BEEP
-    DEPTH --> BEEP
-    GAZE --> BEEP
-
-    MIC --> WHISPER
-    WHISPER --> CMD
-
-    CMD -->|"describe"| VLM
-    CMD -->|"stop"| BEEP
-    CMD -->|"resume"| BEEP
-
-    VLM --> TTS
-```
-
-### Flujo de Voz
-
-```mermaid
-sequenceDiagram
-    participant U as Usuario
-    participant W as Whisper
-    participant S as Sistema
-    participant V as FastVLM
-    participant T as TTS
-
-    U->>W: "describe"
-    W->>S: Comando reconocido
-    S->>V: Frame actual
-    V->>V: Genera descripción (~400ms)
-    V->>T: "Office space with person at desk..."
-    T->>U: Audio descripción
-
-    Note over S: Loop real-time continúa<br/>sin interrupción
-```
-
-### Modelos y VRAM
-
-```mermaid
-pie title VRAM Usage Actual (~2.0GB)
-    "YOLO26s" : 0.5
-    "Depth Anything V2" : 0.8
-    "Meta Eye Gaze" : 0.2
-    "NeMo TTS" : 0.5
-```
-
-Con FastVLM (futuro): ~3.2GB total
-
-### Comandos de Voz (Planned)
-
-| Comando | Acción |
-|---------|--------|
-| "describe" / "scan" | Descripción VLM detallada |
-| "stop" | Pausar alertas de audio |
-| "resume" | Reanudar alertas |
-| "help" | Listar comandos disponibles |
+### Futuro
+- FastVLM para descripciones de escena
+- Control por voz (Whisper)
+- Detección de semáforos y señales
 
 ## Créditos
 
 - [Ultralytics YOLO](https://github.com/ultralytics/ultralytics)
 - [Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2)
-- [NVIDIA NeMo](https://github.com/NVIDIA/NeMo) - FastPitch + HiFiGAN TTS
+- [NVIDIA NeMo](https://github.com/NVIDIA/NeMo)
 - [Meta Project Aria](https://www.projectaria.com/)
 - [projectaria_eyetracking](https://github.com/facebookresearch/projectaria_eyetracking)
-- [FastVLM](https://github.com/apple/ml-fastvlm) (planned)
