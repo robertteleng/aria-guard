@@ -236,7 +236,7 @@ class ParallelDetector:
         # Decidir si calcular depth este frame
         should_compute_depth = (
             self.enable_depth and
-            self.depth_model and
+            self.depth_model is not None and
             self._frame_idx % self.depth_interval == 0
         )
 
