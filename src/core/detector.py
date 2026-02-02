@@ -7,6 +7,7 @@ Soporta TensorRT y OpenCV CUDA para máximo rendimiento.
 
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
+from pathlib import Path
 import math
 import os
 
@@ -19,6 +20,10 @@ torch.backends.cudnn.benchmark = True
 
 # OpenCV CUDA disponible?
 _OPENCV_CUDA = hasattr(cv2, 'cuda') and cv2.cuda.getCudaEnabledDeviceCount() > 0
+
+# Paths
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
+MODELS_DIR = _PROJECT_ROOT / "models"
 
 
 @dataclass
@@ -33,16 +38,28 @@ class Detection:
     is_gazed: bool = False  # True if user is looking at this object
 
 
+# Filtros de clases por modo
+CLASS_FILTERS = {
+    "indoor": {"person", "chair", "couch", "bed", "dining table", "toilet", "tv", "laptop", "door", "refrigerator", "oven", "sink", "backpack", "handbag", "suitcase"},
+    "outdoor": {"person", "bicycle", "car", "motorcycle", "bus", "truck", "traffic light", "stop sign", "dog", "cat", "backpack", "handbag", "suitcase"},
+    "all": None  # Sin filtro
+}
+
+
 class ParallelDetector:
     """YOLO + Depth en paralelo con CUDA streams."""
 
-    def __init__(self, enable_depth: bool = True, device: str = "cuda", depth_interval: int = 3):
+    def __init__(self, enable_depth: bool = True, device: str = "cuda", depth_interval: int = 3, mode: str = "all"):
         """
         Args:
             enable_depth: Activar estimación de profundidad
             device: "cuda" o "cpu"
             depth_interval: Procesar depth cada N frames (para performance)
+            mode: "indoor", "outdoor" o "all" - filtra clases relevantes
         """
+        self.filter_classes = CLASS_FILTERS.get(mode, None)
+        if self.filter_classes:
+            print(f"[DETECTOR] Modo {mode}: filtrando a {len(self.filter_classes)} clases")
         # Detectar dispositivo
         if device == "cuda" and not torch.cuda.is_available():
             print("[DETECTOR] CUDA no disponible, usando CPU")
@@ -86,23 +103,23 @@ class ParallelDetector:
             from ultralytics import YOLO
 
             model_name = "yolo26s"
-            engine_path = f"{model_name}.engine"
-            pt_path = f"{model_name}.pt"
+            engine_path = MODELS_DIR / f"{model_name}.engine"
+            pt_path = MODELS_DIR / f"{model_name}.pt"
 
             # Intentar cargar TensorRT engine
-            if self.device == "cuda" and os.path.exists(engine_path):
-                self.yolo = YOLO(engine_path)
+            if self.device == "cuda" and engine_path.exists():
+                self.yolo = YOLO(str(engine_path))
                 self._yolo_tensorrt = True
                 print(f"[DETECTOR] {model_name} cargado (TensorRT)")
             elif self.device == "cuda":
                 # Cargar PyTorch y exportar a TensorRT si es posible
-                self.yolo = YOLO(pt_path)
+                self.yolo = YOLO(str(pt_path))
                 self._yolo_tensorrt = False
                 try:
                     self.yolo.export(format="engine", half=True)
                     # Recargar con TensorRT
-                    if os.path.exists(engine_path):
-                        self.yolo = YOLO(engine_path)
+                    if engine_path.exists():
+                        self.yolo = YOLO(str(engine_path))
                         self._yolo_tensorrt = True
                         print(f"[DETECTOR] {model_name} exportado y cargado (TensorRT)")
                     else:
@@ -113,7 +130,7 @@ class ParallelDetector:
                     self.yolo.to("cuda")
                     print(f"[DETECTOR] {model_name} cargado (CUDA PyTorch)")
             else:
-                self.yolo = YOLO(pt_path)
+                self.yolo = YOLO(str(pt_path))
                 self._yolo_tensorrt = False
                 print(f"[DETECTOR] {model_name} cargado (CPU)")
         except Exception as e:
@@ -346,6 +363,10 @@ class ParallelDetector:
             conf = float(box.conf[0])
             cls_id = int(box.cls[0])
             name = yolo_result.names[cls_id]
+
+            # Filtrar por clase si hay filtro activo
+            if self.filter_classes and name not in self.filter_classes:
+                continue
 
             # Calcular bbox en formato (x, y, w, h)
             bbox = (int(x1), int(y1), int(x2 - x1), int(y2 - y1))

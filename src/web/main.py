@@ -1,13 +1,17 @@
 """Server MJPEG simple para streaming de video con audio feedback."""
+import sys
+from pathlib import Path
+
+# Add project root to path
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
 import cv2
 import time
 import threading
 from flask import Flask, Response, render_template
 
-from observer import MockObserver, AriaDemoObserver
-from detector import ParallelDetector
-from dashboard import Dashboard
-from audio import AudioFeedback
+from src.core import MockObserver, AriaDemoObserver, ParallelDetector, Dashboard, AudioFeedback
 
 app = Flask(__name__)
 
@@ -38,11 +42,11 @@ def generate_frames(feed_type="rgb"):
                b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
 
 
-def process_loop(source: str, enable_audio: bool = True):
+def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
     """Loop de procesamiento en background."""
     global current_frame, current_depth, fps, current_detections, current_gaze
 
-    print(f"[SERVER] Iniciando con fuente: {source}")
+    print(f"[SERVER] Iniciando con fuente: {source}, modo: {mode}")
 
     if source == "aria":
         print("[SERVER] Conectando con gafas Aria...")
@@ -52,7 +56,7 @@ def process_loop(source: str, enable_audio: bool = True):
     else:
         observer = MockObserver(source="video", video_path=source)
     print("[SERVER] Cargando detector...")
-    detector = ParallelDetector(enable_depth=True)
+    detector = ParallelDetector(enable_depth=True, mode=mode)
     dashboard = Dashboard()
     audio = AudioFeedback(enabled=enable_audio)
     print("[SERVER] Iniciando procesamiento...")
@@ -140,17 +144,44 @@ def status():
 if __name__ == '__main__':
     import sys
 
-    # Opciones: "aria", "webcam", o ruta a video
+    # Parsear source desde argumentos
     source = sys.argv[1] if len(sys.argv) > 1 else "webcam"
 
-    print(f"Uso: python main.py [aria|webcam|video.mp4]")
-    print(f"  - aria: Conectar con gafas Meta Aria")
-    print(f"  - webcam: Usar webcam local")
-    print(f"  - video.mp4: Usar archivo de video")
+    print()
+    print("╔══════════════════════════════════════╗")
+    print("║          ARIA DEMO v1.0              ║")
+    print("║   Visual Assistance System           ║")
+    print("╚══════════════════════════════════════╝")
+    print()
+    print(f"  Fuente: {source}")
+    print()
+    print("  Selecciona el modo de detección:")
+    print()
+    print("    [1] Indoor  - persona, silla, sofá, mesa, tv, puerta...")
+    print("    [2] Outdoor - persona, coche, bici, moto, bus, semáforo...")
+    print("    [3] All     - todas las clases (80 objetos)")
+    print()
+
+    while True:
+        choice = input("  Modo [1/2/3]: ").strip()
+        if choice == "1":
+            mode = "indoor"
+            break
+        elif choice == "2":
+            mode = "outdoor"
+            break
+        elif choice == "3":
+            mode = "all"
+            break
+        else:
+            print("  Opción no válida. Introduce 1, 2 o 3.")
+
+    print()
+    print(f"  → Modo seleccionado: {mode.upper()}")
     print()
 
     # Iniciar procesamiento en background
-    thread = threading.Thread(target=process_loop, args=(source,), daemon=True)
+    thread = threading.Thread(target=process_loop, args=(source, mode), daemon=True)
     thread.start()
 
     print("Servidor en http://0.0.0.0:5000")

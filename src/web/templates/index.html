@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ARIA Demo</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #0d0d0d; color: #e0e0e0; font-family: 'Segoe UI', system-ui, sans-serif; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+
+        .main-container { display: flex; flex: 1; min-height: 0; }
+
+        .video-area {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+        }
+        .video-area img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        .panel {
+            width: 260px;
+            background: linear-gradient(180deg, #121218 0%, #0d0d12 100%);
+            padding: 20px 16px;
+            border-left: 1px solid #1a1a24;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            overflow-y: auto;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid #1a1a24;
+        }
+        .header-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #4a9eff 0%, #7c3aed 100%);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+        .header h1 { font-size: 16px; font-weight: 600; color: #fff; }
+        .header span { font-size: 11px; color: #666; }
+
+        .stats-card {
+            background: #16161d;
+            border-radius: 10px;
+            padding: 14px;
+            border: 1px solid #1f1f2a;
+        }
+        .stats-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .stat-label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-value { font-size: 28px; font-weight: 700; color: #4aff4a; font-family: 'JetBrains Mono', monospace; }
+        .stat-unit { font-size: 12px; color: #666; margin-left: 4px; }
+
+        .section-title {
+            font-size: 11px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .section-title .count {
+            background: #1f1f2a;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            color: #888;
+        }
+
+        .detections-list {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            overflow-y: auto;
+        }
+        .detection {
+            padding: 8px 10px;
+            border-radius: 6px;
+            background: #16161d;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid #1f1f2a;
+        }
+        .detection .indicator {
+            width: 3px;
+            height: 20px;
+            border-radius: 2px;
+        }
+        .very_close .indicator { background: #ff4a4a; box-shadow: 0 0 6px #ff4a4a50; }
+        .close .indicator { background: #ffa54a; box-shadow: 0 0 6px #ffa54a50; }
+        .medium .indicator { background: #ffff4a; }
+        .far .indicator { background: #4aff4a; }
+        .detection .info { flex: 1; }
+        .detection .name { font-weight: 500; color: #fff; font-size: 12px; }
+        .detection .zone { font-size: 10px; color: #666; }
+        .detection .gaze-icon { font-size: 12px; }
+        .gazed { border-color: #7c3aed40; background: #1a1a28; }
+
+        .legend {
+            display: flex;
+            justify-content: space-between;
+            padding-top: 10px;
+            border-top: 1px solid #1a1a24;
+            margin-top: auto;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 9px;
+            color: #555;
+        }
+        .legend-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+        .empty-state {
+            text-align: center;
+            padding: 20px 10px;
+            color: #444;
+            font-size: 11px;
+        }
+
+        /* Bottom Gaze Bar */
+        .gaze-bar {
+            height: 70px;
+            background: linear-gradient(180deg, #121218 0%, #0a0a0f 100%);
+            border-top: 1px solid #1a1a24;
+            display: flex;
+            align-items: center;
+            padding: 0 30px;
+            gap: 40px;
+        }
+
+        .gaze-indicator {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .gaze-dot {
+            width: 14px;
+            height: 14px;
+            background: #ff4aff;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+            box-shadow: 0 0 10px #ff4aff50;
+        }
+        .gaze-dot.active {
+            background: #4aff4a;
+            box-shadow: 0 0 10px #4aff4a50;
+        }
+        @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(0.85); } }
+
+        .gaze-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .gaze-label { font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+        .gaze-coords {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 20px;
+            color: #fff;
+            font-weight: 500;
+        }
+
+        .gaze-status-box {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .gaze-status-label { font-size: 10px; color: #666; text-transform: uppercase; }
+        .gaze-status { font-size: 14px; color: #666; font-weight: 500; }
+        .gaze-status.active { color: #4aff4a; }
+
+        .bar-legend {
+            display: flex;
+            gap: 20px;
+            margin-left: auto;
+        }
+        .bar-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #666;
+        }
+        .bar-legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <div class="video-area">
+            <img src="/video_feed" />
+        </div>
+        <div class="panel">
+            <div class="header">
+                <div class="header-icon">👁</div>
+                <div>
+                    <h1>ARIA Demo</h1>
+                    <span>Visual Assistance</span>
+                </div>
+            </div>
+
+            <div class="stats-card">
+                <div class="stats-row">
+                    <span class="stat-label">Framerate</span>
+                    <div>
+                        <span class="stat-value" id="fps">--</span>
+                        <span class="stat-unit">FPS</span>
+                    </div>
+                </div>
+            </div>
+
+            <div style="flex:1; display:flex; flex-direction:column; min-height:0;">
+                <div class="section-title">
+                    Detecciones <span class="count" id="count">0</span>
+                </div>
+                <div class="detections-list" id="detections">
+                    <div class="empty-state">Sin objetos detectados</div>
+                </div>
+            </div>
+
+            <div class="legend">
+                <div class="legend-item"><div class="legend-dot" style="background:#ff4a4a"></div>Muy cerca</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#ffa54a"></div>Cerca</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#ffff4a"></div>Medio</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#4aff4a"></div>Lejos</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="gaze-bar">
+        <div class="gaze-indicator">
+            <div class="gaze-dot" id="gaze-dot"></div>
+            <div class="gaze-info">
+                <span class="gaze-label">Eye Tracking</span>
+                <span class="gaze-coords" id="gaze-text">-- , --</span>
+            </div>
+        </div>
+        <div class="gaze-status-box">
+            <span class="gaze-status-label">Estado</span>
+            <span class="gaze-status" id="eye-status">Inactivo</span>
+        </div>
+        <div class="bar-legend">
+            <div class="bar-legend-item"><div class="bar-legend-dot" style="background:#ff4a4a"></div>Muy cerca</div>
+            <div class="bar-legend-item"><div class="bar-legend-dot" style="background:#ffa54a"></div>Cerca</div>
+            <div class="bar-legend-item"><div class="bar-legend-dot" style="background:#ffff4a"></div>Medio</div>
+            <div class="bar-legend-item"><div class="bar-legend-dot" style="background:#4aff4a"></div>Lejos</div>
+        </div>
+    </div>
+
+    <script>
+        setInterval(async () => {
+            try {
+                const res = await fetch('/status');
+                const data = await res.json();
+
+                document.getElementById('fps').textContent = data.fps.toFixed(1);
+                document.getElementById('count').textContent = data.detections.length;
+
+                const detectionsEl = document.getElementById('detections');
+                if (data.detections.length === 0) {
+                    detectionsEl.innerHTML = '<div class="empty-state">Sin objetos detectados</div>';
+                } else {
+                    let html = '';
+                    data.detections.slice(0, 10).forEach(d => {
+                        const gazeClass = d.is_gazed ? ' gazed' : '';
+                        const gazeIcon = d.is_gazed ? '<span class="gaze-icon">👁</span>' : '';
+                        html += `
+                            <div class="detection ${d.distance}${gazeClass}">
+                                <div class="indicator"></div>
+                                <div class="info">
+                                    <div class="name">${d.name}</div>
+                                    <div class="zone">${d.zone}</div>
+                                </div>
+                                ${gazeIcon}
+                            </div>`;
+                    });
+                    detectionsEl.innerHTML = html;
+                }
+
+                const gazeDot = document.getElementById('gaze-dot');
+                const gazeStatus = document.getElementById('eye-status');
+                const gazeText = document.getElementById('gaze-text');
+
+                if (data.gaze) {
+                    gazeText.textContent = `${data.gaze[0].toFixed(3)} , ${data.gaze[1].toFixed(3)}`;
+                    gazeStatus.textContent = 'Activo';
+                    gazeStatus.classList.add('active');
+                    gazeDot.classList.add('active');
+                } else {
+                    gazeText.textContent = '-- , --';
+                    gazeStatus.textContent = 'Inactivo';
+                    gazeStatus.classList.remove('active');
+                    gazeDot.classList.remove('active');
+                }
+            } catch (e) {
+                console.error('Status fetch error:', e);
+            }
+        }, 200);
+    </script>
+</body>
+</html>

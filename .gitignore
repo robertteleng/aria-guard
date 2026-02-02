@@ -12,10 +12,18 @@ build/
 venv/
 ENV/
 
-# Models (downloaded automatically)
-*.pt
-*.onnx
-*.engine
+# Models (large files, downloaded/generated automatically)
+models/*.pt
+models/*.onnx
+models/*.onnx.data
+models/*.engine
+
+# Data (test videos)
+data/*.mp4
+data/*.avi
+data/*.mov
+data/*.mkv
+data/*.webm
 
 # IDE
 .vscode/
@@ -30,9 +38,3 @@ Thumbs.db
 
 # Temp
 *.tmp
-
-# Videos (test files)
-*.mp4
-*.avi
-*.mov
-*.mkv
