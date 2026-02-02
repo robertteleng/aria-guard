@@ -12,6 +12,9 @@ import cv2
 import numpy as np
 import torch
 
+# Optimizar convs para tamaños fijos
+torch.backends.cudnn.benchmark = True
+
 
 @dataclass
 class Detection:
@@ -99,6 +102,12 @@ class ParallelDetector:
             if self.device == "cuda":
                 self.depth_model = self.depth_model.cuda().half()
                 self.depth_model.eval()
+                # torch.compile para PyTorch 2.0+ (opcional)
+                try:
+                    self.depth_model = torch.compile(self.depth_model, mode="reduce-overhead")
+                    print("[DETECTOR] Depth model compiled with torch.compile")
+                except Exception:
+                    pass  # torch.compile no disponible o falló
                 # Verificar que está en GPU
                 param = next(self.depth_model.parameters())
                 print(f"[DETECTOR] Depth Anything V2 cargado (device={param.device}, dtype={param.dtype})")
@@ -207,11 +216,11 @@ class ParallelDetector:
         return detections, depth_map
 
     def _run_yolo(self, frame: np.ndarray):
-        """Ejecuta YOLO."""
+        """Ejecuta YOLO con FP16."""
         if self.yolo is None:
             return None
         try:
-            results = self.yolo(frame, verbose=False)
+            results = self.yolo(frame, verbose=False, half=(self.device == "cuda"))
             return results[0] if results else None
         except Exception as e:
             print(f"[DETECTOR ERROR] YOLO: {e}")
