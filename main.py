@@ -163,20 +163,8 @@ def process_loop(video_path: str, enable_audio: bool = True):
         # Get eye tracking frame (None for video/webcam, available with Aria)
         eye_frame = observer.get_frame("eye")
 
-        # Process detections
-        detections, depth_map = detector.process(rgb)
-
-        # Estimate gaze if eye frame available
-        gaze_point = None
-        if eye_frame is not None:
-            gaze_point = detector.estimate_gaze(eye_frame)
-
-        # Check which objects user is looking at
-        if gaze_point:
-            for det in detections:
-                det.is_gazed = detector.check_gaze_on_detection(
-                    gaze_point, det, rgb.shape
-                )
+        # Process all in parallel (YOLO + Depth + Gaze)
+        detections, depth_map, gaze_point = detector.process(rgb, eye_frame)
 
         # Audio feedback for dangers
         for det in detections:

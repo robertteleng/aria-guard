@@ -53,10 +53,12 @@ class ParallelDetector:
         if device == "cuda":
             self.yolo_stream = torch.cuda.Stream()
             self.depth_stream = torch.cuda.Stream()
+            self.gaze_stream = torch.cuda.Stream()
             print(f"[DETECTOR] CUDA: {torch.cuda.get_device_name(0)}")
         else:
             self.yolo_stream = None
             self.depth_stream = None
+            self.gaze_stream = None
 
         # Cargar YOLO
         self._load_yolo()
@@ -163,21 +165,27 @@ class ParallelDetector:
         except Exception as e:
             print(f"[DETECTOR WARN] Could not load gaze model: {e}")
 
-    def process(self, frame: np.ndarray) -> Tuple[List[Detection], Optional[np.ndarray]]:
+    def process(
+        self,
+        frame: np.ndarray,
+        eye_frame: Optional[np.ndarray] = None
+    ) -> Tuple[List[Detection], Optional[np.ndarray], Optional[Tuple[float, float]]]:
         """
-        Procesa frame: detecta objetos + estima profundidad.
+        Procesa frame: detecta objetos + estima profundidad + gaze (todo en paralelo).
 
         Args:
             frame: Imagen BGR
+            eye_frame: Imagen de eye tracking (opcional)
 
         Returns:
-            (detecciones, depth_map)
+            (detecciones, depth_map, gaze_point)
         """
         if frame is None:
-            return [], None
+            return [], None, None
 
         detections = []
         depth_map = None
+        gaze_point = None
         self._frame_idx += 1
 
         # Decidir si calcular depth este frame
@@ -198,13 +206,20 @@ class ParallelDetector:
                 with torch.cuda.stream(self.depth_stream):
                     self._cached_depth = self._run_depth(frame)
 
-            # Sincronizar
+            # Stream 3: Gaze (si hay eye frame)
+            if eye_frame is not None and self.gaze_stream:
+                with torch.cuda.stream(self.gaze_stream):
+                    gaze_point = self.estimate_gaze(eye_frame)
+
+            # Sincronizar todos los streams
             torch.cuda.synchronize()
         else:
             # CPU: secuencial
             yolo_results = self._run_yolo(frame)
             if should_compute_depth:
                 self._cached_depth = self._run_depth(frame)
+            if eye_frame is not None:
+                gaze_point = self.estimate_gaze(eye_frame)
 
         # Usar depth cacheado
         depth_map = self._cached_depth
@@ -213,7 +228,12 @@ class ParallelDetector:
         if yolo_results:
             detections = self._create_detections(yolo_results, depth_map, frame.shape)
 
-        return detections, depth_map
+        # Marcar objetos que el usuario está mirando
+        if gaze_point:
+            for det in detections:
+                det.is_gazed = self.check_gaze_on_detection(gaze_point, det, frame.shape)
+
+        return detections, depth_map, gaze_point
 
     def _run_yolo(self, frame: np.ndarray):
         """Ejecuta YOLO con FP16."""
