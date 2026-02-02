@@ -1,4 +1,4 @@
-"""Server MJPEG simple para streaming de video."""
+"""Server MJPEG simple para streaming de video con audio feedback."""
 import cv2
 import time
 import threading
@@ -7,6 +7,7 @@ from flask import Flask, Response, render_template_string
 from observer import MockObserver
 from detector import ParallelDetector
 from dashboard import Dashboard
+from audio import AudioFeedback
 
 app = Flask(__name__)
 
@@ -95,7 +96,8 @@ HTML = """
 
             let html = '';
             data.detections.slice(0, 8).forEach(d => {
-                html += `<div class="detection ${d.distance}">${d.name} - ${d.zone} (${d.distance})</div>`;
+                const gazeIcon = d.is_gazed ? '👁️ ' : '';
+                html += `<div class="detection ${d.distance}">${gazeIcon}${d.name} - ${d.zone} (${d.distance})</div>`;
             });
             document.getElementById('detections').innerHTML = html;
 
@@ -131,15 +133,16 @@ def generate_frames(feed_type="rgb"):
                b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
 
 
-def process_loop(video_path: str):
+def process_loop(video_path: str, enable_audio: bool = True):
     """Loop de procesamiento en background."""
-    global current_frame, current_depth, fps, current_detections
+    global current_frame, current_depth, fps, current_detections, current_gaze
 
     print(f"[SERVER] Cargando video: {video_path}")
     observer = MockObserver(source="video", video_path=video_path)
     print("[SERVER] Cargando detector...")
     detector = ParallelDetector(enable_depth=True)
     dashboard = Dashboard()
+    audio = AudioFeedback(enabled=enable_audio)
     print("[SERVER] Iniciando procesamiento...")
 
     frame_count = 0
@@ -151,17 +154,46 @@ def process_loop(video_path: str):
             time.sleep(0.01)
             continue
 
+        # Get eye tracking frame (None for video/webcam, available with Aria)
+        eye_frame = observer.get_frame("eye")
+
+        # Process detections
         detections, depth_map = detector.process(rgb)
+
+        # Estimate gaze if eye frame available
+        gaze_point = None
+        if eye_frame is not None:
+            gaze_point = detector.estimate_gaze(eye_frame)
+
+        # Check which objects user is looking at
+        if gaze_point:
+            for det in detections:
+                det.is_gazed = detector.check_gaze_on_detection(
+                    gaze_point, det, rgb.shape
+                )
+
+        # Audio feedback for dangers
+        for det in detections:
+            if det.distance in ("very_close", "close"):
+                user_looking = getattr(det, 'is_gazed', False)
+                audio.alert_danger(
+                    object_name=det.name,
+                    zone=det.zone,
+                    distance=det.distance,
+                    user_looking=user_looking
+                )
+                break  # Only alert for most dangerous object
 
         # Renderizar
         rgb_out, depth_out, _, _ = dashboard.render(
-            rgb, depth_map, None, detections, None, fps
+            rgb, depth_map, eye_frame, detections, gaze_point, fps
         )
 
         with frame_lock:
             current_frame = rgb_out
             current_depth = depth_out if depth_out is not None else rgb_out
             current_detections = detections
+            current_gaze = gaze_point
 
         # FPS
         frame_count += 1
@@ -192,12 +224,16 @@ def depth_feed():
 def status():
     from flask import jsonify
     with frame_lock:
-        dets = [{'name': d.name, 'zone': d.zone, 'distance': d.distance}
-                for d in current_detections] if current_detections else []
+        dets = [{
+            'name': d.name,
+            'zone': d.zone,
+            'distance': d.distance,
+            'is_gazed': getattr(d, 'is_gazed', False)
+        } for d in current_detections] if current_detections else []
     return jsonify({
         'fps': fps,
         'detections': dets,
-        'gaze': current_gaze
+        'gaze': list(current_gaze) if current_gaze else None
     })
 
 
