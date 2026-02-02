@@ -15,6 +15,11 @@ from src.core import MockObserver, AriaDemoObserver, AriaDatasetObserver, Parall
 
 app = Flask(__name__)
 
+# Disable Flask request logging for cleaner output
+import logging
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
+
 # Estado global
 frame_lock = threading.Lock()
 current_frame = None

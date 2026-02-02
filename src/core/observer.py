@@ -371,8 +371,9 @@ class AriaDatasetObserver(BaseObserver):
                 rgb_frame = rgb_data[0].to_numpy_array()
                 rgb_ts = rgb_data[1].capture_timestamp_ns
 
-                # Convertir a BGR para OpenCV
-                self._current_frame = cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2BGR)
+                # Convertir a BGR y rotar (Aria dataset: COUNTERCLOCKWISE)
+                bgr_frame = cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2BGR)
+                self._current_frame = cv2.rotate(bgr_frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
                 # Obtener ET frame sincronizado
                 et_idx = self._find_nearest_idx(self._et_timestamps, rgb_ts)

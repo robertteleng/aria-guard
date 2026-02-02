@@ -9,7 +9,7 @@ from typing import List, Optional, Tuple
 import cv2
 import numpy as np
 
-from detector import Detection
+from .detector import Detection
 
 
 class Dashboard:
