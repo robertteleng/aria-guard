@@ -4,7 +4,8 @@ import sys
 from pathlib import Path
 
 # Ensure project root is in path
-sys.path.insert(0, str(Path(__file__).parent))
+PROJECT_ROOT = Path(__file__).parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.web.main import app, process_loop
 import threading
@@ -14,12 +15,34 @@ if __name__ == '__main__':
     # Parsear source desde argumentos
     source = sys.argv[1] if len(sys.argv) > 1 else "webcam"
 
-    # Resolve video path if relative
-    if source not in ("webcam", "aria"):
+    # Check for dataset source (VRS files)
+    if source == "dataset":
+        # Use default sample dataset
+        vrs_path = PROJECT_ROOT / "data" / "aria_sample" / "sample.vrs"
+        gaze_csv = PROJECT_ROOT / "data" / "aria_sample" / "eye_gaze" / "general_eye_gaze.csv"
+        if not vrs_path.exists():
+            print(f"[ERROR] Dataset no encontrado: {vrs_path}")
+            print("        Descarga con: curl -L -o data/aria_sample/sample.vrs ...")
+            sys.exit(1)
+        source = f"dataset:{vrs_path}:{gaze_csv}"
+    elif source.endswith(".vrs"):
+        # Direct VRS path
+        vrs_path = Path(source)
+        if not vrs_path.is_absolute():
+            data_path = PROJECT_ROOT / "data" / source
+            if data_path.exists():
+                vrs_path = data_path
+        # Look for matching gaze CSV
+        gaze_csv = vrs_path.parent / "eye_gaze" / "general_eye_gaze.csv"
+        if gaze_csv.exists():
+            source = f"dataset:{vrs_path}:{gaze_csv}"
+        else:
+            source = f"dataset:{vrs_path}:"
+    elif source not in ("webcam", "aria"):
+        # Regular video file
         video_path = Path(source)
         if not video_path.is_absolute():
-            # Check in data/ directory first
-            data_path = Path(__file__).parent / "data" / source
+            data_path = PROJECT_ROOT / "data" / source
             if data_path.exists():
                 source = str(data_path)
             elif not video_path.exists():
@@ -34,7 +57,11 @@ if __name__ == '__main__':
     print("║   Visual Assistance System           ║")
     print("╚══════════════════════════════════════╝")
     print()
-    print(f"  Fuente: {source}")
+
+    if source.startswith("dataset:"):
+        print(f"  Fuente: Aria Dataset (VRS + Eye Gaze)")
+    else:
+        print(f"  Fuente: {source}")
     print()
     print("  Selecciona el modo de detección:")
     print()

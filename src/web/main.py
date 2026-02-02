@@ -11,7 +11,7 @@ import time
 import threading
 from flask import Flask, Response, render_template
 
-from src.core import MockObserver, AriaDemoObserver, ParallelDetector, Dashboard, AudioFeedback
+from src.core import MockObserver, AriaDemoObserver, AriaDatasetObserver, ParallelDetector, Dashboard, AudioFeedback
 
 app = Flask(__name__)
 
@@ -48,7 +48,17 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
 
     print(f"[SERVER] Iniciando con fuente: {source}, modo: {mode}")
 
-    if source == "aria":
+    # Seleccionar observer según fuente
+    use_precomputed_gaze = False
+    if source.startswith("dataset:"):
+        # Parse dataset:vrs_path:gaze_csv
+        parts = source.split(":", 2)
+        vrs_path = parts[1]
+        gaze_csv = parts[2] if len(parts) > 2 and parts[2] else None
+        print(f"[SERVER] Cargando Aria Dataset: {vrs_path}")
+        observer = AriaDatasetObserver(vrs_path, gaze_csv, target_fps=10.0)
+        use_precomputed_gaze = gaze_csv is not None
+    elif source == "aria":
         print("[SERVER] Conectando con gafas Aria...")
         observer = AriaDemoObserver()
     elif source == "webcam":
@@ -73,8 +83,30 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
         # Get eye tracking frame (None for video/webcam, available with Aria)
         eye_frame = observer.get_frame("eye")
 
+        # Check for precomputed gaze from dataset
+        precomputed_gaze = None
+        if use_precomputed_gaze and hasattr(observer, 'get_precomputed_gaze'):
+            gaze_data = observer.get_precomputed_gaze()
+            if gaze_data:
+                # Convert (yaw, pitch, depth) to normalized 2D coords
+                # Aria RGB camera has ~120 degree FOV
+                import math
+                yaw, pitch, depth = gaze_data
+                fov_h = math.pi * 2 / 3  # ~120 degrees
+                fov_v = math.pi * 2 / 3
+                gaze_x = 0.5 + yaw / fov_h
+                gaze_y = 0.5 - pitch / fov_v
+                # Clamp to [0, 1]
+                gaze_x = max(0, min(1, gaze_x))
+                gaze_y = max(0, min(1, gaze_y))
+                precomputed_gaze = (gaze_x, gaze_y)
+
         # Process all in parallel (YOLO + Depth + Gaze)
         detections, depth_map, gaze_point = detector.process(rgb, eye_frame)
+
+        # Use precomputed gaze if available
+        if precomputed_gaze:
+            gaze_point = precomputed_gaze
 
         # Audio feedback for dangers
         for det in detections:
