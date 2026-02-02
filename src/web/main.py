@@ -43,6 +43,20 @@ fps = 0
 current_detections = []
 current_gaze = None
 
+# Stats globales
+stats_lock = threading.Lock()
+system_stats = {
+    "server_fps": 0,
+    "detector_fps": 0,
+    "observer_fps": 0,
+    "latency_ms": 0,
+    "vram_used_mb": 0,
+    "vram_total_mb": 0,
+    "input_queue_size": 0,
+    "output_queue_size": 0,
+    "uptime_sec": 0,
+}
+
 
 def generate_frames(feed_type="rgb"):
     """Generator para MJPEG streaming."""
@@ -64,7 +78,7 @@ def generate_frames(feed_type="rgb"):
 
 def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
     """Loop de procesamiento en background."""
-    global current_frame, current_depth, fps, current_detections, current_gaze
+    global current_frame, current_depth, fps, current_detections, current_gaze, system_stats
 
     print(f"[SERVER] Iniciando con fuente: {source}, modo: {mode}")
 
@@ -182,11 +196,46 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
             current_detections = detections
             current_gaze = gaze_point
 
-        # FPS
+        # FPS and stats
         frame_count += 1
         if frame_count % 30 == 0:
             elapsed = time.time() - start_time
             fps = frame_count / elapsed if elapsed > 0 else 0
+
+            # Calculate latency from result timestamp
+            latency = 0
+            if result and "timestamp" in result:
+                latency = (time.time() - result["timestamp"]) * 1000  # ms
+
+            # Get queue sizes from detector
+            input_q_size = 0
+            output_q_size = 0
+            if hasattr(detector, '_input_queue') and detector._input_queue:
+                try:
+                    input_q_size = detector._input_queue.qsize()
+                except:
+                    pass
+            if hasattr(detector, '_output_queue') and detector._output_queue:
+                try:
+                    output_q_size = detector._output_queue.qsize()
+                except:
+                    pass
+
+            # Get observer stats
+            obs_fps = 0
+            if hasattr(observer, 'get_stats'):
+                obs_stats = observer.get_stats()
+                obs_fps = obs_stats.get('fps', 0)
+
+            # Update global stats
+            with stats_lock:
+                system_stats["server_fps"] = fps
+                system_stats["latency_ms"] = latency
+                system_stats["input_queue_size"] = input_q_size
+                system_stats["output_queue_size"] = output_q_size
+                system_stats["observer_fps"] = obs_fps
+                system_stats["uptime_sec"] = elapsed
+
             print(f"[SERVER] Frame {frame_count}, {fps:.1f} FPS")
 
 
@@ -222,6 +271,35 @@ def status():
         'detections': dets,
         'gaze': list(current_gaze) if current_gaze else None
     })
+
+
+@app.route('/stats')
+def stats():
+    """Endpoint con estadísticas detalladas del sistema."""
+    from flask import jsonify
+
+    # Try to get VRAM usage (requires pynvml)
+    vram_used = 0
+    vram_total = 0
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['nvidia-smi', '--query-gpu=memory.used,memory.total', '--format=csv,nounits,noheader'],
+            capture_output=True, text=True, timeout=1
+        )
+        if result.returncode == 0:
+            parts = result.stdout.strip().split(',')
+            vram_used = int(parts[0].strip())
+            vram_total = int(parts[1].strip())
+    except:
+        pass
+
+    with stats_lock:
+        stats_copy = system_stats.copy()
+        stats_copy["vram_used_mb"] = vram_used
+        stats_copy["vram_total_mb"] = vram_total
+
+    return jsonify(stats_copy)
 
 
 if __name__ == '__main__':

@@ -140,6 +140,51 @@
             font-size: 11px;
         }
 
+        /* System Stats Panel */
+        .system-stats {
+            background: #16161d;
+            border-radius: 10px;
+            padding: 12px;
+            border: 1px solid #1f1f2a;
+            margin-top: 10px;
+        }
+        .system-stats-title {
+            font-size: 10px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0;
+            border-bottom: 1px solid #1a1a24;
+        }
+        .stat-row:last-child { border-bottom: none; }
+        .stat-row .label { font-size: 10px; color: #888; }
+        .stat-row .value {
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            color: #4aff4a;
+        }
+        .stat-row .value.warn { color: #ffa54a; }
+        .stat-row .value.bad { color: #ff4a4a; }
+        .vram-bar {
+            height: 4px;
+            background: #1f1f2a;
+            border-radius: 2px;
+            margin-top: 6px;
+            overflow: hidden;
+        }
+        .vram-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4aff4a, #ffa54a);
+            border-radius: 2px;
+            transition: width 0.3s;
+        }
+
         /* Bottom Gaze Bar */
         .gaze-bar {
             height: 70px;
@@ -246,6 +291,37 @@
                 <div class="legend-item"><div class="legend-dot" style="background:#ffff4a"></div>Medio</div>
                 <div class="legend-item"><div class="legend-dot" style="background:#4aff4a"></div>Lejos</div>
             </div>
+
+            <div class="system-stats">
+                <div class="system-stats-title">System Stats</div>
+                <div class="stat-row">
+                    <span class="label">Server FPS</span>
+                    <span class="value" id="server-fps">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="label">Observer FPS</span>
+                    <span class="value" id="observer-fps">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="label">Latency</span>
+                    <span class="value" id="latency">-- ms</span>
+                </div>
+                <div class="stat-row">
+                    <span class="label">Queue In/Out</span>
+                    <span class="value" id="queues">-/-</span>
+                </div>
+                <div class="stat-row">
+                    <span class="label">VRAM</span>
+                    <span class="value" id="vram">-- / -- MB</span>
+                </div>
+                <div class="vram-bar">
+                    <div class="vram-bar-fill" id="vram-bar" style="width: 0%"></div>
+                </div>
+                <div class="stat-row" style="margin-top:6px">
+                    <span class="label">Uptime</span>
+                    <span class="value" id="uptime">--</span>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -318,6 +394,39 @@
                 console.error('Status fetch error:', e);
             }
         }, 200);
+
+        // Fetch system stats every second
+        setInterval(async () => {
+            try {
+                const res = await fetch('/stats');
+                const s = await res.json();
+
+                document.getElementById('server-fps').textContent = s.server_fps.toFixed(1);
+                document.getElementById('observer-fps').textContent = s.observer_fps.toFixed(1);
+
+                const latencyEl = document.getElementById('latency');
+                latencyEl.textContent = s.latency_ms.toFixed(0) + ' ms';
+                latencyEl.className = 'value' + (s.latency_ms > 100 ? ' warn' : '') + (s.latency_ms > 200 ? ' bad' : '');
+
+                document.getElementById('queues').textContent = s.input_queue_size + '/' + s.output_queue_size;
+
+                const vramUsed = s.vram_used_mb;
+                const vramTotal = s.vram_total_mb;
+                document.getElementById('vram').textContent = vramUsed + ' / ' + vramTotal + ' MB';
+
+                const vramPct = vramTotal > 0 ? (vramUsed / vramTotal * 100) : 0;
+                document.getElementById('vram-bar').style.width = vramPct + '%';
+
+                // Format uptime
+                const uptime = s.uptime_sec;
+                const mins = Math.floor(uptime / 60);
+                const secs = Math.floor(uptime % 60);
+                document.getElementById('uptime').textContent = mins + 'm ' + secs + 's';
+
+            } catch (e) {
+                console.error('Stats fetch error:', e);
+            }
+        }, 1000);
     </script>
 </body>
 </html>
