@@ -137,7 +137,7 @@ def create_gradio_app(process_callback, scan_callback=None):
     Returns:
         Gradio Blocks app
     """
-    with gr.Blocks(title="ARIA Demo", theme=gr.themes.Dark()) as app:
+    with gr.Blocks(title="ARIA Demo") as app:
         gr.Markdown("# ARIA Demo")
         gr.Markdown("Detección de objetos + Profundidad + Eye Tracking")
 
