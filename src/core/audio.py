@@ -2,13 +2,12 @@
 Audio feedback system for ARIA demo.
 
 Spatial beeps + TTS based on object position, distance, and gaze.
-Supports NVIDIA NeMo TTS (FastPitch + HiFiGAN) for high-quality voice.
+NeMo TTS runs in a separate process to avoid CUDA conflicts with detector.
 """
 
 import threading
 import time
-from typing import Optional, List, Dict
-from pathlib import Path
+from typing import Optional, Dict
 
 import numpy as np
 
@@ -18,26 +17,13 @@ except ImportError:
     sd = None
     print("[AUDIO WARN] sounddevice not installed. Beeps disabled.")
 
-# Try NeMo TTS first (better quality), fallback to pyttsx3
-_nemo_available = False
+# Check for pyttsx3 fallback
 _pyttsx3_available = False
-
 try:
-    from nemo.collections.tts.models import FastPitchModel, HifiGanModel
-    import torch
-    _nemo_available = True
+    import pyttsx3
+    _pyttsx3_available = True
 except ImportError:
     pass
-
-if not _nemo_available:
-    try:
-        import pyttsx3
-        _pyttsx3_available = True
-    except ImportError:
-        pass
-
-if not _nemo_available and not _pyttsx3_available:
-    print("[AUDIO WARN] No TTS engine available. Install nemo_toolkit[tts] or pyttsx3.")
 
 
 class AudioFeedback:
@@ -65,32 +51,26 @@ class AudioFeedback:
         self.tts_engine = None
         self.tts_type = None
         self.tts_speaking = False
-        self._nemo_spec_gen = None
-        self._nemo_vocoder = None
-        self._tts_cache: Dict[str, np.ndarray] = {}  # Cache for common phrases
-        self._tts_sample_rate = 22050  # NeMo default
+        self._tts_process = None
 
-        # Try NeMo first (better quality)
-        if use_nemo and _nemo_available:
+        # Try NeMo in separate process (avoids CUDA conflicts)
+        if use_nemo:
             try:
-                print("[AUDIO] Loading NeMo TTS models...")
-                self._nemo_spec_gen = FastPitchModel.from_pretrained("nvidia/tts_en_fastpitch")
-                self._nemo_vocoder = HifiGanModel.from_pretrained("nvidia/tts_hifigan")
-                # Move to GPU if available
-                if torch.cuda.is_available():
-                    self._nemo_spec_gen = self._nemo_spec_gen.cuda()
-                    self._nemo_vocoder = self._nemo_vocoder.cuda()
-                self._nemo_spec_gen.eval()
-                self._nemo_vocoder.eval()
-                self.tts_type = "nemo"
-                print("[AUDIO] NeMo TTS initialized (FastPitch + HiFiGAN)")
+                from src.core.tts_process import TTSProcess
+                self._tts_process = TTSProcess()
+                self._tts_process.start()
+                if self._tts_process.ready:
+                    self.tts_type = "nemo"
+                    print("[AUDIO] NeMo TTS ready (separate process)")
+                else:
+                    self._tts_process = None
             except Exception as e:
-                print(f"[AUDIO WARN] NeMo TTS failed: {e}")
+                print(f"[AUDIO WARN] NeMo process failed: {e}")
+                self._tts_process = None
 
         # Fallback to pyttsx3
         if self.tts_type is None and _pyttsx3_available:
             try:
-                import pyttsx3
                 self.tts_engine = pyttsx3.init()
                 self.tts_engine.setProperty('rate', 150)
                 self.tts_type = "pyttsx3"
@@ -162,72 +142,45 @@ class AudioFeedback:
 
                 if is_unnoticed_danger:
                     time.sleep(0.08)
-                    sd.play(audio_data, samplerate=self.sample_rate, blocking=False)
+                    sd.play(audio_data, samplerate=self.beep_sample_rate, blocking=False)
 
             except Exception as e:
                 print(f"[AUDIO ERROR] Beep: {e}")
 
         threading.Thread(target=_play, daemon=True).start()
 
-    def _generate_nemo_audio(self, text: str) -> np.ndarray:
-        """Generate audio using NeMo FastPitch + HiFiGAN."""
-        import torch
-        with torch.no_grad():
-            parsed = self._nemo_spec_gen.parse(text)
-            spectrogram = self._nemo_spec_gen.generate_spectrogram(tokens=parsed)
-            audio = self._nemo_vocoder.convert_spectrogram_to_audio(spec=spectrogram)
-        return audio.squeeze().cpu().numpy()
-
     def speak(self, message: str, force: bool = False) -> bool:
-        """Speak a message using TTS (NeMo or pyttsx3)."""
+        """Speak a message using TTS (NeMo process or pyttsx3)."""
         if self.tts_type is None:
             return False
 
         now = time.time()
         if not force and (now - self.last_tts_time) < self.tts_cooldown:
             return False
-        if self.tts_speaking:
-            return False
 
         self.last_tts_time = now
 
-        def _speak_nemo():
-            try:
-                self.tts_speaking = True
-                print(f"[AUDIO TTS] {message}")
+        if self.tts_type == "nemo" and self._tts_process:
+            # Non-blocking: send to separate process
+            self._tts_process.speak(message)
+            return True
 
-                # Check cache first
-                if message in self._tts_cache:
-                    audio = self._tts_cache[message]
-                else:
-                    audio = self._generate_nemo_audio(message)
-                    # Cache short common phrases
-                    if len(message) < 50:
-                        self._tts_cache[message] = audio
+        elif self.tts_type == "pyttsx3":
+            def _speak_pyttsx3():
+                try:
+                    self.tts_speaking = True
+                    print(f"[AUDIO TTS] {message}")
+                    self.tts_engine.say(message)
+                    self.tts_engine.runAndWait()
+                except Exception as e:
+                    print(f"[AUDIO ERROR] pyttsx3 TTS: {e}")
+                finally:
+                    self.tts_speaking = False
 
-                # Play audio
-                sd.play(audio, samplerate=self._tts_sample_rate, blocking=True)
-            except Exception as e:
-                print(f"[AUDIO ERROR] NeMo TTS: {e}")
-            finally:
-                self.tts_speaking = False
-
-        def _speak_pyttsx3():
-            try:
-                self.tts_speaking = True
-                print(f"[AUDIO TTS] {message}")
-                self.tts_engine.say(message)
-                self.tts_engine.runAndWait()
-            except Exception as e:
-                print(f"[AUDIO ERROR] pyttsx3 TTS: {e}")
-            finally:
-                self.tts_speaking = False
-
-        if self.tts_type == "nemo":
-            threading.Thread(target=_speak_nemo, daemon=True).start()
-        else:
             threading.Thread(target=_speak_pyttsx3, daemon=True).start()
-        return True
+            return True
+
+        return False
 
     def alert_danger(
         self,
@@ -248,32 +201,9 @@ class AudioFeedback:
 
         if is_critical and not user_looking:
             zone_word = {"left": "left", "right": "right", "center": "ahead"}.get(zone, "")
-            self.speak(f"Warning, {object_name} {zone_word}", force=True)
+            self.speak(f"Warning, {object_name} {zone_word}")
 
-    def announce_scene(self, detections: List) -> None:
-        """Announce summary of detected objects."""
-        if not detections:
-            self.speak("No objects detected", force=True)
-            return
-
-        zones = {"center": [], "left": [], "right": []}
-        for det in detections[:5]:
-            zones[det.zone].append(det.name)
-
-        parts = ["Scanning."]
-        zone_names = {"center": "Ahead", "left": "Left", "right": "Right"}
-        for zone in ["center", "left", "right"]:
-            if zones[zone]:
-                objects = ", ".join(zones[zone][:3])
-                parts.append(f"{zone_names[zone]}: {objects}.")
-
-        self.speak(" ".join(parts), force=True)
-
-    def close(self) -> None:
-        """Cleanup."""
-        if self.tts_engine:
-            try:
-                self.tts_engine.stop()
-            except:
-                pass
-        print("[AUDIO] Closed")
+    def shutdown(self):
+        """Clean shutdown of TTS process."""
+        if self._tts_process:
+            self._tts_process.stop()

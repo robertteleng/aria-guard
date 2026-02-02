@@ -106,31 +106,14 @@ class ParallelDetector:
             engine_path = MODELS_DIR / f"{model_name}.engine"
             pt_path = MODELS_DIR / f"{model_name}.pt"
 
-            # Intentar cargar TensorRT engine
-            if self.device == "cuda" and engine_path.exists():
-                self.yolo = YOLO(str(engine_path))
-                self._yolo_tensorrt = True
-                print(f"[DETECTOR] {model_name} cargado (TensorRT)")
-            elif self.device == "cuda":
-                # Cargar PyTorch y exportar a TensorRT si es posible
-                self.yolo = YOLO(str(pt_path))
+            # TensorRT disabled - causes memory corruption with NeMo TTS
+            if self.device == "cuda":
+                self.yolo = YOLO(str(pt_path), task="detect")
+                self.yolo.to("cuda")
                 self._yolo_tensorrt = False
-                try:
-                    self.yolo.export(format="engine", half=True)
-                    # Recargar con TensorRT
-                    if engine_path.exists():
-                        self.yolo = YOLO(str(engine_path))
-                        self._yolo_tensorrt = True
-                        print(f"[DETECTOR] {model_name} exportado y cargado (TensorRT)")
-                    else:
-                        self.yolo.to("cuda")
-                        print(f"[DETECTOR] {model_name} cargado (CUDA PyTorch)")
-                except Exception as e:
-                    print(f"[DETECTOR] TensorRT no disponible: {e}")
-                    self.yolo.to("cuda")
-                    print(f"[DETECTOR] {model_name} cargado (CUDA PyTorch)")
+                print(f"[DETECTOR] {model_name} cargado (CUDA PyTorch)")
             else:
-                self.yolo = YOLO(str(pt_path))
+                self.yolo = YOLO(str(pt_path), task="detect")
                 self._yolo_tensorrt = False
                 print(f"[DETECTOR] {model_name} cargado (CPU)")
         except Exception as e:
@@ -150,31 +133,9 @@ class ParallelDetector:
 
             if self.device == "cuda":
                 self.depth_model = self.depth_model.cuda().half().eval()
-
-                # Intentar TensorRT via torch_tensorrt
-                try:
-                    import torch_tensorrt
-                    # Compilar con TensorRT (input shape fija para depth)
-                    self.depth_model = torch_tensorrt.compile(
-                        self.depth_model,
-                        inputs=[torch_tensorrt.Input((1, 3, 384, 384), dtype=torch.half)],
-                        enabled_precisions={torch.half}
-                    )
-                    self._depth_tensorrt = True
-                    print("[DETECTOR] Depth Anything V2 (TensorRT)")
-                except ImportError:
-                    # Fallback: torch.compile
-                    try:
-                        self.depth_model = torch.compile(self.depth_model, mode="reduce-overhead")
-                        print("[DETECTOR] Depth Anything V2 (torch.compile)")
-                    except Exception:
-                        print("[DETECTOR] Depth Anything V2 (FP16)")
-                except Exception as e:
-                    print(f"[DETECTOR] TensorRT falló: {e}, usando torch.compile")
-                    try:
-                        self.depth_model = torch.compile(self.depth_model, mode="reduce-overhead")
-                    except Exception:
-                        pass
+                # NOTE: TensorRT and torch.compile disabled - cause mempool conflicts
+                # with CUDA streams and NeMo TTS. FP16 is fast enough.
+                print("[DETECTOR] Depth Anything V2 (FP16)")
             else:
                 print("[DETECTOR] Depth Anything V2 (CPU)")
         except Exception as e:
@@ -185,7 +146,15 @@ class ParallelDetector:
 
     def _load_gaze(self):
         """Carga Meta Eye Gaze model (projectaria_eyetracking)."""
+        # PyTorch 2.6+ changed default to weights_only=True, which breaks legacy models
+        # using EasyDict. Monkey-patch torch.load before importing the library.
+        _original_torch_load = torch.load
+        def _patched_load(*args, **kwargs):
+            kwargs.setdefault('weights_only', False)
+            return _original_torch_load(*args, **kwargs)
+
         try:
+            torch.load = _patched_load
             from projectaria_eyetracking.inference.infer import EyeGazeInference
             import os
 
@@ -226,6 +195,9 @@ class ParallelDetector:
             print("[DETECTOR WARN] projectaria_eyetracking not installed")
         except Exception as e:
             print(f"[DETECTOR WARN] Could not load gaze model: {e}")
+        finally:
+            # Restore original torch.load
+            torch.load = _original_torch_load
 
     def process(
         self,

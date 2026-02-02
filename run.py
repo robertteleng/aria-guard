@@ -1,7 +1,18 @@
 #!/usr/bin/env python3
 """Entry point for ARIA Demo."""
+import os
 import sys
+import tempfile
 from pathlib import Path
+
+# Force TMPDIR to /home to avoid disk space issues on /
+# NeMo uses tempfile module directly, so we must patch tempfile.tempdir too
+_tmp_dir = Path.home() / "tmp"
+_tmp_dir.mkdir(exist_ok=True)
+os.environ["TMPDIR"] = str(_tmp_dir)
+os.environ["TEMP"] = str(_tmp_dir)
+os.environ["TMP"] = str(_tmp_dir)
+tempfile.tempdir = str(_tmp_dir)
 
 # Ensure project root is in path
 PROJECT_ROOT = Path(__file__).parent

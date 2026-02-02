@@ -4,12 +4,15 @@ Demo de asistencia visual para gafas Meta Aria: detección de objetos en tiempo 
 
 ## Características
 
-- **YOLO26s** - Detección de objetos con GPU
-- **Depth Anything V2** - Estimación de profundidad monocular (FP16)
+- **YOLO26s** - Detección de objetos con GPU (TensorRT/PyTorch)
+- **Depth Anything V2** - Estimación de profundidad monocular (FP16/torch.compile)
 - **Meta Eye Gaze** - Modelo oficial de Meta para estimación de mirada (`projectaria_eyetracking`)
-- **Audio Espacial** - Beeps direccionales (izq/centro/der) + TTS
-- **CUDA Streams** - YOLO y Depth ejecutándose en paralelo
+- **NeMo TTS** - Síntesis de voz de alta calidad (FastPitch + HiFiGAN) en GPU
+- **Audio Espacial** - Beeps direccionales (izq/centro/der) según posición del objeto
+- **CUDA Streams** - YOLO, Depth y Gaze ejecutándose en paralelo (3 streams)
 - **Gaze-Aware Alerts** - Alertas más intensas para objetos no vistos por el usuario
+- **AriaDatasetObserver** - Reproducción de grabaciones VRS con eye gaze sincronizado
+- **Modos de detección** - Indoor, Outdoor o All (80 clases COCO)
 
 ## Arquitectura
 
@@ -17,45 +20,54 @@ Demo de asistencia visual para gafas Meta Aria: detección de objetos en tiempo 
 graph TB
     subgraph Input
         ARIA[Meta Aria Glasses]
+        VRS[VRS Dataset]
         WEB[Webcam]
-        VID[Video File]
     end
 
     subgraph Observer
         OBS[observer.py<br/>Frame Capture]
+        DOBS[AriaDatasetObserver<br/>VRS + Eye Gaze CSV]
     end
 
-    subgraph Detector
+    subgraph Detector["Detector (3 CUDA Streams)"]
         DET[detector.py]
-        subgraph CUDA Streams
-            YOLO[YOLO26s<br/>Object Detection]
-            DEPTH[Depth Anything V2<br/>Depth Estimation]
+        subgraph Streams
+            S1[Stream 1: YOLO26s]
+            S2[Stream 2: Depth Anything V2]
+            S3[Stream 3: Meta Eye Gaze]
         end
-        GAZE[Meta Eye Gaze<br/>Gaze Estimation]
+    end
+
+    subgraph Audio["Audio (Thread)"]
+        AUD[audio.py]
+        NEMO[NeMo TTS<br/>FastPitch + HiFiGAN]
+        BEEP[Spatial Beeps]
     end
 
     subgraph Output
         DASH[dashboard.py<br/>Visual Rendering]
-        AUD[audio.py<br/>Spatial Audio + TTS]
         SRV[main.py<br/>MJPEG Streaming]
     end
 
     ARIA --> OBS
     WEB --> OBS
-    VID --> OBS
+    VRS --> DOBS
 
-    OBS -->|RGB Frame| DET
-    OBS -->|Eye Frame| GAZE
+    OBS -->|RGB + Eye Frame| DET
+    DOBS -->|RGB + Eye Frame + Gaze| DET
 
-    DET --> YOLO
-    DET --> DEPTH
+    DET --> S1
+    DET --> S2
+    DET --> S3
 
-    YOLO -->|Detections| DASH
-    DEPTH -->|Depth Map| DASH
-    GAZE -->|Gaze Point| DASH
+    S1 -->|Detections| DASH
+    S2 -->|Depth Map| DASH
+    S3 -->|Gaze Point| DASH
 
-    YOLO -->|Danger Objects| AUD
-    GAZE -->|User Looking?| AUD
+    S1 -->|Danger Objects| AUD
+    S3 -->|User Looking?| AUD
+    AUD --> NEMO
+    AUD --> BEEP
 ```
 
 ## Pipeline de Procesamiento
@@ -97,6 +109,18 @@ sequenceDiagram
 
 ## Sistema de Audio
 
+### NeMo TTS (NVIDIA)
+
+Síntesis de voz de alta calidad usando:
+- **FastPitch** - Generación de espectrogramas mel
+- **HiFiGAN** - Vocoder neuronal
+
+Corre en un **thread separado** con GPU (CUDA default stream). Cache automático de frases comunes.
+
+Alertas: `"Warning, [objeto] [dirección]"` cuando hay peligro cercano que el usuario NO está mirando.
+
+### Beeps Espaciales
+
 ```mermaid
 graph LR
     subgraph Distance
@@ -127,14 +151,21 @@ graph LR
 
 ```
 aria-demo/
-├── main.py          # Servidor MJPEG + UI web
-├── observer.py      # Captura de frames (Aria/Webcam/Video)
-├── detector.py      # YOLO + Depth + Gaze (CUDA streams)
-├── dashboard.py     # Renderizado visual con OpenCV
-├── audio.py         # Feedback auditivo (beeps + TTS)
-├── benchmark.py     # Benchmarks de rendimiento
-├── requirements.txt # Dependencias
-└── README.md
+├── run.py                 # Entry point con selector de modo
+├── src/
+│   ├── core/
+│   │   ├── observer.py    # Captura: Aria/Webcam/AriaDatasetObserver
+│   │   ├── detector.py    # YOLO + Depth + Gaze (CUDA streams)
+│   │   ├── dashboard.py   # Renderizado visual con OpenCV
+│   │   └── audio.py       # NeMo TTS + beeps espaciales (CUDA stream)
+│   └── web/
+│       └── main.py        # Flask server + MJPEG streaming
+├── data/
+│   └── aria_sample/       # VRS recordings + eye_gaze CSV
+├── models/                # YOLO weights (.pt, .engine)
+├── docs/
+│   └── README.md
+└── requirements.txt
 ```
 
 ## Instalación
@@ -158,9 +189,18 @@ sudo apt-get install -y libportaudio2 portaudio19-dev espeak-ng
 ## Uso
 
 ```bash
-python main.py                    # Usar webcam (default)
-python main.py test_video.mp4     # Usar archivo de video
+cd ~/Projects/aria/aria-demo
+source .venv/bin/activate
+
+python run.py webcam      # Webcam en tiempo real
+python run.py dataset     # Reproducir VRS sample (data/aria_sample/)
+python run.py video.mp4   # Archivo de video
 ```
+
+Al arrancar, selecciona el modo de detección:
+- **[1] Indoor** - persona, silla, sofá, mesa, tv, puerta...
+- **[2] Outdoor** - persona, coche, bici, moto, bus, semáforo...
+- **[3] All** - todas las clases (80 objetos COCO)
 
 Abre http://localhost:5000 en el navegador.
 
@@ -188,11 +228,15 @@ Probado en RTX 3090:
 
 ### Optimizaciones GPU
 
-El detector usa automáticamente:
+El sistema usa automáticamente:
 - **TensorRT** para YOLO (exporta .engine si no existe)
 - **TensorRT/torch.compile** para Depth
 - **OpenCV CUDA** para resize/cvtColor (si está disponible)
-- **CUDA Streams** para ejecución paralela
+- **3 CUDA Streams** para ejecución paralela:
+  - Stream 1: YOLO detección
+  - Stream 2: Depth estimation
+  - Stream 3: Eye gaze inference
+- **NeMo TTS** en thread separado (CUDA default stream)
 - **FP16** para todos los modelos
 
 ## Dependencias
@@ -205,20 +249,33 @@ ultralytics>=8.0.0
 transformers>=4.35.0
 flask>=3.0.0
 sounddevice>=0.4.6
-pyttsx3>=2.90
 Pillow>=10.0.0
+nemo_toolkit[tts]>=2.0.0    # NeMo TTS (FastPitch + HiFiGAN)
 ```
 
-### Opcionales (más rendimiento)
+### Opcionales
 
 ```bash
-pip install tensorrt torch-tensorrt  # TensorRT
+# TensorRT (más rendimiento)
+pip install tensorrt torch-tensorrt
+
+# Meta Eye Gaze (para Aria glasses)
+pip install projectaria-tools
+pip install git+https://github.com/facebookresearch/projectaria_eyetracking.git
+
+# Fallback TTS (si no hay GPU para NeMo)
+pip install pyttsx3
+
 # OpenCV CUDA requiere compilar desde fuente
 ```
 
-## Roadmap: VLM + Control por Voz
+## Roadmap
 
-Próxima integración: FastVLM para descripciones de escena + comandos de voz.
+### Próximo: Conexión Meta Aria Glasses
+Integrar streaming en tiempo real desde las gafas Meta Aria físicas.
+
+### Futuro: FastVLM + Control por Voz
+FastVLM para descripciones de escena + comandos de voz (después de conectar Aria).
 
 ### Arquitectura Completa (Planned)
 
@@ -288,12 +345,14 @@ sequenceDiagram
 ### Modelos y VRAM
 
 ```mermaid
-pie title VRAM Usage (~2.7GB total)
+pie title VRAM Usage Actual (~2.0GB)
     "YOLO26s" : 0.5
     "Depth Anything V2" : 0.8
     "Meta Eye Gaze" : 0.2
-    "FastVLM-0.5B" : 1.2
+    "NeMo TTS" : 0.5
 ```
+
+Con FastVLM (futuro): ~3.2GB total
 
 ### Comandos de Voz (Planned)
 
@@ -308,6 +367,7 @@ pie title VRAM Usage (~2.7GB total)
 
 - [Ultralytics YOLO](https://github.com/ultralytics/ultralytics)
 - [Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2)
+- [NVIDIA NeMo](https://github.com/NVIDIA/NeMo) - FastPitch + HiFiGAN TTS
 - [Meta Project Aria](https://www.projectaria.com/)
 - [projectaria_eyetracking](https://github.com/facebookresearch/projectaria_eyetracking)
 - [FastVLM](https://github.com/apple/ml-fastvlm) (planned)
