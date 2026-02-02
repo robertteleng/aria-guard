@@ -61,6 +61,13 @@ class MockObserver(BaseObserver):
         if source == "webcam":
             self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
             self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            self._target_fps = 30
+        else:
+            # Respetar FPS original del video
+            self._target_fps = self._cap.get(cv2.CAP_PROP_FPS) or 30
+            print(f"[OBSERVER] Video FPS: {self._target_fps:.1f}")
+
+        self._frame_interval = 1.0 / self._target_fps
 
         # Hilo de captura
         self._thread = threading.Thread(target=self._capture_loop, daemon=True)
@@ -69,8 +76,17 @@ class MockObserver(BaseObserver):
         print(f"[OBSERVER] MockObserver iniciado ({source})")
 
     def _capture_loop(self):
-        """Hilo de captura continua."""
+        """Hilo de captura continua con timing controlado."""
+        last_frame_time = time.time()
+
         while not self._stop:
+            # Controlar timing para respetar FPS del video
+            now = time.time()
+            elapsed = now - last_frame_time
+            if elapsed < self._frame_interval:
+                time.sleep(self._frame_interval - elapsed)
+            last_frame_time = time.time()
+
             ret, frame = self._cap.read()
             if ret:
                 with self._lock:
@@ -80,7 +96,6 @@ class MockObserver(BaseObserver):
                 # Si es video, reiniciar
                 if self.source == "video":
                     self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                time.sleep(0.01)
 
     def get_frame(self, camera: str = "rgb") -> Optional[np.ndarray]:
         """
