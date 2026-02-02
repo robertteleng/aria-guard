@@ -69,16 +69,30 @@ class Dashboard:
     def _draw_detections(
         self, frame: np.ndarray, detections: List[Detection]
     ) -> np.ndarray:
-        """Dibuja bounding boxes con colores por distancia."""
+        """Dibuja bounding boxes con colores por distancia.
+
+        Objects the user is looking at (is_gazed=True) get a filled
+        semi-transparent overlay to highlight them.
+        """
         for det in detections:
             x, y, w, h = det.bbox
             color = self._colors.get(det.distance, (128, 128, 128))
 
-            # Bounding box
-            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+            # If user is looking at this object, fill with semi-transparent color
+            if getattr(det, 'is_gazed', False):
+                overlay = frame.copy()
+                cv2.rectangle(overlay, (x, y), (x + w, y + h), color, -1)
+                cv2.addWeighted(overlay, 0.3, frame, 0.7, 0, frame)
+                # Thicker border for gazed objects
+                cv2.rectangle(frame, (x, y), (x + w, y + h), color, 3)
+            else:
+                # Normal bounding box
+                cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
 
             # Label con fondo
             label = f"{det.name} ({det.distance})"
+            if getattr(det, 'is_gazed', False):
+                label = f"[LOOKING] {label}"
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
             cv2.rectangle(frame, (x, y - th - 8), (x + tw + 4, y), color, -1)
             cv2.putText(frame, label, (x + 2, y - 4),
