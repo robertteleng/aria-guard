@@ -156,32 +156,16 @@ class ParallelDetector:
         try:
             torch.load = _patched_load
             from projectaria_eyetracking.inference.infer import EyeGazeInference
+            import projectaria_eyetracking
             import os
 
-            # Path to pretrained weights
-            pkg_base = os.path.dirname(__file__)
-            venv_path = os.path.join(pkg_base, ".venv/lib/python3.12/site-packages")
-            weights_dir = "projectaria_eyetracking/inference/model/pretrained_weights/social_eyes_uncertainty_v1"
+            # Find weights relative to the installed package
+            pkg_dir = os.path.dirname(projectaria_eyetracking.__file__)
+            weights_dir = "inference/model/pretrained_weights/social_eyes_uncertainty_v1"
+            weights_path = os.path.join(pkg_dir, weights_dir)
 
-            # Try multiple paths
-            possible_paths = [
-                os.path.join(venv_path, weights_dir),
-                os.path.expanduser(f"~/.cache/projectaria/{weights_dir}"),
-            ]
-
-            # Also check site-packages directly
-            import site
-            for sp in site.getsitepackages():
-                possible_paths.append(os.path.join(sp, weights_dir))
-
-            weights_path = None
-            for path in possible_paths:
-                if os.path.exists(os.path.join(path, "weights.pth")):
-                    weights_path = path
-                    break
-
-            if weights_path is None:
-                print("[DETECTOR WARN] Meta gaze weights not found, using fallback")
+            if not os.path.exists(os.path.join(weights_path, "weights.pth")):
+                print(f"[DETECTOR WARN] Meta gaze weights not found at {weights_path}")
                 return
 
             self.gaze_model = EyeGazeInference(
@@ -195,6 +179,8 @@ class ParallelDetector:
             print("[DETECTOR WARN] projectaria_eyetracking not installed")
         except Exception as e:
             print(f"[DETECTOR WARN] Could not load gaze model: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             # Restore original torch.load
             torch.load = _original_torch_load

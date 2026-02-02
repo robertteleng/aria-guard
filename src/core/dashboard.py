@@ -64,27 +64,9 @@ class Dashboard:
         y_radar = rgb_out.shape[0] - self._radar_size - 10
         rgb_out = self._overlay_image(rgb_out, radar, x_radar, y_radar)
 
-        # 5. Eye tracking con anotaciones
+        # 5. Eye tracking (raw frame, gaze is shown on RGB)
         if eye_frame is not None:
             eye_out = eye_frame.copy()
-            # Draw gaze indicator on eye frame
-            if gaze_point is not None:
-                h_eye, w_eye = eye_out.shape[:2]
-                # Gaze point mapped to each eye region (left half, right half)
-                gx = gaze_point[0]  # 0-1 horizontal
-                gy = gaze_point[1]  # 0-1 vertical
-                # Left eye (x in range 0-0.5 of frame)
-                left_x = int(gx * w_eye * 0.4 + w_eye * 0.05)
-                left_y = int(gy * h_eye * 0.6 + h_eye * 0.2)
-                # Right eye (x in range 0.5-1 of frame)
-                right_x = int(gx * w_eye * 0.4 + w_eye * 0.55)
-                right_y = left_y
-                # Draw pupil circles (magenta)
-                cv2.circle(eye_out, (left_x, left_y), 8, (255, 0, 255), 2)
-                cv2.circle(eye_out, (right_x, right_y), 8, (255, 0, 255), 2)
-                # Draw center dots
-                cv2.circle(eye_out, (left_x, left_y), 2, (255, 0, 255), -1)
-                cv2.circle(eye_out, (right_x, right_y), 2, (255, 0, 255), -1)
         else:
             eye_out = np.full((120, 640, 3), 30, dtype=np.uint8)
             cv2.putText(eye_out, "No Eye Tracking", (220, 65),
