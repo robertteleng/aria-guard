@@ -1,11 +1,12 @@
 """
-Detector: YOLO + Depth con CUDA streams.
+Detector: YOLO + Depth + Eye Gaze con CUDA streams.
 
-KISS: YOLO detecta objetos, Depth calcula distancia.
+YOLO detecta objetos, Depth calcula distancia, Meta model estima gaze.
 """
 
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
+import math
 
 import cv2
 import numpy as np
@@ -21,6 +22,7 @@ class Detection:
     zone: str           # "left", "center", "right"
     distance: str       # "very_close", "close", "medium", "far"
     depth_value: float  # 0.0 - 1.0 (normalizado)
+    is_gazed: bool = False  # True if user is looking at this object
 
 
 class ParallelDetector:
@@ -61,6 +63,10 @@ class ParallelDetector:
         self.depth_processor = None
         if enable_depth:
             self._load_depth()
+
+        # Cargar Eye Gaze model (Meta)
+        self.gaze_model = None
+        self._load_gaze()
 
         print(f"[DETECTOR] Inicializado (device={device}, depth={enable_depth}, depth_interval={depth_interval})")
 
@@ -103,6 +109,50 @@ class ParallelDetector:
             print("[DETECTOR] Continuando sin profundidad")
             self.depth_model = None
             self.enable_depth = False
+
+    def _load_gaze(self):
+        """Carga Meta Eye Gaze model (projectaria_eyetracking)."""
+        try:
+            from projectaria_eyetracking.inference.infer import EyeGazeInference
+            import os
+
+            # Path to pretrained weights
+            pkg_base = os.path.dirname(__file__)
+            venv_path = os.path.join(pkg_base, ".venv/lib/python3.12/site-packages")
+            weights_dir = "projectaria_eyetracking/inference/model/pretrained_weights/social_eyes_uncertainty_v1"
+
+            # Try multiple paths
+            possible_paths = [
+                os.path.join(venv_path, weights_dir),
+                os.path.expanduser(f"~/.cache/projectaria/{weights_dir}"),
+            ]
+
+            # Also check site-packages directly
+            import site
+            for sp in site.getsitepackages():
+                possible_paths.append(os.path.join(sp, weights_dir))
+
+            weights_path = None
+            for path in possible_paths:
+                if os.path.exists(os.path.join(path, "weights.pth")):
+                    weights_path = path
+                    break
+
+            if weights_path is None:
+                print("[DETECTOR WARN] Meta gaze weights not found, using fallback")
+                return
+
+            self.gaze_model = EyeGazeInference(
+                model_checkpoint_path=os.path.join(weights_path, "weights.pth"),
+                model_config_path=os.path.join(weights_path, "config.yaml"),
+                device=self.device
+            )
+            print(f"[DETECTOR] Meta Eye Gaze model loaded ({self.device})")
+
+        except ImportError:
+            print("[DETECTOR WARN] projectaria_eyetracking not installed")
+        except Exception as e:
+            print(f"[DETECTOR WARN] Could not load gaze model: {e}")
 
     def process(self, frame: np.ndarray) -> Tuple[List[Detection], Optional[np.ndarray]]:
         """
@@ -299,6 +349,9 @@ class ParallelDetector:
         """
         Estima punto de mirada desde imagen de eye tracking.
 
+        Uses Meta's projectaria_eyetracking model if available,
+        falls back to simple pupil detection otherwise.
+
         Args:
             eye_frame: Imagen de ambos ojos (240x640)
 
@@ -308,46 +361,109 @@ class ParallelDetector:
         if eye_frame is None:
             return None
 
+        # Try Meta model first
+        if self.gaze_model is not None:
+            return self._estimate_gaze_meta(eye_frame)
+
+        # Fallback to simple method
+        return self._estimate_gaze_simple(eye_frame)
+
+    def _estimate_gaze_meta(self, eye_frame: np.ndarray) -> Optional[Tuple[float, float]]:
+        """Use Meta's projectaria_eyetracking model."""
         try:
-            # Convertir a grayscale si es necesario
+            # Convert to tensor
             if len(eye_frame.shape) == 3:
                 gray = cv2.cvtColor(eye_frame, cv2.COLOR_BGR2GRAY)
             else:
                 gray = eye_frame
 
-            # Dividir en ojo izquierdo y derecho (imagen tiene ambos)
+            img_tensor = torch.tensor(gray, device=self.device)
+
+            # Run inference
+            preds, lower, upper = self.gaze_model.predict(img_tensor)
+            yaw = float(preds[0][0])  # radians
+            pitch = float(preds[0][1])  # radians
+
+            # Check for valid output
+            if math.isnan(yaw) or math.isnan(pitch):
+                return None
+
+            # Convert yaw/pitch to normalized screen coordinates
+            # Aria CPF: yaw is horizontal (-pi/4 to pi/4), pitch is vertical
+            # Map to 0-1 range
+            gaze_x = 0.5 + (yaw / (math.pi / 4)) * 0.5  # Clamp to 0-1
+            gaze_y = 0.5 + (pitch / (math.pi / 4)) * 0.5
+
+            gaze_x = max(0.0, min(1.0, gaze_x))
+            gaze_y = max(0.0, min(1.0, gaze_y))
+
+            return (gaze_x, gaze_y)
+
+        except Exception as e:
+            print(f"[DETECTOR ERROR] Meta gaze: {e}")
+            return None
+
+    def _estimate_gaze_simple(self, eye_frame: np.ndarray) -> Optional[Tuple[float, float]]:
+        """Simple pupil detection fallback."""
+        try:
+            if len(eye_frame.shape) == 3:
+                gray = cv2.cvtColor(eye_frame, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = eye_frame
+
             h, w = gray.shape
             left_eye = gray[:, :w//2]
             right_eye = gray[:, w//2:]
 
-            # Detectar pupila en cada ojo (zona más oscura)
             left_pos = self._find_pupil(left_eye)
             right_pos = self._find_pupil(right_eye)
 
             if left_pos and right_pos:
-                # Promediar posiciones
-                gaze_x = (left_pos[0] + right_pos[0] + 0.5) / 2  # +0.5 para right eye offset
+                gaze_x = (left_pos[0] + right_pos[0] + 0.5) / 2
                 gaze_y = (left_pos[1] + right_pos[1]) / 2
                 return (gaze_x, gaze_y)
 
             return None
         except Exception as e:
-            print(f"[DETECTOR ERROR] Gaze: {e}")
+            print(f"[DETECTOR ERROR] Simple gaze: {e}")
             return None
 
     def _find_pupil(self, eye_region: np.ndarray) -> Optional[Tuple[float, float]]:
         """Encuentra pupila en región del ojo."""
         h, w = eye_region.shape
-
-        # Aplicar blur para reducir ruido
         blurred = cv2.GaussianBlur(eye_region, (7, 7), 0)
-
-        # Encontrar el punto más oscuro (pupila)
         min_val, _, min_loc, _ = cv2.minMaxLoc(blurred)
 
-        # Verificar que sea suficientemente oscuro
-        if min_val < 100:  # Threshold para pupila
+        if min_val < 100:
             x, y = min_loc
-            return (x / w, y / h)  # Normalizado
-
+            return (x / w, y / h)
         return None
+
+    def check_gaze_on_detection(
+        self,
+        gaze_point: Tuple[float, float],
+        detection: Detection,
+        frame_shape: Tuple[int, int],
+        tolerance: float = 0.1
+    ) -> bool:
+        """
+        Check if gaze point falls on a detection.
+
+        Args:
+            gaze_point: (x, y) normalized 0-1
+            detection: Detection object
+            frame_shape: (height, width)
+            tolerance: Extra margin around bbox (fraction of frame)
+
+        Returns:
+            True if user is looking at the detection
+        """
+        h, w = frame_shape[:2]
+        gx, gy = gaze_point[0] * w, gaze_point[1] * h
+
+        x, y, bw, bh = detection.bbox
+        margin_x = w * tolerance
+        margin_y = h * tolerance
+
+        return (x - margin_x <= gx <= x + bw + margin_x and
+                y - margin_y <= gy <= y + bh + margin_y)
