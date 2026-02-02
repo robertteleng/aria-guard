@@ -357,38 +357,89 @@ same_object_cooldown = 3.0s  # Antes de re-alertar mismo objeto
 
 ## Sistema de Audio
 
-### Arquitectura TTS (Aislamiento CUDA)
+### Aislamiento CUDA: Process Isolation Pattern
 
-**Problema resuelto**: NeMo TTS crasheaba con "double free or corruption" al usar CUDA junto con YOLO TensorRT.
+**Problema**: Aria SDK (FastDDS) y CUDA (PyTorch/TensorRT) **no pueden coexistir** en el mismo proceso - causa "double free or corruption" y segfaults.
 
-**Solución**: NeMo corre en un **proceso separado** con `mp.get_context('spawn')` para aislar contextos CUDA:
+**Solución** (patrón de aria-nav): Ocultar CUDA del proceso principal y ejecutar modelos en procesos separados:
+
+```
+Main Process (NO CUDA)        DetectorProcess (spawn)       TTSProcess (spawn)
+├─ Aria SDK (FastDDS)         ├─ YOLO TensorRT             ├─ NeMo TTS
+├─ Flask server               ├─ Depth Anything V2         └─ Audio playback
+├─ Dashboard rendering        └─ Eye Gaze model
+└─ AudioFeedback wrapper
+```
+
+**Implementación**:
+
+```python
+# run.py - CRÍTICO: Ocultar CUDA ANTES de cualquier import
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""   # Ocultar GPU del proceso principal
+os.environ["NUMBA_DISABLE_CUDA"] = "1"    # Desactivar numba CUDA
+
+if __name__ == '__main__':
+    import multiprocessing as mp  # NO torch.multiprocessing (importa torch)
+    mp.set_start_method('spawn', force=True)
+
+    # Ahora seguro importar módulos
+    from src.web.main import app, process_loop
+```
+
+```python
+# detector_process.py - Worker restaura CUDA
+def _detector_worker(input_queue, output_queue, ...):
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Restaurar CUDA
+    os.environ.pop("NUMBA_DISABLE_CUDA", None)
+
+    # AHORA importar torch (con CUDA visible)
+    from src.core.detector import ParallelDetector
+    detector = ParallelDetector(...)
+```
+
+**Por qué funciona**:
+- `spawn` crea procesos hijos desde cero (sin heredar estado)
+- El proceso principal nunca inicializa CUDA (invisible)
+- Cada worker restaura CUDA antes de importar torch
+- Aria SDK y CUDA nunca se encuentran en el mismo proceso
+
+**Patrón heredado de aria-nav** donde se descubrió este conflicto.
+
+### Arquitectura Multi-Proceso (Aislamiento CUDA)
+
+**Problema resuelto**: CUDA y Aria SDK (FastDDS) crasheaban con "double free or corruption".
+
+**Solución**: Tres procesos separados con contextos CUDA aislados:
 
 ```mermaid
 graph TB
-    subgraph MainProcess["Proceso Principal"]
-        DET[Detector]
-        YOLO[YOLO TensorRT<br/>CUDA Context A]
-        DEPTH[Depth FP16<br/>CUDA Context A]
-        AUDIO[AudioFeedback]
-        QUEUE[Queue<br/>multiprocessing]
+    subgraph MainProcess["Proceso Principal (NO CUDA)"]
+        ARIA[Aria SDK<br/>FastDDS]
+        FLASK[Flask Server<br/>MJPEG Streaming]
+        DASH[Dashboard<br/>Rendering]
+        AUDIO[AudioFeedback<br/>Wrapper]
     end
 
-    subgraph TTSProcess["Proceso TTS (spawn)"]
-        TTS[TTSProcess]
-        NEMO[NeMo<br/>FastPitch + HiFiGAN]
-        CUDA_B[CUDA Context B]
+    subgraph DetectorProcess["DetectorProcess (spawn)"]
+        YOLO[YOLO TensorRT<br/>CUDA]
+        DEPTH[Depth Anything V2<br/>CUDA FP16]
+        GAZE[Eye Gaze Model<br/>CUDA]
+    end
+
+    subgraph TTSProcess["TTSProcess (spawn)"]
+        NEMO[NeMo TTS<br/>FastPitch + HiFiGAN]
         CACHE[Audio Cache<br/>30 phrases]
     end
 
-    DET --> YOLO
-    DET --> DEPTH
-    AUDIO -->|text| QUEUE
-    QUEUE -->|text| TTS
-    TTS --> NEMO
-    NEMO --> CUDA_B
-    TTS --> CACHE
+    ARIA -->|frames| DetectorProcess
+    DetectorProcess -->|detections, depth| DASH
+    AUDIO -->|text| TTSProcess
+    DASH --> FLASK
 
     style MainProcess fill:#e8f4ea
+    style DetectorProcess fill:#f4e8ea
     style TTSProcess fill:#e8e4f4
 ```
 
