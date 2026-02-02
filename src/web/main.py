@@ -106,24 +106,23 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
                 gaze_y = max(0, min(1, gaze_y))
                 precomputed_gaze = (gaze_x, gaze_y)
 
-        # Process all in parallel (YOLO + Depth + Gaze)
-        detections, depth_map, gaze_point = detector.process(rgb, eye_frame)
+        # Process all in parallel (YOLO + Depth + Gaze + Tracking)
+        detections, depth_map, gaze_point, tracked = detector.process(rgb, eye_frame)
 
         # Use precomputed gaze if available
         if precomputed_gaze:
             gaze_point = precomputed_gaze
 
-        # Audio feedback for dangers
-        for det in detections:
-            if det.distance in ("very_close", "close"):
-                user_looking = getattr(det, 'is_gazed', False)
+        # Audio feedback: only alert for top priority object
+        if tracked:
+            top = tracked[0]  # Highest priority (sorted by tracker)
+            if top.distance in ("very_close", "close"):
                 audio.alert_danger(
-                    object_name=det.name,
-                    zone=det.zone,
-                    distance=det.distance,
-                    user_looking=user_looking
+                    object_name=top.name,
+                    zone=top.zone,
+                    distance=top.distance,
+                    user_looking=top.is_gazed
                 )
-                break  # Only alert for most dangerous object
 
         # Renderizar
         rgb_out, depth_out, _, _ = dashboard.render(

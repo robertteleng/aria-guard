@@ -6,7 +6,7 @@ Soporta TensorRT y OpenCV CUDA para máximo rendimiento.
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 from pathlib import Path
 import math
 import os
@@ -14,6 +14,8 @@ import os
 import cv2
 import numpy as np
 import torch
+
+from src.core.tracker import SimpleTracker, TrackedObject
 
 # Optimizar convs para tamaños fijos
 torch.backends.cudnn.benchmark = True
@@ -94,6 +96,9 @@ class ParallelDetector:
         # Cargar Eye Gaze model (Meta)
         self.gaze_model = None
         self._load_gaze()
+
+        # Tracker para seguimiento temporal
+        self.tracker = SimpleTracker()
 
         print(f"[DETECTOR] Inicializado (device={device}, depth={enable_depth}, depth_interval={depth_interval})")
 
@@ -218,16 +223,16 @@ class ParallelDetector:
         self,
         frame: np.ndarray,
         eye_frame: Optional[np.ndarray] = None
-    ) -> Tuple[List[Detection], Optional[np.ndarray], Optional[Tuple[float, float]]]:
+    ) -> Tuple[List[Detection], Optional[np.ndarray], Optional[Tuple[float, float]], List[TrackedObject]]:
         """
-        Procesa frame: detecta objetos + estima profundidad + gaze (todo en paralelo).
+        Procesa frame: detecta objetos + estima profundidad + gaze + tracking.
 
         Args:
             frame: Imagen BGR
             eye_frame: Imagen de eye tracking (opcional)
 
         Returns:
-            (detecciones, depth_map, gaze_point)
+            (detecciones, depth_map, gaze_point, tracked_objects)
         """
         if frame is None:
             return [], None, None
@@ -282,7 +287,10 @@ class ParallelDetector:
             for det in detections:
                 det.is_gazed = self.check_gaze_on_detection(gaze_point, det, frame.shape)
 
-        return detections, depth_map, gaze_point
+        # Update tracker and get tracked objects with priority
+        tracked_objects = self.tracker.update(detections)
+
+        return detections, depth_map, gaze_point, tracked_objects
 
     def _run_yolo(self, frame: np.ndarray):
         """Ejecuta YOLO con FP16."""
