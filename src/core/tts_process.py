@@ -6,7 +6,7 @@ import os
 import tempfile
 from pathlib import Path
 import multiprocessing as mp
-from typing import Optional
+from typing import Optional, List
 
 # Use spawn context for clean CUDA initialization in child process
 _ctx = mp.get_context('spawn')
@@ -18,6 +18,20 @@ os.environ["TMPDIR"] = str(_tmp_dir)
 os.environ["TEMP"] = str(_tmp_dir)
 os.environ["TMP"] = str(_tmp_dir)
 tempfile.tempdir = str(_tmp_dir)
+
+# Common phrases to pre-cache at startup (short: object + direction)
+PRECACHE_PHRASES = [
+    "person left", "person right", "person ahead",
+    "car left", "car right", "car ahead",
+    "bicycle left", "bicycle right", "bicycle ahead",
+    "motorcycle left", "motorcycle right", "motorcycle ahead",
+    "bus left", "bus right", "bus ahead",
+    "truck left", "truck right", "truck ahead",
+    "chair left", "chair right", "chair ahead",
+    "dog left", "dog right", "dog ahead",
+    "backpack left", "backpack right", "backpack ahead",
+    "handbag left", "handbag right", "handbag ahead",
+]
 
 
 def _tts_worker(queue, sample_rate_out):
@@ -45,7 +59,6 @@ def _tts_worker(queue, sample_rate_out):
             print("[TTS PROCESS] NeMo loaded on CPU")
 
         sample_rate = 22050
-        sample_rate_out.put(sample_rate)
 
     except Exception as e:
         print(f"[TTS PROCESS] Failed to load NeMo: {e}")
@@ -54,6 +67,31 @@ def _tts_worker(queue, sample_rate_out):
 
     # Audio cache
     cache = {}
+
+    def generate_audio(text):
+        """Generate audio for text, using cache if available."""
+        if text in cache:
+            return cache[text].copy()
+
+        with torch.no_grad():
+            parsed = spec_gen.parse(text)
+            spectrogram = spec_gen.generate_spectrogram(tokens=parsed)
+            audio = vocoder.convert_spectrogram_to_audio(spec=spectrogram)
+        audio = audio.squeeze().cpu().numpy()
+
+        if len(text) < 50:
+            cache[text] = audio.copy()
+
+        return audio
+
+    # Pre-cache common phrases for instant playback
+    print("[TTS PROCESS] Pre-caching common phrases...")
+    for phrase in PRECACHE_PHRASES:
+        generate_audio(phrase)
+    print(f"[TTS PROCESS] Cached {len(PRECACHE_PHRASES)} phrases")
+
+    # Signal ready
+    sample_rate_out.put(sample_rate)
 
     # Process messages
     while True:
@@ -64,18 +102,18 @@ def _tts_worker(queue, sample_rate_out):
                 print("[TTS PROCESS] Shutting down")
                 break
 
-            if msg in cache:
-                audio = cache[msg].copy()
-            else:
-                with torch.no_grad():
-                    parsed = spec_gen.parse(msg)
-                    spectrogram = spec_gen.generate_spectrogram(tokens=parsed)
-                    audio = vocoder.convert_spectrogram_to_audio(spec=spectrogram)
-                audio = audio.squeeze().cpu().numpy()
+            # Skip old messages - only process the latest
+            while not queue.empty():
+                try:
+                    newer_msg = queue.get_nowait()
+                    if newer_msg is None:
+                        print("[TTS PROCESS] Shutting down")
+                        return
+                    msg = newer_msg  # Use the newer message
+                except:
+                    break
 
-                if len(msg) < 50:
-                    cache[msg] = audio.copy()
-
+            audio = generate_audio(msg)
             print(f"[TTS] {msg}")
             sd.play(audio, samplerate=sample_rate, blocking=True)
 
@@ -104,8 +142,8 @@ class TTSProcess:
         )
         self.process.start()
 
-        # Wait for initialization
-        result = sample_rate_out.get(timeout=60)
+        # Wait for initialization (longer timeout for pre-caching)
+        result = sample_rate_out.get(timeout=120)
         if result is None:
             print("[TTS] Process failed to initialize")
             self._ready = False

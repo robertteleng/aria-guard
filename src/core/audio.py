@@ -201,7 +201,7 @@ class AudioFeedback:
 
         if is_critical and not user_looking:
             zone_word = {"left": "left", "right": "right", "center": "ahead"}.get(zone, "")
-            self.speak(f"Warning, {object_name} {zone_word}")
+            self.speak(f"{object_name} {zone_word}")
 
     def shutdown(self):
         """Clean shutdown of TTS process."""

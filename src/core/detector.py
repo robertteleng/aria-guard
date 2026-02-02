@@ -106,8 +106,19 @@ class ParallelDetector:
             engine_path = MODELS_DIR / f"{model_name}.engine"
             pt_path = MODELS_DIR / f"{model_name}.pt"
 
-            # TensorRT disabled - causes memory corruption with NeMo TTS
-            if self.device == "cuda":
+            # Try TensorRT first (NeMo now runs in separate process)
+            if self.device == "cuda" and engine_path.exists():
+                try:
+                    self.yolo = YOLO(str(engine_path), task="detect")
+                    self._yolo_tensorrt = True
+                    print(f"[DETECTOR] {model_name} cargado (TensorRT)")
+                except Exception as e:
+                    print(f"[DETECTOR WARN] TensorRT failed: {e}")
+                    self.yolo = YOLO(str(pt_path), task="detect")
+                    self.yolo.to("cuda")
+                    self._yolo_tensorrt = False
+                    print(f"[DETECTOR] {model_name} cargado (CUDA PyTorch)")
+            elif self.device == "cuda":
                 self.yolo = YOLO(str(pt_path), task="detect")
                 self.yolo.to("cuda")
                 self._yolo_tensorrt = False
@@ -133,9 +144,13 @@ class ParallelDetector:
 
             if self.device == "cuda":
                 self.depth_model = self.depth_model.cuda().half().eval()
-                # NOTE: TensorRT and torch.compile disabled - cause mempool conflicts
-                # with CUDA streams and NeMo TTS. FP16 is fast enough.
-                print("[DETECTOR] Depth Anything V2 (FP16)")
+                # Try torch.compile for faster inference (NeMo now in separate process)
+                try:
+                    self.depth_model = torch.compile(self.depth_model, mode="reduce-overhead")
+                    print("[DETECTOR] Depth Anything V2 (FP16 + torch.compile)")
+                except Exception as e:
+                    print(f"[DETECTOR WARN] torch.compile failed: {e}")
+                    print("[DETECTOR] Depth Anything V2 (FP16)")
             else:
                 print("[DETECTOR] Depth Anything V2 (CPU)")
         except Exception as e:
