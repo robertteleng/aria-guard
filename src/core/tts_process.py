@@ -21,16 +21,16 @@ tempfile.tempdir = str(_tmp_dir)
 
 # Common phrases to pre-cache at startup (short: object + direction)
 PRECACHE_PHRASES = [
-    "person left", "person right", "person ahead",
-    "car left", "car right", "car ahead",
-    "bicycle left", "bicycle right", "bicycle ahead",
-    "motorcycle left", "motorcycle right", "motorcycle ahead",
-    "bus left", "bus right", "bus ahead",
-    "truck left", "truck right", "truck ahead",
-    "chair left", "chair right", "chair ahead",
-    "dog left", "dog right", "dog ahead",
-    "backpack left", "backpack right", "backpack ahead",
-    "handbag left", "handbag right", "handbag ahead",
+    "person left", "person right", "person straight",
+    "car left", "car right", "car straight",
+    "bicycle left", "bicycle right", "bicycle straight",
+    "motorcycle left", "motorcycle right", "motorcycle straight",
+    "bus left", "bus right", "bus straight",
+    "truck left", "truck right", "truck straight",
+    "chair left", "chair right", "chair straight",
+    "dog left", "dog right", "dog straight",
+    "backpack left", "backpack right", "backpack straight",
+    "handbag left", "handbag right", "handbag straight",
 ]
 
 

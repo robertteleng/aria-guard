@@ -200,7 +200,7 @@ class AudioFeedback:
         )
 
         if is_critical and not user_looking:
-            zone_word = {"left": "left", "right": "right", "center": "ahead"}.get(zone, "")
+            zone_word = {"left": "left", "right": "right", "center": "straight"}.get(zone, "")
             self.speak(f"{object_name} {zone_word}")
 
     def shutdown(self):
