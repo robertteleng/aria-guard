@@ -10,7 +10,6 @@ ultralytics>=8.0.0
 transformers>=4.35.0
 
 # UI
-gradio>=4.0.0
 flask>=3.0.0
 
 # Audio

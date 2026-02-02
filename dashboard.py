@@ -1,20 +1,19 @@
 """
-Dashboard Gradio para ARIA Demo.
+Dashboard para ARIA Demo.
 
-UI web simple: RGB + Depth + Eye + Status.
+Renderiza RGB + Depth overlay + Radar + Status.
 """
 
 from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
-import gradio as gr
 
 from detector import Detection
 
 
 class Dashboard:
-    """Dashboard visual con Gradio."""
+    """Dashboard visual."""
 
     def __init__(self):
         self._colors = {
@@ -24,6 +23,8 @@ class Dashboard:
             "far": (0, 255, 0),           # Verde
             "unknown": (128, 128, 128)    # Gris
         }
+        self._radar_size = 200
+        self._depth_size = 200
 
     def render(
         self,
@@ -49,19 +50,29 @@ class Dashboard:
         if depth_map is not None:
             depth_out = cv2.applyColorMap(depth_map, cv2.COLORMAP_MAGMA)
         else:
-            # Placeholder gris
             depth_out = np.full_like(rgb_frame, 50)
 
-        # 3. Eye tracking con anotaciones
+        # 3. Overlay depth (200x200) en esquina superior derecha del RGB
+        if depth_map is not None:
+            depth_small = cv2.resize(depth_out, (self._depth_size, self._depth_size))
+            x_depth = rgb_out.shape[1] - self._depth_size - 10
+            rgb_out = self._overlay_image(rgb_out, depth_small, x_depth, 10)
+
+        # 4. Overlay radar en esquina inferior derecha del RGB
+        radar = self._draw_radar(detections, rgb_frame.shape[1])
+        x_radar = rgb_out.shape[1] - self._radar_size - 10
+        y_radar = rgb_out.shape[0] - self._radar_size - 10
+        rgb_out = self._overlay_image(rgb_out, radar, x_radar, y_radar)
+
+        # 5. Eye tracking con anotaciones
         if eye_frame is not None:
             eye_out = eye_frame.copy()
         else:
-            # Placeholder
-            eye_out = np.full((240, 640, 3), 30, dtype=np.uint8)
-            cv2.putText(eye_out, "No Eye Tracking", (200, 120),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (100, 100, 100), 2)
+            eye_out = np.full((120, 640, 3), 30, dtype=np.uint8)
+            cv2.putText(eye_out, "No Eye Tracking", (220, 65),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (100, 100, 100), 1)
 
-        # 4. Status text
+        # 6. Status text
         status = self._format_status(detections, fps, gaze_point)
 
         return rgb_out, depth_out, eye_out, status
@@ -139,79 +150,79 @@ class Dashboard:
 
         return "\n".join(lines)
 
+    def _draw_radar(
+        self, detections: List[Detection], frame_width: int
+    ) -> np.ndarray:
+        """Dibuja radar 2D top-down (semicírculo)."""
+        size = self._radar_size
+        radar = np.zeros((size, size, 3), dtype=np.uint8)
+        center_x = size // 2
+        center_y = size - 15  # Usuario en la parte inferior
 
-def create_gradio_app(process_callback, scan_callback=None):
-    """
-    Crea aplicación Gradio.
+        # Arcos de referencia (distancia)
+        for i, radius in enumerate([size // 4, size // 2, size * 3 // 4 - 10]):
+            alpha = 40 + i * 20
+            cv2.ellipse(radar, (center_x, center_y), (radius, radius),
+                       0, 180, 360, (alpha, alpha, alpha), 1)
 
-    Args:
-        process_callback: Función que procesa un frame y retorna los outputs
-        scan_callback: Función para scan de escena (opcional)
+        # Líneas de zona (izq/centro/der)
+        cv2.line(radar, (size // 3, center_y), (size // 3, 20), (40, 40, 40), 1)
+        cv2.line(radar, (2 * size // 3, center_y), (2 * size // 3, 20), (40, 40, 40), 1)
 
-    Returns:
-        Gradio Blocks app
-    """
-    with gr.Blocks(title="ARIA Demo") as app:
-        gr.Markdown("# ARIA Demo")
-        gr.Markdown("Detección de objetos + Profundidad + Eye Tracking")
+        # Usuario (punto blanco abajo)
+        cv2.circle(radar, (center_x, center_y), 6, (255, 255, 255), -1)
 
-        with gr.Row():
-            with gr.Column(scale=2):
-                rgb_output = gr.Image(label="RGB + Detecciones", type="numpy")
-            with gr.Column(scale=1):
-                depth_output = gr.Image(label="Profundidad", type="numpy")
+        # Objetos detectados
+        for det in detections:
+            # Posición X: centro del bbox normalizado
+            bbox_center_x = (det.bbox[0] + det.bbox[2] / 2) / frame_width
+            # Mapear a posición en radar (0=izq, 1=der)
+            px = int(bbox_center_x * (size - 20) + 10)
 
-        with gr.Row():
-            with gr.Column(scale=2):
-                eye_output = gr.Image(label="Eye Tracking", type="numpy")
-            with gr.Column(scale=1):
-                status_output = gr.Textbox(
-                    label="Status",
-                    lines=10,
-                    interactive=False
-                )
+            # Distancia: invertir depth (1=cerca=abajo, 0=lejos=arriba)
+            dist_normalized = 1.0 - det.depth_value
+            max_radius = size - 30
+            py = int(center_y - dist_normalized * max_radius)
 
-        with gr.Row():
-            start_btn = gr.Button("Start", variant="primary")
-            stop_btn = gr.Button("Stop", variant="stop")
-            if scan_callback:
-                scan_btn = gr.Button("Scan Scene")
+            # Color según distancia
+            color = self._colors.get(det.distance, (128, 128, 128))
 
-        # Estado de ejecución
-        is_running = gr.State(False)
+            # Dibujar punto (más grande si is_gazed)
+            point_size = 10 if getattr(det, 'is_gazed', False) else 6
+            cv2.circle(radar, (px, py), point_size, color, -1)
 
-        def toggle_start():
-            return True
+            # Borde blanco si is_gazed
+            if getattr(det, 'is_gazed', False):
+                cv2.circle(radar, (px, py), point_size + 2, (255, 255, 255), 2)
 
-        def toggle_stop():
-            return False
+        # Etiqueta
+        cv2.putText(radar, "RADAR", (size // 2 - 25, 15),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (100, 100, 100), 1)
 
-        start_btn.click(toggle_start, outputs=is_running)
-        stop_btn.click(toggle_stop, outputs=is_running)
+        return radar
 
-        # Timer para actualizar frames
-        timer = gr.Timer(0.1)  # 10 FPS en UI
+    def _overlay_image(
+        self, base: np.ndarray, overlay: np.ndarray,
+        x: int, y: int, alpha: float = 0.85
+    ) -> np.ndarray:
+        """Superpone una imagen sobre otra con transparencia."""
+        h, w = overlay.shape[:2]
+        # Asegurar que no se sale del frame
+        if x + w > base.shape[1]:
+            w = base.shape[1] - x
+        if y + h > base.shape[0]:
+            h = base.shape[0] - y
+        if w <= 0 or h <= 0:
+            return base
 
-        def update_display(running):
-            if not running:
-                return None, None, None, "Parado"
-            return process_callback()
-
-        timer.tick(
-            update_display,
-            inputs=[is_running],
-            outputs=[rgb_output, depth_output, eye_output, status_output]
-        )
-
-        if scan_callback:
-            scan_btn.click(scan_callback)
-
-    return app
+        overlay_crop = overlay[:h, :w]
+        roi = base[y:y+h, x:x+w]
+        cv2.addWeighted(overlay_crop, alpha, roi, 1 - alpha, 0, roi)
+        return base
 
 
-# Versión simple sin Gradio (OpenCV fallback)
 class SimpleDashboard:
-    """Dashboard OpenCV simple (fallback si no hay Gradio)."""
+    """Dashboard OpenCV simple para visualización local."""
 
     def __init__(self):
         self._dashboard = Dashboard()
