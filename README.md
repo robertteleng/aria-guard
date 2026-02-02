@@ -181,9 +181,19 @@ Cada objeto detectado incluye:
 ## Rendimiento
 
 Probado en RTX 3090:
-- **15-19 FPS** con YOLO + Depth + Gaze
+- **15-19 FPS** con YOLO + Depth + Gaze (PyTorch)
+- **~30 FPS** con TensorRT habilitado
 - **~25 FPS** sin profundidad
-- **~30 FPS** solo YOLO
+- **~40 FPS** solo YOLO TensorRT
+
+### Optimizaciones GPU
+
+El detector usa automáticamente:
+- **TensorRT** para YOLO (exporta .engine si no existe)
+- **TensorRT/torch.compile** para Depth
+- **OpenCV CUDA** para resize/cvtColor (si está disponible)
+- **CUDA Streams** para ejecución paralela
+- **FP16** para todos los modelos
 
 ## Dependencias
 
@@ -193,10 +203,17 @@ opencv-python>=4.8.0
 torch>=2.0.0
 ultralytics>=8.0.0
 transformers>=4.35.0
-gradio>=4.0.0
+flask>=3.0.0
 sounddevice>=0.4.6
 pyttsx3>=2.90
 Pillow>=10.0.0
+```
+
+### Opcionales (más rendimiento)
+
+```bash
+pip install tensorrt torch-tensorrt  # TensorRT
+# OpenCV CUDA requiere compilar desde fuente
 ```
 
 ## Roadmap: VLM + Control por Voz

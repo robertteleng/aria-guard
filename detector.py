@@ -2,11 +2,13 @@
 Detector: YOLO + Depth + Eye Gaze con CUDA streams.
 
 YOLO detecta objetos, Depth calcula distancia, Meta model estima gaze.
+Soporta TensorRT y OpenCV CUDA para máximo rendimiento.
 """
 
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 import math
+import os
 
 import cv2
 import numpy as np
@@ -14,6 +16,9 @@ import torch
 
 # Optimizar convs para tamaños fijos
 torch.backends.cudnn.benchmark = True
+
+# OpenCV CUDA disponible?
+_OPENCV_CUDA = hasattr(cv2, 'cuda') and cv2.cuda.getCudaEnabledDeviceCount() > 0
 
 
 @dataclass
@@ -76,45 +81,85 @@ class ParallelDetector:
         print(f"[DETECTOR] Inicializado (device={device}, depth={enable_depth}, depth_interval={depth_interval})")
 
     def _load_yolo(self):
-        """Carga YOLO26s con PyTorch."""
+        """Carga YOLO26s con TensorRT si está disponible."""
         try:
             from ultralytics import YOLO
 
             model_name = "yolo26s"
-            self.yolo = YOLO(f"{model_name}.pt")
+            engine_path = f"{model_name}.engine"
+            pt_path = f"{model_name}.pt"
 
-            if self.device == "cuda":
-                self.yolo.to("cuda")
-                print(f"[DETECTOR] {model_name} cargado (CUDA)")
+            # Intentar cargar TensorRT engine
+            if self.device == "cuda" and os.path.exists(engine_path):
+                self.yolo = YOLO(engine_path)
+                self._yolo_tensorrt = True
+                print(f"[DETECTOR] {model_name} cargado (TensorRT)")
+            elif self.device == "cuda":
+                # Cargar PyTorch y exportar a TensorRT si es posible
+                self.yolo = YOLO(pt_path)
+                self._yolo_tensorrt = False
+                try:
+                    self.yolo.export(format="engine", half=True)
+                    # Recargar con TensorRT
+                    if os.path.exists(engine_path):
+                        self.yolo = YOLO(engine_path)
+                        self._yolo_tensorrt = True
+                        print(f"[DETECTOR] {model_name} exportado y cargado (TensorRT)")
+                    else:
+                        self.yolo.to("cuda")
+                        print(f"[DETECTOR] {model_name} cargado (CUDA PyTorch)")
+                except Exception as e:
+                    print(f"[DETECTOR] TensorRT no disponible: {e}")
+                    self.yolo.to("cuda")
+                    print(f"[DETECTOR] {model_name} cargado (CUDA PyTorch)")
             else:
+                self.yolo = YOLO(pt_path)
+                self._yolo_tensorrt = False
                 print(f"[DETECTOR] {model_name} cargado (CPU)")
         except Exception as e:
             print(f"[DETECTOR ERROR] No se pudo cargar YOLO: {e}")
             self.yolo = None
+            self._yolo_tensorrt = False
 
     def _load_depth(self):
-        """Carga Depth Anything V2 con PyTorch FP16."""
+        """Carga Depth Anything V2. Intenta TensorRT, luego torch.compile, luego FP16."""
         try:
             from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
             model_name = "depth-anything/Depth-Anything-V2-Small-hf"
             self.depth_processor = AutoImageProcessor.from_pretrained(model_name)
             self.depth_model = AutoModelForDepthEstimation.from_pretrained(model_name)
+            self._depth_tensorrt = False
 
             if self.device == "cuda":
-                self.depth_model = self.depth_model.cuda().half()
-                self.depth_model.eval()
-                # torch.compile para PyTorch 2.0+ (opcional)
+                self.depth_model = self.depth_model.cuda().half().eval()
+
+                # Intentar TensorRT via torch_tensorrt
                 try:
-                    self.depth_model = torch.compile(self.depth_model, mode="reduce-overhead")
-                    print("[DETECTOR] Depth model compiled with torch.compile")
-                except Exception:
-                    pass  # torch.compile no disponible o falló
-                # Verificar que está en GPU
-                param = next(self.depth_model.parameters())
-                print(f"[DETECTOR] Depth Anything V2 cargado (device={param.device}, dtype={param.dtype})")
+                    import torch_tensorrt
+                    # Compilar con TensorRT (input shape fija para depth)
+                    self.depth_model = torch_tensorrt.compile(
+                        self.depth_model,
+                        inputs=[torch_tensorrt.Input((1, 3, 384, 384), dtype=torch.half)],
+                        enabled_precisions={torch.half}
+                    )
+                    self._depth_tensorrt = True
+                    print("[DETECTOR] Depth Anything V2 (TensorRT)")
+                except ImportError:
+                    # Fallback: torch.compile
+                    try:
+                        self.depth_model = torch.compile(self.depth_model, mode="reduce-overhead")
+                        print("[DETECTOR] Depth Anything V2 (torch.compile)")
+                    except Exception:
+                        print("[DETECTOR] Depth Anything V2 (FP16)")
+                except Exception as e:
+                    print(f"[DETECTOR] TensorRT falló: {e}, usando torch.compile")
+                    try:
+                        self.depth_model = torch.compile(self.depth_model, mode="reduce-overhead")
+                    except Exception:
+                        pass
             else:
-                print("[DETECTOR] Depth Anything V2 cargado (CPU)")
+                print("[DETECTOR] Depth Anything V2 (CPU)")
         except Exception as e:
             print(f"[DETECTOR WARN] No se pudo cargar Depth: {e}")
             print("[DETECTOR] Continuando sin profundidad")
@@ -247,20 +292,26 @@ class ParallelDetector:
             return None
 
     def _run_depth(self, frame: np.ndarray) -> Optional[np.ndarray]:
-        """Ejecuta Depth Anything con PyTorch FP16."""
+        """Ejecuta Depth Anything. Usa OpenCV CUDA si está disponible."""
         if self.depth_model is None:
             return None
         try:
             h, w = frame.shape[:2]
 
-            # Preprocesar
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            rgb_small = cv2.resize(rgb, (384, 384))
+            # Preprocesar con OpenCV CUDA si está disponible
+            if _OPENCV_CUDA:
+                gpu_frame = cv2.cuda_GpuMat()
+                gpu_frame.upload(frame)
+                gpu_rgb = cv2.cuda.cvtColor(gpu_frame, cv2.COLOR_BGR2RGB)
+                gpu_small = cv2.cuda.resize(gpu_rgb, (384, 384))
+                rgb_small = gpu_small.download()
+            else:
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                rgb_small = cv2.resize(rgb, (384, 384))
 
-            # PyTorch FP16
+            # Procesar con modelo
             from PIL import Image
-            pil_img = Image.fromarray(rgb_small)
-            inputs = self.depth_processor(images=pil_img, return_tensors="pt")
+            inputs = self.depth_processor(images=Image.fromarray(rgb_small), return_tensors="pt")
 
             if self.device == "cuda":
                 inputs = {k: v.cuda().half() for k, v in inputs.items()}
@@ -269,7 +320,7 @@ class ParallelDetector:
                 outputs = self.depth_model(**inputs)
                 depth_np = outputs.predicted_depth.squeeze().float().cpu().numpy()
 
-            # Resize a tamaño original
+            # Resize a tamaño original (OpenCV CUDA no soporta float32 resize fácilmente)
             depth_resized = cv2.resize(depth_np, (w, h))
 
             # Normalizar a 0-255
