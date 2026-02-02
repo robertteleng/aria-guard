@@ -18,12 +18,13 @@ models/*.onnx
 models/*.onnx.data
 models/*.engine
 
-# Data (test videos)
+# Data (test videos and samples)
 data/*.mp4
 data/*.avi
 data/*.mov
 data/*.mkv
 data/*.webm
+data/aria_sample/
 
 # IDE
 .vscode/
