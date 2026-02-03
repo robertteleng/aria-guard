@@ -269,11 +269,13 @@ graph LR
 ```
 
 **Ejemplo**: Coche acercándose, no visto:
+
 ```
 10 (car) × 2.0 (close) × 2.0 (approaching) × 1.5 (not gazed) = 60
 ```
 
 **Ejemplo**: Persona muy cerca, vista:
+
 ```
 6 (person) × 4.0 (very_close) × 1.0 (static) × 1.0 (gazed) = 24
 ```
@@ -400,6 +402,7 @@ def _detector_worker(input_queue, output_queue, ...):
 ```
 
 **Por qué funciona**:
+
 - `spawn` crea procesos hijos desde cero (sin heredar estado)
 - El proceso principal nunca inicializa CUDA (invisible)
 - Cada worker restaura CUDA antes de importar torch
@@ -460,6 +463,7 @@ PRECACHE_PHRASES = [
 ```
 
 **Latencia**:
+
 - Frase cacheada: **<10ms** (solo playback)
 - Frase nueva: **~200ms** (generación + playback)
 
@@ -529,7 +533,43 @@ aria-demo/
 └── requirements.txt
 ```
 
-## Instalación
+## Instalación via Docker (Recomendada)
+
+Esta es la **forma más segura** de ejecutar el proyecto, ya que aísla todas las dependencias y evita conflictos de librerías del sistema (como `glibc` vs Aria SDK).
+
+### Requisitos Previos
+
+1. **Drivers NVIDIA** instalados en el sistema host.
+2. **Docker Desktop** (Linux/Windows) o **Docker Engine**.
+3. **NVIDIA Container Toolkit** (Crítico en Linux):
+   ```bash
+   sudo apt-get install -y nvidia-container-toolkit
+   sudo nvidia-ctk runtime configure --runtime=docker
+   sudo systemctl restart docker
+   ```
+
+### Ejecución Rápida
+
+Clona el proyecto y simplemente ejecuta:
+
+```bash
+# Construye la imagen y levanta el contenedor con GPU
+docker compose up --build
+```
+
+El sistema descargará automáticamente la imagen base de Ubuntu 22.04, instalará las versiones correctas de Python, PyTorch y Aria SDK, compilará todo y lanzará la aplicación.
+
+Si necesitas lanzar opciones personalizadas (como un video específico), entra en el contenedor:
+
+```bash
+docker exec -it aria-demo bash
+# Dentro:
+python run.py video.mp4
+```
+
+---
+
+## Instalación Manual (Legacy)
 
 ```bash
 cd aria-demo
@@ -568,6 +608,7 @@ python run.py aria:wifi:<ARIA_IP>  # WiFi con IP específica
 ```
 
 Selecciona modo de detección:
+
 - **[1] Indoor** - persona, silla, sofá, mesa, tv...
 - **[2] Outdoor** - persona, coche, bici, moto, bus...
 - **[3] All** - 80 clases COCO
@@ -577,27 +618,31 @@ Abre http://localhost:5000
 ## Conexión Meta Aria Glasses
 
 ### Requisitos
+
 ```bash
 pip install projectaria-tools aria-glasses
 ```
 
 ### Streaming Profiles
-| Interfaz | Profile | FPS | Notas |
-|----------|---------|-----|-------|
-| USB | profile28 | 30 | Recomendado, más estable |
-| WiFi | profile18 | 30 | Requiere IP del dispositivo |
+
+| Interfaz | Profile   | FPS | Notas                       |
+| -------- | --------- | --- | --------------------------- |
+| USB      | profile28 | 30  | Recomendado, más estable    |
+| WiFi     | profile18 | 30  | Requiere IP del dispositivo |
 
 ### Cámaras Disponibles
-| Cámara | Resolución | Stream |
-|--------|-----------|--------|
-| RGB (centro) | 1408×1408 | Siempre activo |
-| Eye Track | - | Siempre activo |
-| SLAM1 (izquierda) | 640×480 | Opcional |
-| SLAM2 (derecha) | 640×480 | Opcional |
+
+| Cámara            | Resolución | Stream         |
+| ----------------- | ---------- | -------------- |
+| RGB (centro)      | 1408×1408  | Siempre activo |
+| Eye Track         | -          | Siempre activo |
+| SLAM1 (izquierda) | 640×480    | Opcional       |
+| SLAM2 (derecha)   | 640×480    | Opcional       |
 
 ### Troubleshooting
 
 **"Connection refused"**: Verifica que Aria esté en modo streaming
+
 ```bash
 # En el móvil: Aria App → Streaming → Start
 ```
@@ -610,12 +655,12 @@ pip install projectaria-tools aria-glasses
 
 Probado en RTX 3090:
 
-| Configuración | FPS |
-|--------------|-----|
+| Configuración                  | FPS   |
+| ------------------------------ | ----- |
 | YOLO + Depth + Gaze + Tracking | 15-19 |
-| Con TensorRT | ~30 |
-| Sin profundidad | ~25 |
-| Solo YOLO TensorRT | ~40 |
+| Con TensorRT                   | ~30   |
+| Sin profundidad                | ~25   |
+| Solo YOLO TensorRT             | ~40   |
 
 ### Optimizaciones
 
@@ -639,16 +684,19 @@ pie title VRAM (~2.5GB total)
 ## Roadmap
 
 ### Completado
+
 - ✅ Conexión Meta Aria Glasses (USB + WiFi)
 - ✅ Sistema de tracking con priorización
 - ✅ AlertDecisionEngine para alertas inteligentes
 - ✅ NeMo TTS en proceso separado
 
 ### Próximo
+
 - Ajuste fino de umbrales de alerta con usuarios reales
 - Uso de cámaras SLAM laterales para detección periférica
 
 ### Futuro
+
 - FastVLM para descripciones de escena
 - Control por voz (Whisper)
 - Detección de semáforos y señales
