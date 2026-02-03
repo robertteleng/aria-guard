@@ -1,8 +1,27 @@
 """
 Aria SDK running in a separate process to avoid CUDA context conflicts.
 
-The Aria SDK (FastDDS) cannot coexist with CUDA in the same process.
-This module isolates Aria in its own process and sends frames via Queue.
+=============================================================================
+ARQUITECTURA DE AISLAMIENTO DE PROCESOS
+=============================================================================
+
+El Aria SDK usa FastDDS (Data Distribution Service) para comunicacion en
+tiempo real con las gafas. FastDDS tiene conflictos conocidos con:
+  - CUDA/PyTorch (contextos GPU)
+  - Algunas versiones de glibc (ej: 2.39-0ubuntu8.7 en Ubuntu 24.04)
+
+Solucion: Ejecutar Aria SDK en un proceso separado usando multiprocessing
+con contexto 'spawn' (no fork) para evitar heredar contextos CUDA.
+
+Flujo de datos:
+  ┌─────────────────┐     Queue      ┌─────────────────┐
+  │  ARIA PROCESS   │ ────────────>  │  MAIN PROCESS   │
+  │  (FastDDS)      │    frames      │  (CUDA/PyTorch) │
+  │  Sin GPU        │ <────────────  │  Con GPU        │
+  └─────────────────┘   commands     └─────────────────┘
+
+El AriaProcess wrapper proporciona una interfaz compatible con BaseObserver
+para integracion transparente con el resto del sistema.
 """
 import multiprocessing as mp
 import threading

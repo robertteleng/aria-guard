@@ -1,0 +1,62 @@
+# =============================================================================
+# Docker Compose para ARIA Demo
+# =============================================================================
+#
+# Uso:
+#   docker compose up              # Iniciar (primera vez hace build)
+#   docker compose up --build      # Reconstruir imagen
+#   docker compose down            # Parar y limpiar
+#   docker compose up -d           # Iniciar en background
+#   docker compose logs -f         # Ver logs en tiempo real
+#
+# Acceso:
+#   Dashboard: http://localhost:5000
+#
+# =============================================================================
+
+version: '3.8'
+
+services:
+  aria-demo:
+    build: .
+    image: aria-demo:latest
+    container_name: aria-demo
+
+    # Modo privilegiado: necesario para acceso completo a USB
+    # Requerido por Aria SDK para comunicacion con las gafas
+    privileged: true
+
+    # Puerto del dashboard web
+    ports:
+      - "5000:5000"
+
+    volumes:
+      # USB passthrough para conectar Aria glasses
+      - /dev/bus/usb:/dev/bus/usb
+      # Directorio de datos compartido (videos, datasets VRS)
+      - ./data:/app/data
+
+    devices:
+      # Audio para text-to-speech (espeak-ng)
+      - /dev/snd:/dev/snd
+
+    environment:
+      # Display para aplicaciones GUI (si se necesita)
+      - DISPLAY=${DISPLAY}
+
+    # Terminal interactiva (para menu de seleccion)
+    stdin_open: true
+    tty: true
+
+    # Acceso a GPU NVIDIA para inferencia de modelos
+    # Requiere nvidia-container-toolkit instalado en el host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    # Comando por defecto: ejecutar la aplicacion
+    command: python run.py
