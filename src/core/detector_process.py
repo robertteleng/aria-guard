@@ -38,13 +38,27 @@ def _detector_worker(
     """
     import os
     # Restore CUDA visibility in worker process (main process hides it to avoid FastDDS conflict)
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    # Check if we're in Docker or if GPU is available before forcing device 0
+    if "NVIDIA_VISIBLE_DEVICES" in os.environ:
+        # Docker with nvidia-container-toolkit sets this
+        os.environ.pop("CUDA_VISIBLE_DEVICES", None)  # Let nvidia runtime handle it
+    else:
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     os.environ.pop("NUMBA_DISABLE_CUDA", None)
 
     print("[DETECTOR PROCESS] Starting...", flush=True)
+    print(f"[DETECTOR PROCESS] CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}", flush=True)
+    print(f"[DETECTOR PROCESS] NVIDIA_VISIBLE_DEVICES={os.environ.get('NVIDIA_VISIBLE_DEVICES', 'not set')}", flush=True)
 
     try:
         # Import CUDA modules here, in the worker process
+        import torch
+        print(f"[DETECTOR PROCESS] PyTorch {torch.__version__}, CUDA available: {torch.cuda.is_available()}", flush=True)
+        if torch.cuda.is_available():
+            print(f"[DETECTOR PROCESS] GPU: {torch.cuda.get_device_name(0)}", flush=True)
+        else:
+            print("[DETECTOR PROCESS] WARNING: CUDA not available, using CPU (will be slower)", flush=True)
+
         from src.core.detector import ParallelDetector
 
         print(f"[DETECTOR PROCESS] Loading models (mode={mode}, depth={enable_depth})...", flush=True)

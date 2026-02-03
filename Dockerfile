@@ -43,6 +43,7 @@ RUN apt-get update && apt-get install -y \
     && add-apt-repository ppa:ubuntu-toolchain-r/test \
     && apt-get update && apt-get install -y \
     python3.11 \
+    python3.11-dev \
     python3.11-venv \
     python3-pip \
     libgl1-mesa-glx \
@@ -52,6 +53,7 @@ RUN apt-get update && apt-get install -y \
     libxrender-dev \
     libportaudio2 \
     libasound2-dev \
+    libsndfile1 \
     usbutils \
     libstdc++6 \
     espeak-ng \
@@ -69,20 +71,32 @@ RUN echo "source /etc/bash_completion" >> /root/.bashrc && \
 # Crear directorio de trabajo
 WORKDIR /app
 
-# Crear y activar venv
-RUN python3.11 -m venv /app/.venv
-ENV PATH="/app/.venv/bin:$PATH"
+# Crear y activar venv fuera de /app para evitar que el volumen lo oculte
+RUN python3.11 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-# Instalar dependencias Python principales
-# - projectaria-client-sdk: SDK oficial para streaming de Aria glasses
-# - projectaria-tools: herramientas para VRS y calibracion
-# - projectaria_eyetracking: modelo de gaze de Meta (desde GitHub)
-# - opencv-python-headless: procesamiento de imagen (sin GUI)
-# - flask: servidor web para dashboard
-# - torch, torchvision: PyTorch para modelos de IA
-# - ultralytics: YOLO para deteccion de objetos
-RUN pip install --upgrade pip && \
-    pip install \
+# =============================================================================
+# LAYER CACHING OPTIMIZATION
+# =============================================================================
+# Copiar SOLO requirements.txt primero para cachear pip install
+# Si requirements.txt no cambia, esta capa pesada se reutiliza
+# =============================================================================
+
+# Actualizar pip
+RUN pip install --upgrade pip && pip install Cython
+
+# Copiar requirements.txt primero (si existe)
+COPY requirements.txt* /app/
+
+# Instalar dependencias de requirements.txt (si existe)
+# Esta capa se cachea mientras requirements.txt no cambie
+RUN if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+# Instalar PyTorch con CUDA 12.4 primero (usando extra-index-url para no bloquear PyPI)
+RUN pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+
+# Instalar resto de dependencias desde PyPI
+RUN pip install \
     projectaria-client-sdk \
     projectaria-tools \
     git+https://github.com/facebookresearch/projectaria_eyetracking.git \
@@ -90,15 +104,18 @@ RUN pip install --upgrade pip && \
     numpy \
     flask \
     sounddevice \
-    torch \
-    torchvision \
-    ultralytics
+    ultralytics \
+    transformers \
+    "nemo_toolkit[tts]"
 
-# Copiar código del proyecto
+# =============================================================================
+# CÓDIGO FUENTE (última capa - cambios frecuentes)
+# =============================================================================
+# Esta capa se invalida con cada cambio de código, pero las dependencias
+# ya están cacheadas arriba, así que el rebuild es rápido.
+# =============================================================================
+
 COPY . /app/
-
-# Instalar dependencias adicionales si hay requirements.txt
-RUN if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
 # Puerto para Flask
 EXPOSE 5000

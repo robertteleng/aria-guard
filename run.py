@@ -113,26 +113,40 @@ if __name__ == '__main__':
     print("    [3] All     - todas las clases (80 objetos)")
     print()
 
-    while True:
-        choice = input("  Modo [1/2/3]: ").strip()
-        if choice == "1":
-            mode = "indoor"
-            break
-        elif choice == "2":
-            mode = "outdoor"
-            break
-        elif choice == "3":
-            mode = "all"
-            break
-        else:
-            print("  Opción no válida. Introduce 1, 2 o 3.")
+    # Check for --no-tts flag
+    enable_audio = "--no-tts" not in sys.argv
+    if "--no-tts" in sys.argv:
+        sys.argv.remove("--no-tts")
+        print("  [TTS desactivado]")
+
+    mode = None
+    if len(sys.argv) > 2:
+        m = sys.argv[2].lower()
+        if m in ["1", "indoor"]: mode = "indoor"
+        elif m in ["2", "outdoor"]: mode = "outdoor"
+        elif m in ["3", "all"]: mode = "all"
+
+    if mode is None:
+        while True:
+            choice = input("  Modo [1/2/3]: ").strip()
+            if choice == "1":
+                mode = "indoor"
+                break
+            elif choice == "2":
+                mode = "outdoor"
+                break
+            elif choice == "3":
+                mode = "all"
+                break
+            else:
+                print("  Opción no válida. Introduce 1, 2 o 3.")
 
     print()
     print(f"  → Modo seleccionado: {mode.upper()}")
     print()
 
     # Iniciar procesamiento en background
-    thread = threading.Thread(target=process_loop, args=(source, mode), daemon=True)
+    thread = threading.Thread(target=process_loop, args=(source, mode, enable_audio), daemon=True)
     thread.start()
 
     print("Servidor en http://0.0.0.0:5000")

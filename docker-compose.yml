@@ -14,8 +14,6 @@
 #
 # =============================================================================
 
-version: '3.8'
-
 services:
   aria-demo:
     build: .
@@ -35,6 +33,8 @@ services:
       - /dev/bus/usb:/dev/bus/usb
       # Directorio de datos compartido (videos, datasets VRS)
       - ./data:/app/data
+      # Montar código fuente para desarrollo en tiempo real
+      - .:/app
 
     devices:
       # Audio para text-to-speech (espeak-ng)
@@ -43,6 +43,9 @@ services:
     environment:
       # Display para aplicaciones GUI (si se necesita)
       - DISPLAY=${DISPLAY}
+      # GPU access for CUDA in child processes
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
     # Terminal interactiva (para menu de seleccion)
     stdin_open: true

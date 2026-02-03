@@ -1,13 +1,69 @@
-.venv
-__pycache__
-*.pyc
-.git
+# =============================================================================
+# .dockerignore - Excluir archivos del contexto de build de Docker
+# =============================================================================
+# Esto acelera el build y reduce el tamaño de la imagen.
+# Los archivos aquí NO se copian al contenedor durante `docker build`.
+
+# Version Control (1MB+)
+.git/
 .gitignore
-*.egg-info
-dist
-build
-.pytest_cache
-.mypy_cache
+.gitattributes
+
+# Python cache y bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+
+# Large Media & Models (mounted via volumes instead)
+data/
+models/
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.pth
+*.pt
+*.onnx
+*.engine
+*.vrs
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs & Temp
+logs/
+tmp/
 *.log
-data/*.vrs
-data/*.mp4
+
+# Documentation (not needed in container)
+docs/
+*.md
+!README.md
+
+# Docker files (no need to copy into image)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Test files (optional - uncomment if not needed in container)
+# tests/
+# *_test.py
+# test_*.py

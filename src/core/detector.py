@@ -129,13 +129,9 @@ class ParallelDetector:
 
             if self.device == "cuda":
                 self.depth_model = self.depth_model.cuda().half().eval()
-                # Try torch.compile for faster inference (NeMo now in separate process)
-                try:
-                    self.depth_model = torch.compile(self.depth_model, mode="reduce-overhead")
-                    print("[DETECTOR] Depth Anything V2 (FP16 + torch.compile)")
-                except Exception as e:
-                    print(f"[DETECTOR WARN] torch.compile failed: {e}")
-                    print("[DETECTOR] Depth Anything V2 (FP16)")
+                # Note: torch.compile disabled - causes crashes in Docker containers
+                # with subprocess compilation errors. FP16 alone is fast enough.
+                print("[DETECTOR] Depth Anything V2 (FP16)")
             else:
                 print("[DETECTOR] Depth Anything V2 (CPU)")
         except Exception as e:
@@ -156,13 +152,14 @@ class ParallelDetector:
         try:
             torch.load = _patched_load
             from projectaria_eyetracking.inference.infer import EyeGazeInference
-            import projectaria_eyetracking
+            import projectaria_eyetracking.inference.infer as infer_module
             import os
 
             # Find weights relative to the installed package
-            pkg_dir = os.path.dirname(projectaria_eyetracking.__file__)
-            weights_dir = "inference/model/pretrained_weights/social_eyes_uncertainty_v1"
-            weights_path = os.path.join(pkg_dir, weights_dir)
+            # Use the infer module's __file__ since the main package might be a namespace package
+            infer_dir = os.path.dirname(infer_module.__file__)
+            weights_dir = "model/pretrained_weights/social_eyes_uncertainty_v1"
+            weights_path = os.path.join(infer_dir, weights_dir)
 
             if not os.path.exists(os.path.join(weights_path, "weights.pth")):
                 print(f"[DETECTOR WARN] Meta gaze weights not found at {weights_path}")
