@@ -76,7 +76,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Instalar dependencias Python principales
 # - projectaria-client-sdk: SDK oficial para streaming de Aria glasses
 # - projectaria-tools: herramientas para VRS y calibracion
-# - aria-glasses: utilidades adicionales de Aria
+# - projectaria_eyetracking: modelo de gaze de Meta (desde GitHub)
 # - opencv-python-headless: procesamiento de imagen (sin GUI)
 # - flask: servidor web para dashboard
 # - torch, torchvision: PyTorch para modelos de IA
@@ -85,7 +85,7 @@ RUN pip install --upgrade pip && \
     pip install \
     projectaria-client-sdk \
     projectaria-tools \
-    aria-glasses \
+    git+https://github.com/facebookresearch/projectaria_eyetracking.git \
     opencv-python-headless \
     numpy \
     flask \

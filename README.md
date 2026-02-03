@@ -620,7 +620,7 @@ Abre http://localhost:5000
 ### Requisitos
 
 ```bash
-pip install projectaria-tools aria-glasses
+pip install projectaria-client-sdk projectaria-tools
 ```
 
 ### Streaming Profiles
