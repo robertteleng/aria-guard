@@ -51,6 +51,22 @@ docker compose down
 
 La aplicacion estara disponible en: http://localhost:5000
 
+## Modo Interactivo (desarrollo)
+
+Para ejecutar comandos manualmente dentro del contenedor:
+
+```bash
+# Shell interactivo con puertos mapeados
+docker compose run --rm --service-ports aria-demo bash
+
+# Dentro del contenedor:
+python run.py webcam outdoor           # Con TTS
+python run.py webcam outdoor --no-tts  # Sin TTS (inicio rapido)
+python run.py data/video.mp4 indoor    # Desde archivo de video
+```
+
+**Nota**: Usar `--service-ports` es necesario para que el puerto 5000 sea accesible.
+
 ## Comandos Utiles
 
 ```bash
@@ -128,9 +144,42 @@ lsusb | grep -i aria
 docker compose exec aria-demo lsusb
 ```
 
-### Error de GPU
+### Error de GPU / CUDA no disponible
 
 ```bash
 # Verificar que Docker ve la GPU
-docker run --rm --gpus all nvidia/cuda:11.0-base nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
+
+# Verificar CUDA dentro del contenedor
+docker compose run --rm aria-demo python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}')"
+```
+
+Si CUDA no esta disponible, asegurate de tener `nvidia-container-toolkit` instalado
+y que docker-compose.yml tenga la configuracion de GPU correcta.
+
+### Depth o detecciones no aparecen
+
+Si el video se muestra pero no hay bounding boxes ni depth:
+
+1. Revisa los logs del detector:
+   ```
+   [DETECTOR PROCESS] PyTorch X.X, CUDA available: True
+   [DETECTOR PROCESS] GPU: NVIDIA GeForce RTX ...
+   ```
+
+2. Si ves errores de `torch.compile` o "compilation subprocess", es normal.
+   El codigo ya tiene torch.compile desactivado para Docker.
+
+3. Verifica que los modelos esten en `/app/models/`:
+   ```bash
+   docker compose exec aria-demo ls -la /app/models/
+   ```
+
+### TTS tarda mucho en cargar
+
+El modelo TTS (NeMo) tarda ~60 segundos en cargar la primera vez.
+Para desarrollo rapido, usa `--no-tts`:
+
+```bash
+python run.py webcam outdoor --no-tts
 ```
