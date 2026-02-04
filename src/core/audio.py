@@ -13,8 +13,16 @@ import numpy as np
 
 try:
     import sounddevice as sd
+    # Check if audio devices are available
+    try:
+        sd.query_devices()
+        _audio_available = True
+    except Exception:
+        _audio_available = False
+        print("[AUDIO WARN] No audio devices found. Beeps disabled.")
 except ImportError:
     sd = None
+    _audio_available = False
     print("[AUDIO WARN] sounddevice not installed. Beeps disabled.")
 
 # Check for pyttsx3 fallback
@@ -43,7 +51,7 @@ class AudioFeedback:
     }
 
     def __init__(self, enabled: bool = True, use_nemo: bool = True):
-        self.enabled = enabled and sd is not None
+        self.enabled = enabled and sd is not None and _audio_available
         self.beep_sample_rate = 44100  # Fixed for beeps
         self.base_volume = 0.6
 

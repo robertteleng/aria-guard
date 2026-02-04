@@ -34,8 +34,8 @@ RUN pip3 install numpy
 
 WORKDIR /tmp
 
-# Download NVIDIA Video Codec SDK headers for NVDEC/NVENC support
-RUN git clone --depth 1 https://github.com/FFmpeg/nv-codec-headers.git && \
+# Download NVIDIA Video Codec SDK 13.0 headers for NVDEC/NVENC (Blackwell support)
+RUN git clone --depth 1 --branch n13.0.19.0 https://github.com/FFmpeg/nv-codec-headers.git && \
     cd nv-codec-headers && make install
 
 RUN git clone --depth 1 --branch 4.10.0 https://github.com/opencv/opencv.git && \

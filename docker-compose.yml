@@ -35,6 +35,9 @@ services:
       - /dev/bus/usb:/dev/bus/usb
       # Directorio de datos compartido (videos, datasets VRS)
       - ./data:/app/data
+      # PulseAudio socket para audio output
+      - /run/user/1000/pulse:/run/user/1000/pulse:ro
+      - ~/.config/pulse/cookie:/root/.config/pulse/cookie:ro
 
     devices:
       # Audio para text-to-speech (espeak-ng)
@@ -48,6 +51,8 @@ services:
       # GPU access for CUDA in child processes
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      # PulseAudio para audio output
+      - PULSE_SERVER=unix:/run/user/1000/pulse/native
 
     # Terminal interactiva (para menu de seleccion)
     stdin_open: true

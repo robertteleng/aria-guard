@@ -14,6 +14,7 @@ graph TB
         subgraph BASE_CONTENT["Contenido"]
             CUDA["CUDA 12.8.1 + cuDNN 9"]
             OPENCV["OpenCV 4.10.0<br/>✓ CUDA support<br/>✓ NVDEC decode<br/>✓ NVENC encode"]
+            NVCODEC["Video Codec SDK 13.0<br/>✓ Blackwell (RTX 50xx)"]
             PYTHON["Python 3.11 + venv"]
             TBB["TBB + OpenGL + V4L"]
         end
@@ -200,7 +201,9 @@ flowchart TB
 
 ### NVDEC (Decodificación de Video GPU)
 
-El Dockerfile incluye soporte para NVDEC, permitiendo decodificar video en la GPU:
+El Dockerfile incluye soporte para NVDEC usando **NVIDIA Video Codec SDK 13.0** (`nv-codec-headers n13.0.19.0`), permitiendo decodificar video en la GPU:
+
+**GPUs soportadas:** RTX 20xx (Turing), RTX 30xx (Ampere), RTX 40xx (Ada), **RTX 50xx (Blackwell)**
 
 ```mermaid
 flowchart LR
@@ -436,6 +439,19 @@ docker run --gpus all aria-demo:tensorrt python -c \
 # Primera vez descarga modelos (~2GB)
 # Usar --no-tts para desarrollo:
 python run.py webcam outdoor --no-tts
+```
+
+### Audio no funciona (beeps/TTS)
+```bash
+# Verificar PulseAudio en el host
+pactl info
+
+# El docker-compose.yml monta el socket de PulseAudio:
+# - /run/user/1000/pulse:/run/user/1000/pulse:ro
+# - PULSE_SERVER=unix:/run/user/1000/pulse/native
+
+# Si no hay audio, los beeps se deshabilitan automáticamente
+# (el código detecta si hay dispositivos disponibles)
 ```
 
 ### Alto uso de CPU
