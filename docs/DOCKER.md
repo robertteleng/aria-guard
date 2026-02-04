@@ -53,9 +53,9 @@ Incluye OpenCV compilado con CUDA para máximo rendimiento.
 
 ### Configuración
 
-- **CUDA**: 12.6 + cuDNN 8.9.7
+- **CUDA**: 12.8.1 + cuDNN
 - **OpenCV**: 4.10.0 compilado con CUDA
-- **PyTorch**: cu126 + TensorRT
+- **PyTorch**: cu128 + TensorRT
 - **GPUs soportadas**: RTX 20xx (7.5), RTX 30xx (8.6), RTX 40xx (8.9), RTX 50xx (12.0)
 
 ### Build y uso

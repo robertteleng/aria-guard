@@ -85,13 +85,13 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
     # Start CUDA in separate process FIRST (before any Aria SDK)
     print("[SERVER] Iniciando DetectorProcess (CUDA en proceso separado)...")
     detector = DetectorProcess(mode=mode, enable_depth=True)
-    if not detector.start(timeout=120):
+    if not detector.start(timeout=60):
         print("[SERVER] ✗ Failed to start DetectorProcess")
         return
 
     # Non-CUDA components in main process
     dashboard = Dashboard()
-    audio = AudioFeedback(enabled=enable_audio)
+    audio = AudioFeedback(enabled=enable_audio, use_nemo=enable_audio)
     alert_engine = AlertDecisionEngine()
     tracker = SimpleTracker()
     print("[SERVER] ✓ Componentes inicializados")

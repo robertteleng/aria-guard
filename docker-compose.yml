@@ -1,5 +1,5 @@
 # =============================================================================
-# Docker Compose para ARIA Demo
+# Docker Compose para ARIA Demo (TensorRT)
 # =============================================================================
 #
 # Uso:
@@ -16,8 +16,10 @@
 
 services:
   aria-demo:
-    build: .
-    image: aria-demo:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.tensorrt
+    image: aria-demo:tensorrt
     container_name: aria-demo
 
     # Modo privilegiado: necesario para acceso completo a USB
@@ -33,12 +35,12 @@ services:
       - /dev/bus/usb:/dev/bus/usb
       # Directorio de datos compartido (videos, datasets VRS)
       - ./data:/app/data
-      # Montar código fuente para desarrollo en tiempo real
-      - .:/app
 
     devices:
       # Audio para text-to-speech (espeak-ng)
       - /dev/snd:/dev/snd
+      # Webcam (si se usa)
+      - /dev/video0:/dev/video0
 
     environment:
       # Display para aplicaciones GUI (si se necesita)
@@ -58,7 +60,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              count: all
               capabilities: [gpu]
 
     # Comando por defecto: ejecutar la aplicacion

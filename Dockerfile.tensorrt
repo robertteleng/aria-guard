@@ -1,10 +1,10 @@
 # =============================================================================
 # Dockerfile.tensorrt - ARIA Demo con OpenCV CUDA + TensorRT
 # =============================================================================
-# Combinación probada compatible (fuente: github.com/raulqf):
-#   - CUDA 12.6 + cuDNN 8.9.7 + OpenCV 4.10.0
+# Configuración:
+#   - CUDA 12.8.1 + cuDNN + OpenCV 4.10.0
 #   - Python 3.11 (builder y runtime)
-#   - PyTorch con CUDA 12.6
+#   - PyTorch con CUDA 12.8 (cu128)
 #   - TensorRT via pip
 #
 # Soporta GPUs: RTX 20xx (7.5), RTX 30xx (8.6), RTX 40xx (8.9), RTX 50xx (12.0)
@@ -14,7 +14,7 @@
 # =============================================================================
 
 # Stage 1: Build OpenCV con CUDA
-FROM nvidia/cuda:12.6.3-cudnn-devel-ubuntu22.04 AS opencv-builder
+FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04 AS opencv-builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -79,7 +79,7 @@ RUN NUMPY_INCLUDE=$(python3 -c "import numpy; print(numpy.get_include())") && \
 # =============================================================================
 # Stage 2: Runtime
 # =============================================================================
-FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -91,7 +91,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.11 python3.11-dev python3.11-venv python3-pip git build-essential \
     libgtk-3-0 libavcodec-dev libavformat-dev libswscale-dev \
     libportaudio2 libasound2-dev libsndfile1 espeak-ng usbutils ffmpeg \
-    libstdc++6 libusb-1.0-0-dev \
+    libstdc++6 libusb-1.0-0-dev libtbb12 libprotobuf23 \
     && rm -rf /var/lib/apt/lists/*
 
 # Intel RealSense SDK (para soporte D435)
@@ -137,8 +137,8 @@ RUN cp -r /opt/opencv/lib/python3.11/site-packages/cv2 /opt/venv/lib/python3.11/
 # Verificar que OpenCV funciona
 RUN python -c "import cv2; print('OpenCV version:', cv2.__version__); print('CUDA devices:', cv2.cuda.getCudaEnabledDeviceCount())" || echo "CUDA check requires GPU"
 
-# PyTorch con CUDA 12.6
-RUN pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+# PyTorch con CUDA 12.8 (Blackwell support)
+RUN pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 
 # TensorRT via pip (soporta GPUs nuevas)
 RUN pip install tensorrt

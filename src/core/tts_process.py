@@ -147,8 +147,8 @@ class TTSProcess:
         )
         self.process.start()
 
-        # Wait for initialization (longer timeout for pre-caching)
-        result = sample_rate_out.get(timeout=120)
+        # Wait for initialization (longer timeout for model download + pre-caching)
+        result = sample_rate_out.get(timeout=90)
         if result is None:
             print("[TTS] Process failed to initialize")
             self._ready = False
