@@ -168,6 +168,10 @@ RUN git lfs install && \
     cd /tmp/aria_gaze && \
     git lfs pull --include="projectaria_eyetracking/inference/model/pretrained_weights/**" && \
     pip install /tmp/aria_gaze && \
+    # Copy LFS weights manually (pip install doesn't include them)
+    mkdir -p /opt/venv/lib/python3.11/site-packages/projectaria_eyetracking/inference/model/pretrained_weights && \
+    cp -r /tmp/aria_gaze/projectaria_eyetracking/inference/model/pretrained_weights/* \
+        /opt/venv/lib/python3.11/site-packages/projectaria_eyetracking/inference/model/pretrained_weights/ && \
     # Verificar que los pesos se instalaron correctamente
     ls -la /opt/venv/lib/python3.11/site-packages/projectaria_eyetracking/inference/model/pretrained_weights/social_eyes_uncertainty_v1/ && \
     rm -rf /tmp/aria_gaze

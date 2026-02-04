@@ -44,9 +44,13 @@ RUN git lfs install && \
     git clone --depth 1 https://github.com/facebookresearch/projectaria_eyetracking.git /tmp/aria_gaze && \
     cd /tmp/aria_gaze && \
     git lfs pull --include="projectaria_eyetracking/inference/model/pretrained_weights/**" && \
-    pip install /tmp/aria_gaze && \
+    pip install /tmp/aria_gaze &&
+    mkdir -p /opt/venv/lib/python3.11/site-packages/projectaria_eyetracking/inference/model/pretrained_weights && \
+    # Copy LFS weights manually (pip install does not include them) \
+    cp -r /tmp/aria_gaze/projectaria_eyetracking/inference/model/pretrained_weights/* \
+        /opt/venv/lib/python3.11/site-packages/projectaria_eyetracking/inference/model/pretrained_weights/ && \
     mkdir -p /app/models/gaze_weights && \
-    cp -r /opt/venv/lib/python3.11/site-packages/projectaria_eyetracking/inference/model/pretrained_weights/social_eyes_uncertainty_v1 /app/models/gaze_weights/ && \
+    cp -r /tmp/aria_gaze/projectaria_eyetracking/inference/model/pretrained_weights/social_eyes_uncertainty_v1 /app/models/gaze_weights/ && \
     rm -rf /tmp/aria_gaze
 
 # Copy application code
