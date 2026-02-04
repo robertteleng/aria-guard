@@ -54,10 +54,20 @@ def _tts_worker(queue, sample_rate_out):
         spec_gen = FastPitchModel.from_pretrained("nvidia/tts_en_fastpitch")
         vocoder = HifiGanModel.from_pretrained("nvidia/tts_hifigan")
 
+        use_amp = False
         if torch.cuda.is_available():
             spec_gen = spec_gen.cuda().eval()
             vocoder = vocoder.cuda().eval()
-            print("[TTS PROCESS] NeMo loaded on CUDA")
+
+            # Use AMP for FP16 (NeMo doesn't support .half() directly)
+            if torch.cuda.get_device_capability()[0] >= 7:  # Volta+
+                use_amp = True
+                print("[TTS PROCESS] NeMo loaded on CUDA (AMP FP16)")
+            else:
+                print("[TTS PROCESS] NeMo loaded on CUDA (FP32)")
+
+            # Warm up CUDA
+            torch.cuda.synchronize()
         else:
             spec_gen = spec_gen.eval()
             vocoder = vocoder.eval()
@@ -78,11 +88,22 @@ def _tts_worker(queue, sample_rate_out):
         if text in cache:
             return cache[text].copy()
 
-        with torch.no_grad():
-            parsed = spec_gen.parse(text)
-            spectrogram = spec_gen.generate_spectrogram(tokens=parsed)
-            audio = vocoder.convert_spectrogram_to_audio(spec=spectrogram)
+        with torch.inference_mode():
+            if use_amp:
+                with torch.amp.autocast('cuda', dtype=torch.float16):
+                    parsed = spec_gen.parse(text)
+                    spectrogram = spec_gen.generate_spectrogram(tokens=parsed)
+                    audio = vocoder.convert_spectrogram_to_audio(spec=spectrogram)
+            else:
+                parsed = spec_gen.parse(text)
+                spectrogram = spec_gen.generate_spectrogram(tokens=parsed)
+                audio = vocoder.convert_spectrogram_to_audio(spec=spectrogram)
+
         audio = audio.squeeze().cpu().numpy()
+
+        # Ensure float32 for sounddevice
+        if audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
 
         if len(text) < 50:
             cache[text] = audio.copy()

@@ -58,9 +58,24 @@ system_stats = {
 }
 
 
+# Check for OpenCV CUDA and turbojpeg availability
+_OPENCV_CUDA = hasattr(cv2, 'cuda') and cv2.cuda.getCudaEnabledDeviceCount() > 0
+_TURBOJPEG = None
+try:
+    from turbojpeg import TurboJPEG
+    _TURBOJPEG = TurboJPEG()
+    print("[SERVER] TurboJPEG habilitado (encoding rápido)")
+except ImportError:
+    pass
+
+
 def generate_frames(feed_type="rgb"):
-    """Generator para MJPEG streaming."""
+    """Generator para MJPEG streaming con encoding optimizado."""
     global current_frame, current_depth
+
+    # GPU frame resize buffer (reuse to avoid allocations)
+    gpu_frame = cv2.cuda_GpuMat() if _OPENCV_CUDA else None
+
     while True:
         with frame_lock:
             if feed_type == "rgb" and current_frame is not None:
@@ -71,9 +86,21 @@ def generate_frames(feed_type="rgb"):
                 time.sleep(0.01)
                 continue
 
-        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        # Resize on GPU if frame is large (reduces CPU JPEG encoding load)
+        if _OPENCV_CUDA and frame.shape[0] > 720:
+            gpu_frame.upload(frame)
+            gpu_small = cv2.cuda.resize(gpu_frame, (1280, 720))
+            frame = gpu_small.download()
+
+        # Encode JPEG (use TurboJPEG if available, ~2x faster)
+        if _TURBOJPEG:
+            buffer = _TURBOJPEG.encode(frame, quality=75)
+        else:
+            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            buffer = buffer.tobytes()
+
         yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+               b'Content-Type: image/jpeg\r\n\r\n' + buffer + b'\r\n')
 
 
 def process_loop(source: str, mode: str = "all", enable_audio: bool = True):

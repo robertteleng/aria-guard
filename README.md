@@ -564,7 +564,18 @@ aria-demo/
 
 ## Instalación via Docker (Recomendada)
 
+> **📖 Documentación completa**: [docs/DOCKER.md](docs/DOCKER.md) - Arquitectura de imágenes, workflow de desarrollo, troubleshooting, diagramas detallados.
+
 Esta es la **forma más segura** de ejecutar el proyecto, ya que aísla todas las dependencias y evita conflictos de librerías del sistema (como `glibc` vs Aria SDK).
+
+```mermaid
+flowchart LR
+    subgraph "Quick Start"
+        A[./docker-build.sh all] --> B[Primera vez ~25 min]
+        C[./docker-build.sh dev] --> D[Desarrollo 0 min]
+        E[./docker-build.sh app] --> F[Deps ~3 min]
+    end
+```
 
 ### Requisitos Previos
 

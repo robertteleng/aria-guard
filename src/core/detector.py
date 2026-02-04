@@ -122,9 +122,9 @@ class ParallelDetector:
         self._depth_tensorrt = False
         self._depth_trt_context = None
 
-        # Try TensorRT first
+        # Try TensorRT first (vits = small model from fabio-sim/Depth-Anything-ONNX)
         if self.device == "cuda":
-            engine_path = MODELS_DIR / "depth_anything_v2_small.engine"
+            engine_path = MODELS_DIR / "depth_anything_v2_vits.engine"
             if engine_path.exists():
                 try:
                     self._load_depth_tensorrt(engine_path)
@@ -203,15 +203,26 @@ class ParallelDetector:
             from projectaria_eyetracking.inference.infer import EyeGazeInference
             import projectaria_eyetracking.inference.infer as infer_module
             import os
+            from pathlib import Path
 
-            # Find weights relative to the installed package
-            # Use the infer module's __file__ since the main package might be a namespace package
-            infer_dir = os.path.dirname(infer_module.__file__)
-            weights_dir = "model/pretrained_weights/social_eyes_uncertainty_v1"
-            weights_path = os.path.join(infer_dir, weights_dir)
+            # Search for weights in multiple locations
+            weights_locations = [
+                # 1. Local project models directory
+                Path(__file__).parent.parent.parent / "models" / "gaze_weights" / "social_eyes_uncertainty_v1",
+                # 2. Inside installed pip package
+                Path(os.path.dirname(infer_module.__file__)) / "model" / "pretrained_weights" / "social_eyes_uncertainty_v1",
+            ]
 
-            if not os.path.exists(os.path.join(weights_path, "weights.pth")):
-                print(f"[DETECTOR WARN] Meta gaze weights not found at {weights_path}")
+            weights_path = None
+            for loc in weights_locations:
+                if (loc / "weights.pth").exists():
+                    weights_path = str(loc)
+                    break
+
+            if weights_path is None:
+                print(f"[DETECTOR WARN] Meta gaze weights not found. Searched:")
+                for loc in weights_locations:
+                    print(f"    - {loc}")
                 return
 
             self.gaze_model = EyeGazeInference(
@@ -219,7 +230,7 @@ class ParallelDetector:
                 model_config_path=os.path.join(weights_path, "config.yaml"),
                 device=self.device
             )
-            print(f"[DETECTOR] Meta Eye Gaze model loaded ({self.device})")
+            print(f"[DETECTOR] Meta Eye Gaze model loaded from {weights_path}")
 
         except ImportError:
             print("[DETECTOR WARN] projectaria_eyetracking not installed")

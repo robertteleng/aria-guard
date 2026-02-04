@@ -1,19 +1,18 @@
 # =============================================================================
-# Dockerfile.tensorrt - ARIA Demo con OpenCV CUDA + TensorRT
+# Dockerfile.base - Base image con OpenCV CUDA + NVDEC
 # =============================================================================
-# Configuración:
-#   - CUDA 12.8.1 + cuDNN + OpenCV 4.10.0
-#   - Python 3.11 (builder y runtime)
-#   - PyTorch con CUDA 12.8 (cu128)
-#   - TensorRT via pip
+# Esta imagen se construye UNA VEZ y sirve como base para Dockerfile.app
 #
-# Soporta GPUs: RTX 20xx (7.5), RTX 30xx (8.6), RTX 40xx (8.9), RTX 50xx (12.0)
+# Build: docker build -f Dockerfile.base -t aria-base:opencv-nvdec .
+# Size: ~18GB (incluye OpenCV compilado con CUDA)
 #
-# Build: docker build -f Dockerfile.tensorrt -t aria-demo:tensorrt .
-# Run:   docker run --gpus all -p 5000:5000 aria-demo:tensorrt
+# Solo reconstruir cuando:
+#   - Cambios en OpenCV version
+#   - Cambios en CUDA version
+#   - Cambios en flags de compilación (NVDEC, etc)
 # =============================================================================
 
-# Stage 1: Build OpenCV con CUDA
+# Stage 1: Build OpenCV con CUDA + NVDEC
 FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04 AS opencv-builder
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -40,7 +39,6 @@ RUN git clone --depth 1 https://github.com/FFmpeg/nv-codec-headers.git && \
 
 RUN git clone --depth 1 --branch 4.10.0 https://github.com/opencv/opencv.git && \
     git clone --depth 1 --branch 4.10.0 https://github.com/opencv/opencv_contrib.git && \
-    # Patch for -Wsuggest-override warnings
     sed -i 's/virtual void clear() = 0;/virtual void clear() override = 0;/g' opencv_contrib/modules/cudafeatures2d/include/opencv2/cudafeatures2d.hpp && \
     sed -i 's/virtual bool empty() const = 0;/virtual bool empty() const override = 0;/g' opencv_contrib/modules/cudafeatures2d/include/opencv2/cudafeatures2d.hpp
 
@@ -50,7 +48,6 @@ RUN NUMPY_INCLUDE=$(python3 -c "import numpy; print(numpy.get_include())") && \
     -D CMAKE_BUILD_TYPE=RELEASE \
     -D CMAKE_INSTALL_PREFIX=/opt/opencv \
     -D OPENCV_EXTRA_MODULES_PATH=/tmp/opencv_contrib/modules \
-    # CUDA settings (combinación probada: CUDA 12.6 + cuDNN 8.9.7)
     -D WITH_CUDA=ON \
     -D WITH_CUDNN=ON \
     -D OPENCV_DNN_CUDA=ON \
@@ -61,19 +58,16 @@ RUN NUMPY_INCLUDE=$(python3 -c "import numpy; print(numpy.get_include())") && \
     -D WITH_CUBLAS=1 \
     -D WITH_NVCUVID=ON \
     -D WITH_NVCUVENC=ON \
-    # Optimizaciones adicionales (gist raulqf)
     -D WITH_TBB=ON \
     -D WITH_V4L=ON \
     -D WITH_OPENGL=ON \
     -D OPENCV_GENERATE_PKGCONFIG=ON \
-    # Python bindings
     -D BUILD_opencv_python3=ON \
     -D PYTHON3_EXECUTABLE=/usr/bin/python3.11 \
     -D PYTHON3_INCLUDE_DIR=/usr/include/python3.11 \
     -D PYTHON3_LIBRARY=/usr/lib/x86_64-linux-gnu/libpython3.11.so \
     -D PYTHON3_NUMPY_INCLUDE_DIRS=$NUMPY_INCLUDE \
     -D PYTHON3_PACKAGES_PATH=/opt/opencv/lib/python3.11/site-packages \
-    # Deshabilitar componentes innecesarios
     -D BUILD_TESTS=OFF \
     -D BUILD_PERF_TESTS=OFF \
     -D BUILD_EXAMPLES=OFF \
@@ -84,95 +78,43 @@ RUN NUMPY_INCLUDE=$(python3 -c "import numpy; print(numpy.get_include())") && \
     && make install
 
 # =============================================================================
-# Stage 2: Runtime
+# Stage 2: Runtime base
 # =============================================================================
 FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Dependencias sistema PRIMERO (antes de copiar OpenCV)
+# System dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common curl \
     && add-apt-repository ppa:ubuntu-toolchain-r/test \
     && apt-get update && apt-get install -y --no-install-recommends \
-    python3.11 python3.11-dev python3.11-venv python3-pip git git-lfs build-essential \
-    libgtk-3-0 libavcodec-dev libavformat-dev libswscale-dev \
-    libportaudio2 libasound2-dev libsndfile1 espeak-ng usbutils ffmpeg \
-    libstdc++6 libusb-1.0-0-dev libtbb12 libprotobuf23 \
+    libstdc++6 \
+    python3.11 python3.11-dev python3.11-venv python3-pip \
+    libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender1 \
+    libavcodec-dev libavformat-dev libswscale-dev \
+    libjpeg-dev libpng-dev libtiff-dev \
+    libtbb12 libtbb-dev \
+    libgtk-3-0 \
+    portaudio19-dev libsndfile1 alsa-utils pulseaudio \
+    git git-lfs \
     && rm -rf /var/lib/apt/lists/*
 
-# Intel RealSense SDK (para soporte D435)
-RUN mkdir -p /etc/apt/keyrings && \
-    curl -sSf https://librealsense.intel.com/Debian/librealsense.pgp | tee /etc/apt/keyrings/librealsense.pgp > /dev/null && \
-    echo "deb [signed-by=/etc/apt/keyrings/librealsense.pgp] https://librealsense.intel.com/Debian/apt-repo jammy main" | \
-    tee /etc/apt/sources.list.d/librealsense.list && \
-    apt-get update && apt-get install -y --no-install-recommends \
-    librealsense2-dev librealsense2-utils \
-    && rm -rf /var/lib/apt/lists/*
-
-# Python 3.11 como default ANTES de crear venv
+# Python setup
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
 
-# Verificar version de Python
-RUN python3 --version && python --version
-
-WORKDIR /app
-
-# Crear venv con Python 3.11 explícito
+# Create venv
 RUN python3.11 -m venv /opt/venv
-
-# Activar venv en PATH (ANTES de instalar paquetes)
 ENV PATH="/opt/venv/bin:$PATH"
-ENV VIRTUAL_ENV="/opt/venv"
+RUN pip install --upgrade pip setuptools wheel
 
-# Verificar que el venv usa Python 3.11
-RUN python --version && which python
-
-# Actualizar pip
-RUN pip install --upgrade pip Cython numpy
-
-# Copiar OpenCV compilado DESPUÉS de configurar Python
+# Copy OpenCV from builder
 COPY --from=opencv-builder /opt/opencv /opt/opencv
-
-# Configurar OpenCV en el entorno
 ENV LD_LIBRARY_PATH="/opt/opencv/lib:${LD_LIBRARY_PATH}"
-
-# Copiar el módulo cv2 al site-packages del venv para que Python lo encuentre
 RUN cp -r /opt/opencv/lib/python3.11/site-packages/cv2 /opt/venv/lib/python3.11/site-packages/
 
-# Verificar que OpenCV funciona
-RUN python -c "import cv2; print('OpenCV version:', cv2.__version__); print('CUDA devices:', cv2.cuda.getCudaEnabledDeviceCount())" || echo "CUDA check requires GPU"
+# Verify OpenCV with CUDA
+RUN python -c "import cv2; print('OpenCV:', cv2.__version__); print('CUDA devices:', cv2.cuda.getCudaEnabledDeviceCount()); print('cudacodec:', hasattr(cv2, 'cudacodec'))"
 
-# PyTorch con CUDA 12.8 (Blackwell support)
-RUN pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
-
-# TensorRT via pip (soporta GPUs nuevas)
-RUN pip install tensorrt
-
-# TurboJPEG para encoding JPEG rápido
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libturbojpeg0-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Resto de dependencias (sin projectaria_eyetracking - se instala con LFS)
-RUN pip install \
-    projectaria-client-sdk \
-    projectaria-tools \
-    flask sounddevice ultralytics transformers "nemo_toolkit[tts]" \
-    pyrealsense2 PyTurboJPEG
-
-# Instalar projectaria_eyetracking con Git LFS para obtener los pesos del modelo
-RUN git lfs install && \
-    git clone --depth 1 https://github.com/facebookresearch/projectaria_eyetracking.git /tmp/aria_gaze && \
-    cd /tmp/aria_gaze && \
-    git lfs pull --include="projectaria_eyetracking/inference/model/pretrained_weights/**" && \
-    pip install /tmp/aria_gaze && \
-    # Verificar que los pesos se instalaron correctamente
-    ls -la /opt/venv/lib/python3.11/site-packages/projectaria_eyetracking/inference/model/pretrained_weights/social_eyes_uncertainty_v1/ && \
-    rm -rf /tmp/aria_gaze
-
-COPY . /app/
-
-EXPOSE 5000
-CMD ["python", "run.py"]
+WORKDIR /app
