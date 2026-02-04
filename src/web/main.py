@@ -21,7 +21,7 @@ from flask import Flask, Response, render_template
 
 # NO CUDA imports here - main process must be CUDA-free for Aria SDK compatibility
 from src.core import Dashboard, DetectorProcess
-from src.core import MockObserver, AriaDemoObserver, AriaDatasetObserver
+from src.core import MockObserver, AriaDemoObserver, AriaDatasetObserver, RealSenseObserver
 from src.core.alert_engine import AlertDecisionEngine
 from src.core.tracker import SimpleTracker
 
@@ -115,6 +115,9 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
         observer = AriaDemoObserver(interface="wifi", ip_address=ip)
     elif source == "webcam":
         observer = MockObserver(source="webcam")
+    elif source == "realsense":
+        print("[SERVER] Conectando con Intel RealSense D435...")
+        observer = RealSenseObserver()
     else:
         observer = MockObserver(source="video", video_path=source)
 
@@ -124,6 +127,12 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
     frame_count = 0
     start_time = time.time()
 
+    # Check if observer provides hardware depth (RealSense D435)
+    has_hardware_depth = hasattr(observer, 'get_depth')
+    if has_hardware_depth:
+        print("[SERVER] Hardware depth disponible (RealSense) - desactivando modelo de depth IA")
+        print("[SERVER] Gaze no disponible (RealSense no tiene eye tracking)")
+
     while True:
         # Get frame from observer
         rgb = observer.get_frame("rgb")
@@ -131,10 +140,14 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
             time.sleep(0.01)
             continue
 
-        eye_frame = observer.get_frame("eye")
+        # Eye tracking solo disponible con Aria (RealSense no tiene)
+        eye_frame = None if has_hardware_depth else observer.get_frame("eye")
+
+        # Get hardware depth if available (RealSense D435)
+        hardware_depth = observer.get_depth() if has_hardware_depth else None
 
         # Send frame to DetectorProcess
-        detector.send_frame(rgb, eye_frame)
+        detector.send_frame(rgb, eye_frame, hardware_depth)
 
         # Get results from DetectorProcess (non-blocking)
         result = detector.get_result()

@@ -93,12 +93,14 @@ def _detector_worker(
 
             rgb = frame_data.get("rgb")
             eye = frame_data.get("eye")
+            hardware_depth = frame_data.get("hardware_depth")  # RealSense D435
 
             if rgb is None:
                 continue
 
             # Process frame (returns: detections, depth_map, gaze_point, tracked_objects)
-            detections, depth_colored, gaze_info, _ = detector.process(rgb, eye)
+            # Si hardware_depth está disponible, no ejecuta el modelo de depth IA
+            detections, depth_colored, gaze_info, _ = detector.process(rgb, eye, hardware_depth)
 
             # Send results back
             result = {
@@ -209,13 +211,20 @@ class DetectorProcess:
             self.stop()
             return False
 
-    def send_frame(self, rgb: np.ndarray, eye: Optional[np.ndarray] = None) -> bool:
+    def send_frame(
+        self,
+        rgb: np.ndarray,
+        eye: Optional[np.ndarray] = None,
+        hardware_depth: Optional[np.ndarray] = None
+    ) -> bool:
         """
         Send a frame for processing.
 
         Args:
             rgb: RGB frame
             eye: Eye tracking frame (optional)
+            hardware_depth: Hardware depth map from RealSense D435 (optional).
+                           If provided, skips AI depth estimation.
 
         Returns:
             True if frame was queued
@@ -225,7 +234,8 @@ class DetectorProcess:
 
         frame_data = {
             "rgb": rgb,
-            "eye": eye
+            "eye": eye,
+            "hardware_depth": hardware_depth
         }
 
         try:

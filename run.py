@@ -77,7 +77,7 @@ if __name__ == '__main__':
             source = f"dataset:{vrs_path}:{gaze_csv}"
         else:
             source = f"dataset:{vrs_path}:"
-    elif source not in ("webcam", "aria", "aria:usb") and not source.startswith("aria:wifi"):
+    elif source not in ("webcam", "aria", "aria:usb", "realsense") and not source.startswith("aria:wifi"):
         # Regular video file
         video_path = Path(source)
         if not video_path.is_absolute():
@@ -103,6 +103,8 @@ if __name__ == '__main__':
         print(f"  Fuente: Aria Glasses (USB)")
     elif source.startswith("aria:wifi"):
         print(f"  Fuente: Aria Glasses (WiFi)")
+    elif source == "realsense":
+        print(f"  Fuente: Intel RealSense D435 (RGB + Depth)")
     else:
         print(f"  Fuente: {source}")
     print()

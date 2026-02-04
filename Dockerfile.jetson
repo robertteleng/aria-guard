@@ -1,0 +1,97 @@
+# =============================================================================
+# Dockerfile.jetson - ARIA Demo para Jetson Orin Nano
+# =============================================================================
+# - Jetson Orin Nano: ARM64 (aarch64), Compute Capability 8.7
+# - Base: L4T (Linux for Tegra) con PyTorch pre-instalado
+# - RealSense D435 en lugar de Meta Aria (Aria SDK no soporta ARM)
+# - NO compila OpenCV (usa el de L4T o pip)
+#
+# Build (en el Jetson o con QEMU):
+#   docker build -f Dockerfile.jetson -t aria-demo:jetson .
+#
+# Run:
+#   docker run --runtime nvidia -it --rm \
+#     --device /dev/video0 \
+#     -v /dev/bus/usb:/dev/bus/usb \
+#     -p 5000:5000 \
+#     aria-demo:jetson
+# =============================================================================
+
+# L4T PyTorch base - incluye CUDA, cuDNN, PyTorch precompilados para ARM64
+# JetPack 6.x / L4T R36.x
+FROM nvcr.io/nvidia/l4t-pytorch:r36.2.0-pth2.1-py3
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# =============================================================================
+# Dependencias del sistema
+# =============================================================================
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-pip python3-dev git build-essential \
+    software-properties-common lsb-release curl \
+    # Audio
+    libportaudio2 libasound2-dev libsndfile1 espeak-ng \
+    # Video/USB
+    usbutils ffmpeg libv4l-dev v4l-utils \
+    # RealSense
+    libusb-1.0-0-dev libglfw3-dev libgl1-mesa-dev libglu1-mesa-dev \
+    # OpenCV deps
+    libgtk-3-0 libavcodec-dev libavformat-dev libswscale-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# =============================================================================
+# RealSense SDK (en lugar de Aria)
+# =============================================================================
+# Intel RealSense SDK para ARM64 - usar repo de Intel para Jetson
+RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-key F6E65AC044F831AC80A06380C8B3A55A6F3EFCDE || \
+    apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-key F6E65AC044F831AC80A06380C8B3A55A6F3EFCDE && \
+    add-apt-repository "deb https://librealsense.intel.com/Debian/apt-repo $(lsb_release -cs) main" -u && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    librealsense2-dev librealsense2-utils \
+    && rm -rf /var/lib/apt/lists/* || \
+    echo "librealsense2 apt failed, will try pip"
+
+# pyrealsense2 para ARM64
+RUN pip3 install --no-cache-dir pyrealsense2 || \
+    echo "pyrealsense2 wheel not available, will build from source if needed"
+
+# =============================================================================
+# Dependencias Python
+# =============================================================================
+RUN pip3 install --no-cache-dir --upgrade pip
+
+# OpenCV (usar el de pip para ARM64 - incluye soporte básico)
+RUN pip3 install --no-cache-dir opencv-python-headless
+
+# TensorRT ya está incluido en L4T base
+
+# Resto de dependencias (sin Aria SDK)
+RUN pip3 install --no-cache-dir \
+    numpy \
+    flask \
+    sounddevice \
+    ultralytics \
+    transformers
+
+# NeMo TTS (puede fallar en ARM, usar fallback)
+RUN pip3 install --no-cache-dir "nemo_toolkit[tts]" || \
+    echo "NeMo TTS not available on ARM, using espeak fallback"
+
+# =============================================================================
+# Código fuente
+# =============================================================================
+COPY . /app/
+
+# =============================================================================
+# Configuración RealSense
+# =============================================================================
+# Reglas udev para RealSense (si no están en el host)
+RUN mkdir -p /etc/udev/rules.d && \
+    echo 'SUBSYSTEM=="usb", ATTRS{idVendor}=="8086", MODE="0666"' > /etc/udev/rules.d/99-realsense.rules
+
+EXPOSE 5000
+
+# Usar script de entrada que detecta RealSense vs webcam
+CMD ["python3", "run.py", "realsense"]

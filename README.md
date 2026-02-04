@@ -1,6 +1,11 @@
 # ARIA Demo
 
-Demo de asistencia visual para gafas Meta Aria: detección de objetos en tiempo real + estimación de profundidad + eye tracking + tracking temporal + alertas inteligentes.
+Demo de asistencia visual con detección de objetos en tiempo real + estimación de profundidad + eye tracking + tracking temporal + alertas inteligentes.
+
+Soporta múltiples fuentes de entrada:
+- **Meta Aria Glasses** - RGB + Eye Tracking + Gaze (x86_64)
+- **Intel RealSense D435** - RGB + Depth por hardware (x86_64 + ARM64/Jetson)
+- **Webcam/Video** - RGB + Depth por IA
 
 ## Características
 
@@ -21,12 +26,14 @@ graph TB
         ARIA[Meta Aria Glasses]
         VRS[VRS Dataset]
         WEB[Webcam/Video]
+        RS[Intel RealSense D435]
     end
 
     subgraph Observer["Observer Layer"]
         OBS[MockObserver<br/>Webcam/Video]
         AOBS[AriaDemoObserver<br/>Aria Glasses]
         DOBS[AriaDatasetObserver<br/>VRS + Gaze CSV]
+        ROBS[RealSenseObserver<br/>RGB + HW Depth]
     end
 
     subgraph Detection["Detection Layer (GPU)"]
@@ -63,10 +70,12 @@ graph TB
     ARIA --> AOBS
     VRS --> DOBS
     WEB --> OBS
+    RS --> ROBS
 
     OBS --> DET
     AOBS --> DET
     DOBS --> DET
+    ROBS --> DET
 
     DET --> YOLO
     DET --> DEPTH
@@ -506,16 +515,34 @@ graph LR
     FR --> NORM
 ```
 
+## Fuentes de Entrada
+
+| Fuente | RGB | Depth | Gaze | Eye Tracking | Plataforma |
+|--------|-----|-------|------|--------------|------------|
+| Meta Aria Glasses | ✓ | IA (Depth Anything) | ✓ | ✓ | x86_64 |
+| Intel RealSense D435 | ✓ | Hardware (instantáneo) | ✗ | ✗ | x86_64 + ARM64 |
+| Webcam | ✓ | IA (Depth Anything) | ✗ | ✗ | Todas |
+| Video/VRS | ✓ | IA (Depth Anything) | Precomputed | Precomputed | Todas |
+
+**Ventajas RealSense D435:**
+- Depth por hardware = ~0.8GB menos VRAM
+- ~30% más rápido (sin modelo de depth IA)
+- Funciona en Jetson Orin Nano (ARM64)
+
 ## Estructura del Proyecto
 
 ```
 aria-demo/
 ├── run.py                      # Entry point
+├── Dockerfile                  # Docker básico (desarrollo)
+├── Dockerfile.tensorrt         # OpenCV CUDA + TensorRT (producción x86_64)
+├── Dockerfile.jetson           # Jetson Orin Nano + RealSense (ARM64)
 ├── src/
 │   ├── core/
 │   │   ├── __init__.py
-│   │   ├── observer.py         # Frame capture (Aria/Webcam/VRS)
+│   │   ├── observer.py         # Frame capture (Aria/Webcam/VRS/RealSense)
 │   │   ├── detector.py         # YOLO + Depth + Gaze (CUDA)
+│   │   ├── detector_process.py # CUDA en proceso separado
 │   │   ├── tracker.py          # SimpleTracker + TrackedObject
 │   │   ├── alert_engine.py     # AlertDecisionEngine
 │   │   ├── audio.py            # AudioFeedback + Beeps
@@ -525,11 +552,13 @@ aria-demo/
 │       ├── main.py             # Flask + MJPEG streaming
 │       └── templates/
 │           └── index.html
+├── scripts/
+│   └── export_depth_tensorrt.py  # Exportar Depth Anything a TensorRT
 ├── data/
 │   └── aria_sample/            # VRS recordings + gaze CSV
 ├── models/                     # YOLO weights (.pt, .engine)
 ├── docs/
-│   └── README.md
+│   └── DOCKER.md               # Documentación Docker completa
 └── requirements.txt
 ```
 
@@ -596,11 +625,14 @@ sudo apt-get install -y libportaudio2 portaudio19-dev espeak-ng
 source .venv/bin/activate
 
 # Desarrollo (sin gafas)
-python run.py webcam           # Webcam
+python run.py webcam           # Webcam (depth por IA)
 python run.py video.mp4        # Video file
 python run.py dataset          # VRS sample (data/aria_sample/)
 
-# Gafas Aria reales
+# Intel RealSense D435 (RGB + depth por hardware)
+python run.py realsense        # Depth instantáneo, sin modelo IA
+
+# Gafas Aria reales (x86_64 only)
 python run.py aria             # USB (por defecto)
 python run.py aria:usb         # USB explícito
 python run.py aria:wifi        # WiFi (IP por defecto: <ARIA_IP>)

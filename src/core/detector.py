@@ -118,19 +118,30 @@ class ParallelDetector:
             self._yolo_tensorrt = False
 
     def _load_depth(self):
-        """Carga Depth Anything V2. Intenta TensorRT, luego torch.compile, luego FP16."""
+        """Carga Depth Anything V2. Intenta TensorRT, luego FP16."""
+        self._depth_tensorrt = False
+        self._depth_trt_context = None
+
+        # Try TensorRT first
+        if self.device == "cuda":
+            engine_path = MODELS_DIR / "depth_anything_v2_small.engine"
+            if engine_path.exists():
+                try:
+                    self._load_depth_tensorrt(engine_path)
+                    return
+                except Exception as e:
+                    print(f"[DETECTOR WARN] TensorRT depth failed: {e}")
+
+        # Fallback to HuggingFace FP16
         try:
             from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
             model_name = "depth-anything/Depth-Anything-V2-Small-hf"
             self.depth_processor = AutoImageProcessor.from_pretrained(model_name)
             self.depth_model = AutoModelForDepthEstimation.from_pretrained(model_name)
-            self._depth_tensorrt = False
 
             if self.device == "cuda":
                 self.depth_model = self.depth_model.cuda().half().eval()
-                # Note: torch.compile disabled - causes crashes in Docker containers
-                # with subprocess compilation errors. FP16 alone is fast enough.
                 print("[DETECTOR] Depth Anything V2 (FP16)")
             else:
                 print("[DETECTOR] Depth Anything V2 (CPU)")
@@ -139,6 +150,44 @@ class ParallelDetector:
             print("[DETECTOR] Continuando sin profundidad")
             self.depth_model = None
             self.enable_depth = False
+
+    def _load_depth_tensorrt(self, engine_path: Path):
+        """Carga Depth Anything V2 con TensorRT."""
+        import tensorrt as trt
+
+        # Load TensorRT engine
+        logger = trt.Logger(trt.Logger.WARNING)
+        with open(engine_path, "rb") as f:
+            engine_data = f.read()
+
+        runtime = trt.Runtime(logger)
+        self._depth_trt_engine = runtime.deserialize_cuda_engine(engine_data)
+        self._depth_trt_context = self._depth_trt_engine.create_execution_context()
+
+        # Allocate buffers
+        self._depth_trt_inputs = []
+        self._depth_trt_outputs = []
+        self._depth_trt_bindings = []
+
+        for i in range(self._depth_trt_engine.num_io_tensors):
+            name = self._depth_trt_engine.get_tensor_name(i)
+            shape = self._depth_trt_engine.get_tensor_shape(name)
+            dtype = trt.nptype(self._depth_trt_engine.get_tensor_dtype(name))
+            size = trt.volume(shape)
+
+            # Allocate device memory
+            device_mem = torch.empty(size, dtype=torch.float32, device="cuda")
+            self._depth_trt_bindings.append(device_mem.data_ptr())
+
+            if self._depth_trt_engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
+                self._depth_trt_inputs.append({"name": name, "shape": shape, "mem": device_mem})
+            else:
+                self._depth_trt_outputs.append({"name": name, "shape": shape, "mem": device_mem})
+
+        self._depth_tensorrt = True
+        self.depth_model = True  # Mark as loaded (non-None)
+        self.depth_processor = None  # Not needed for TensorRT
+        print(f"[DETECTOR] Depth Anything V2 (TensorRT: {engine_path.name})")
 
     def _load_gaze(self):
         """Carga Meta Eye Gaze model (projectaria_eyetracking)."""
@@ -185,7 +234,8 @@ class ParallelDetector:
     def process(
         self,
         frame: np.ndarray,
-        eye_frame: Optional[np.ndarray] = None
+        eye_frame: Optional[np.ndarray] = None,
+        hardware_depth: Optional[np.ndarray] = None
     ) -> Tuple[List[Detection], Optional[np.ndarray], Optional[Tuple[float, float]], List[TrackedObject]]:
         """
         Procesa frame: detecta objetos + estima profundidad + gaze + tracking.
@@ -193,6 +243,8 @@ class ParallelDetector:
         Args:
             frame: Imagen BGR
             eye_frame: Imagen de eye tracking (opcional)
+            hardware_depth: Mapa de profundidad de hardware (ej: RealSense D435).
+                           Si se proporciona, no se ejecuta el modelo de depth.
 
         Returns:
             (detecciones, depth_map, gaze_point, tracked_objects)
@@ -205,12 +257,17 @@ class ParallelDetector:
         gaze_point = None
         self._frame_idx += 1
 
-        # Decidir si calcular depth este frame
-        should_compute_depth = (
-            self.enable_depth and
-            self.depth_model is not None and
-            self._frame_idx % self.depth_interval == 0
-        )
+        # Si hay depth por hardware, usarlo directamente (RealSense D435)
+        if hardware_depth is not None:
+            self._cached_depth = hardware_depth
+            should_compute_depth = False
+        else:
+            # Decidir si calcular depth este frame con el modelo de IA
+            should_compute_depth = (
+                self.enable_depth and
+                self.depth_model is not None and
+                self._frame_idx % self.depth_interval == 0
+            )
 
         # Ejecutar en paralelo con CUDA streams
         if self.device == "cuda" and self.yolo_stream:
@@ -267,7 +324,7 @@ class ParallelDetector:
             return None
 
     def _run_depth(self, frame: np.ndarray) -> Optional[np.ndarray]:
-        """Ejecuta Depth Anything. Usa OpenCV CUDA si está disponible."""
+        """Ejecuta Depth Anything. Usa TensorRT o FP16 según disponibilidad."""
         if self.depth_model is None:
             return None
         try:
@@ -278,24 +335,28 @@ class ParallelDetector:
                 gpu_frame = cv2.cuda_GpuMat()
                 gpu_frame.upload(frame)
                 gpu_rgb = cv2.cuda.cvtColor(gpu_frame, cv2.COLOR_BGR2RGB)
-                gpu_small = cv2.cuda.resize(gpu_rgb, (384, 384))
+                gpu_small = cv2.cuda.resize(gpu_rgb, (518, 518))  # Depth Anything V2 uses 518x518
                 rgb_small = gpu_small.download()
             else:
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                rgb_small = cv2.resize(rgb, (384, 384))
+                rgb_small = cv2.resize(rgb, (518, 518))
 
-            # Procesar con modelo
-            from PIL import Image
-            inputs = self.depth_processor(images=Image.fromarray(rgb_small), return_tensors="pt")
+            # TensorRT path
+            if self._depth_tensorrt:
+                depth_np = self._run_depth_tensorrt(rgb_small)
+            else:
+                # HuggingFace path
+                from PIL import Image
+                inputs = self.depth_processor(images=Image.fromarray(rgb_small), return_tensors="pt")
 
-            if self.device == "cuda":
-                inputs = {k: v.cuda().half() for k, v in inputs.items()}
+                if self.device == "cuda":
+                    inputs = {k: v.cuda().half() for k, v in inputs.items()}
 
-            with torch.no_grad():
-                outputs = self.depth_model(**inputs)
-                depth_np = outputs.predicted_depth.squeeze().float().cpu().numpy()
+                with torch.no_grad():
+                    outputs = self.depth_model(**inputs)
+                    depth_np = outputs.predicted_depth.squeeze().float().cpu().numpy()
 
-            # Resize a tamaño original (OpenCV CUDA no soporta float32 resize fácilmente)
+            # Resize a tamaño original
             depth_resized = cv2.resize(depth_np, (w, h))
 
             # Normalizar a 0-255
@@ -304,6 +365,41 @@ class ParallelDetector:
         except Exception as e:
             print(f"[DETECTOR ERROR] Depth: {e}")
             return None
+
+    def _run_depth_tensorrt(self, rgb_image: np.ndarray) -> np.ndarray:
+        """Ejecuta Depth Anything V2 con TensorRT."""
+        import tensorrt as trt
+
+        # Preprocess: normalize to [0, 1] and convert to NCHW
+        img = rgb_image.astype(np.float32) / 255.0
+        # Normalize with ImageNet mean/std
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        img = (img - mean) / std
+        img = img.transpose(2, 0, 1)  # HWC -> CHW
+        img = np.expand_dims(img, 0)  # Add batch dimension
+        img = np.ascontiguousarray(img)
+
+        # Copy input to GPU
+        input_tensor = torch.from_numpy(img).cuda()
+        self._depth_trt_inputs[0]["mem"].copy_(input_tensor.flatten())
+
+        # Set tensor addresses
+        for inp in self._depth_trt_inputs:
+            self._depth_trt_context.set_tensor_address(inp["name"], inp["mem"].data_ptr())
+        for out in self._depth_trt_outputs:
+            self._depth_trt_context.set_tensor_address(out["name"], out["mem"].data_ptr())
+
+        # Execute
+        self._depth_trt_context.execute_async_v3(torch.cuda.current_stream().cuda_stream)
+        torch.cuda.synchronize()
+
+        # Get output
+        output_shape = self._depth_trt_outputs[0]["shape"]
+        depth = self._depth_trt_outputs[0]["mem"][:np.prod(output_shape)].cpu().numpy()
+        depth = depth.reshape(output_shape).squeeze()
+
+        return depth
 
     def _create_detections(
         self, yolo_result, depth_map: Optional[np.ndarray], frame_shape

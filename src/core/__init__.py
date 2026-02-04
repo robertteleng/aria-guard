@@ -1,5 +1,5 @@
 # Non-CUDA imports (safe for main process with Aria SDK)
-from .observer import BaseObserver, MockObserver, AriaDemoObserver, AriaDatasetObserver
+from .observer import BaseObserver, MockObserver, AriaDemoObserver, AriaDatasetObserver, RealSenseObserver
 from .dashboard import Dashboard
 from .detector_process import DetectorProcess
 
@@ -12,6 +12,7 @@ __all__ = [
     "MockObserver",
     "AriaDemoObserver",
     "AriaDatasetObserver",
+    "RealSenseObserver",
     "Dashboard",
     "DetectorProcess",
 ]

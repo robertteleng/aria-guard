@@ -1,6 +1,14 @@
 # Docker Setup para ARIA Demo
 
-## Por que Docker?
+## Dockerfiles Disponibles
+
+| Dockerfile | Plataforma | GPU | Uso |
+|------------|------------|-----|-----|
+| `Dockerfile` | x86_64 | CUDA (pip) | Desarrollo rápido, webcam |
+| `Dockerfile.tensorrt` | x86_64 | CUDA + TensorRT + OpenCV CUDA | Producción, máximo rendimiento |
+| `Dockerfile.jetson` | ARM64 | Jetson (L4T) | Jetson Orin Nano + RealSense |
+
+## Por qué Docker?
 
 El Aria SDK (FastDDS) tiene incompatibilidades con ciertas versiones de glibc.
 En particular, Ubuntu 24.04 con glibc 2.39-0ubuntu8.7 causa crashes al conectar
@@ -11,17 +19,18 @@ munmap_chunk(): invalid pointer
 free(): invalid size
 ```
 
-Docker permite usar Ubuntu 22.04 con una version compatible de glibc.
+Docker permite usar Ubuntu 22.04 con una versión compatible de glibc.
 
 ## Requisitos
 
 - Docker con soporte GPU (nvidia-container-toolkit)
-- Aria glasses conectadas por USB o WiFi
+- NVIDIA GPU con compute capability >= 7.5 (RTX 20xx o superior)
+- Para Jetson: JetPack 6.x / L4T R36.x
 
 ### Instalar nvidia-container-toolkit (si no lo tienes)
 
 ```bash
-# Anadir repositorio
+# Añadir repositorio
 curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
 curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
   sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
@@ -36,100 +45,160 @@ sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
 ```
 
-## Uso Rapido
+---
+
+## Dockerfile.tensorrt (Producción - x86_64)
+
+Incluye OpenCV compilado con CUDA para máximo rendimiento.
+
+### Configuración
+
+- **CUDA**: 12.6 + cuDNN 8.9.7
+- **OpenCV**: 4.10.0 compilado con CUDA
+- **PyTorch**: cu126 + TensorRT
+- **GPUs soportadas**: RTX 20xx (7.5), RTX 30xx (8.6), RTX 40xx (8.9), RTX 50xx (12.0)
+
+### Build y uso
 
 ```bash
-# Construir y ejecutar (primera vez)
-docker compose up --build
+# Build (tarda ~30-60 min por compilación de OpenCV)
+docker build -f Dockerfile.tensorrt -t aria-demo:tensorrt .
 
-# Ejecutar (si ya esta construido)
-docker compose up
-
-# Parar y limpiar
-docker compose down
-```
-
-La aplicacion estara disponible en: http://localhost:5000
-
-## Modo Interactivo (desarrollo)
-
-Para ejecutar comandos manualmente dentro del contenedor:
-
-```bash
-# Shell interactivo con puertos mapeados
-docker compose run --rm --service-ports aria-demo bash
-
-# Dentro del contenedor:
-python run.py webcam outdoor           # Con TTS
-python run.py webcam outdoor --no-tts  # Sin TTS (inicio rapido)
-python run.py data/video.mp4 indoor    # Desde archivo de video
-```
-
-**Nota**: Usar `--service-ports` es necesario para que el puerto 5000 sea accesible.
-
-## Comandos Utiles
-
-```bash
-# Ver logs en tiempo real
-docker compose logs -f
-
-# Ejecutar shell dentro del contenedor
-docker compose exec aria-demo bash
-
-# Reconstruir sin cache
-docker compose build --no-cache
-
-# Ver estado de contenedores
-docker compose ps
-```
-
-## Ejecucion Manual (sin compose)
-
-```bash
-# Construir imagen
-docker build -t aria-demo .
-
-# Ejecutar con GPU y USB
+# Run con Aria glasses
 docker run -it --rm --privileged \
   -v /dev/bus/usb:/dev/bus/usb \
-  -v $(pwd)/data:/app/data \
   -p 5000:5000 \
   --gpus all \
-  aria-demo
-```
+  aria-demo:tensorrt
 
-## Transferir a otro equipo (ej: Jetson)
+# Run con webcam
+docker run -it --rm \
+  --device /dev/video0 \
+  -p 5000:5000 \
+  --gpus all \
+  aria-demo:tensorrt python run.py webcam
 
-```bash
-# En el equipo origen: guardar imagen
-docker save aria-demo:latest | gzip > aria-demo.tar.gz
-
-# Copiar a destino
-scp aria-demo.tar.gz usuario@jetson:/ruta/
-
-# En el destino: cargar imagen
-gunzip -c aria-demo.tar.gz | docker load
-
-# Ejecutar
-docker run -it --rm --privileged \
+# Run con RealSense D435
+docker run -it --rm \
   -v /dev/bus/usb:/dev/bus/usb \
   -p 5000:5000 \
-  --runtime nvidia \
-  aria-demo
+  --gpus all \
+  aria-demo:tensorrt python run.py realsense
 ```
 
-**Nota para Jetson**: La imagen x86 no funcionara directamente en ARM64.
-Debes reconstruir la imagen en el Jetson o usar una imagen base ARM compatible.
+---
+
+## Dockerfile.jetson (Jetson Orin Nano)
+
+Para dispositivos ARM64 con Jetson. Usa RealSense D435 en lugar de Aria (el SDK de Aria no soporta ARM).
+
+### Configuración
+
+- **Base**: nvcr.io/nvidia/l4t-pytorch:r36.2.0-pth2.1-py3
+- **Cámara**: Intel RealSense D435 (RGB + Depth por hardware)
+- **Compute Capability**: 8.7 (Orin Nano)
+
+### Características RealSense vs Aria
+
+| Característica | Aria Glasses | RealSense D435 |
+|----------------|--------------|----------------|
+| RGB | ✓ | ✓ |
+| Depth | ✓ (modelo IA) | ✓ (hardware) |
+| Eye Tracking | ✓ | ✗ |
+| Gaze Estimation | ✓ | ✗ |
+| Plataforma | x86_64 | x86_64 + ARM64 |
+
+### Build en Jetson
+
+```bash
+# Build (ejecutar EN el Jetson)
+docker build -f Dockerfile.jetson -t aria-demo:jetson .
+
+# Run con RealSense
+docker run -it --rm \
+  --runtime nvidia \
+  -v /dev/bus/usb:/dev/bus/usb \
+  --device /dev/video0 \
+  -p 5000:5000 \
+  aria-demo:jetson
+```
+
+### Ventajas del depth por hardware (RealSense)
+
+- **Sin modelo de IA**: No ejecuta Depth Anything V2, ahorra ~0.8GB VRAM
+- **Más rápido**: Depth instantáneo del sensor, ~30% mejora en FPS
+- **Ideal para Jetson**: Maximiza recursos limitados del Orin Nano
+
+---
+
+## Dockerfile (Desarrollo rápido)
+
+Para pruebas rápidas sin compilar OpenCV.
+
+```bash
+# Build
+docker build -t aria-demo .
+
+# Run con compose
+docker compose up
+```
+
+---
+
+## Fuentes de Video Soportadas
+
+```bash
+# Webcam
+python run.py webcam
+
+# Aria Glasses (USB)
+python run.py aria
+
+# Aria Glasses (WiFi)
+python run.py aria:wifi:<ARIA_IP>
+
+# Aria Dataset (VRS)
+python run.py dataset
+python run.py /path/to/recording.vrs
+
+# Intel RealSense D435
+python run.py realsense
+
+# Archivo de video
+python run.py /path/to/video.mp4
+```
+
+---
+
+## Modos de Detección
+
+```bash
+python run.py <source> indoor   # Objetos de interior
+python run.py <source> outdoor  # Objetos de exterior
+python run.py <source> all      # Todos (80 clases COCO)
+```
+
+---
+
+## Exportar Modelos a TensorRT
+
+Para máximo rendimiento, exporta los modelos a TensorRT:
+
+```bash
+# Dentro del contenedor
+python scripts/export_depth_tensorrt.py   # Depth Anything V2
+
+# YOLO se exporta automáticamente la primera vez
+```
+
+---
 
 ## Troubleshooting
 
 ### Puerto 5000 ocupado
 
 ```bash
-# Ver que usa el puerto
 lsof -i :5000
-
-# Parar contenedores anteriores
 docker compose down
 docker rm -f aria-demo
 ```
@@ -137,49 +206,58 @@ docker rm -f aria-demo
 ### No detecta las gafas Aria
 
 ```bash
-# Verificar que las gafas estan conectadas
 lsusb | grep -i aria
-
-# Verificar que el contenedor tiene acceso USB
 docker compose exec aria-demo lsusb
 ```
 
 ### Error de GPU / CUDA no disponible
 
 ```bash
-# Verificar que Docker ve la GPU
-docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
+# Verificar GPU
+docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu22.04 nvidia-smi
 
-# Verificar CUDA dentro del contenedor
-docker compose run --rm aria-demo python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}')"
+# Verificar PyTorch
+docker run --rm --gpus all aria-demo:tensorrt python -c "import torch; print(torch.cuda.is_available())"
 ```
 
-Si CUDA no esta disponible, asegurate de tener `nvidia-container-toolkit` instalado
-y que docker-compose.yml tenga la configuracion de GPU correcta.
+### OpenCV CUDA no funciona
 
-### Depth o detecciones no aparecen
+```bash
+# Verificar OpenCV CUDA
+docker run --rm --gpus all aria-demo:tensorrt python -c "import cv2; print(cv2.cuda.getCudaEnabledDeviceCount())"
+```
 
-Si el video se muestra pero no hay bounding boxes ni depth:
+### RealSense no detecta cámara
 
-1. Revisa los logs del detector:
-   ```
-   [DETECTOR PROCESS] PyTorch X.X, CUDA available: True
-   [DETECTOR PROCESS] GPU: NVIDIA GeForce RTX ...
-   ```
+```bash
+# Verificar USB
+lsusb | grep -i intel
 
-2. Si ves errores de `torch.compile` o "compilation subprocess", es normal.
-   El codigo ya tiene torch.compile desactivado para Docker.
-
-3. Verifica que los modelos esten en `/app/models/`:
-   ```bash
-   docker compose exec aria-demo ls -la /app/models/
-   ```
+# Permisos
+sudo usermod -a -G video $USER
+```
 
 ### TTS tarda mucho en cargar
 
-El modelo TTS (NeMo) tarda ~60 segundos en cargar la primera vez.
-Para desarrollo rapido, usa `--no-tts`:
+El modelo NeMo TTS tarda ~60s la primera vez. Para desarrollo:
 
 ```bash
 python run.py webcam outdoor --no-tts
 ```
+
+---
+
+## Transferir imagen a otro equipo
+
+```bash
+# Guardar
+docker save aria-demo:tensorrt | gzip > aria-demo-tensorrt.tar.gz
+
+# Copiar
+scp aria-demo-tensorrt.tar.gz usuario@destino:/ruta/
+
+# Cargar
+gunzip -c aria-demo-tensorrt.tar.gz | docker load
+```
+
+**IMPORTANTE**: Las imágenes x86_64 NO funcionan en ARM64 (Jetson). Debes usar `Dockerfile.jetson` y construir en el dispositivo.
