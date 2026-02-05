@@ -125,32 +125,25 @@ bno.enable_feature(adafruit_bno08x.BNO_REPORT_ROTATION_VECTOR)
 quat = bno.quaternion  # (w, x, y, z)
 ```
 
-## Dockerfile.jetson
+## Build y Ejecución
 
-```dockerfile
-# Base: JetPack 6.x con TensorRT
-FROM nvcr.io/nvidia/l4t-tensorrt:r10.0.1-runtime
+Ver [Dockerfile.jetson](../Dockerfile.jetson) y [docker-compose.jetson.yml](../docker-compose.jetson.yml).
 
-# librealsense
-RUN apt-get update && apt-get install -y \
-    libusb-1.0-0-dev \
-    libglfw3-dev \
-    && rm -rf /var/lib/apt/lists/*
+```bash
+# Build
+docker compose -f docker-compose.jetson.yml build
 
-# Python deps
-RUN pip install \
-    pyrealsense2 \
-    adafruit-circuitpython-bno08x \
-    ultralytics \
-    flask \
-    PyTurboJPEG
+# Run
+docker compose -f docker-compose.jetson.yml up
 
-# App
-WORKDIR /app
-COPY . .
-
-# TensorRT engine se genera en primera ejecución
-CMD ["python", "run.py", "realsense"]
+# O directamente
+docker build -f Dockerfile.jetson -t aria-demo:jetson .
+docker run --runtime nvidia -it --rm \
+    --privileged \
+    -v /dev/bus/usb:/dev/bus/usb \
+    --device /dev/i2c-1 \
+    -p 5000:5000 \
+    aria-demo:jetson
 ```
 
 ## Modo Single-Process
@@ -204,8 +197,10 @@ realsrc → nvvidconv → nvinfer(YOLO) → nvdsosd → appsink
 
 ## TODO
 
-- [ ] Crear Dockerfile.jetson
-- [ ] Integrar BNO086 en RealSenseObserver
+- [x] Crear Dockerfile.jetson
+- [x] Crear docker-compose.jetson.yml
+- [x] Añadir BNO086 IMU al Dockerfile
+- [ ] Integrar BNO086 en RealSenseObserver (código Python)
 - [ ] Implementar DetectorLite (single-process)
 - [ ] Probar TTS en Jetson (espeak-ng vs Piper)
 - [ ] Benchmarks reales en hardware

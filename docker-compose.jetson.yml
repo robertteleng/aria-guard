@@ -1,0 +1,64 @@
+# =============================================================================
+# Docker Compose para ARIA Demo en Jetson (ARM64)
+# =============================================================================
+#
+# Uso:
+#   docker compose -f docker-compose.jetson.yml up
+#   docker compose -f docker-compose.jetson.yml up --build  # Reconstruir
+#
+# Hardware requerido:
+#   - Jetson Orin NX/Nano con JetPack 6.x
+#   - Intel RealSense D435 (USB 3.0)
+#   - BNO086 IMU (I2C en pines GPIO)
+#
+# Acceso:
+#   Dashboard: http://<jetson-ip>:5000
+#
+# =============================================================================
+
+services:
+  aria-demo:
+    build:
+      context: .
+      dockerfile: Dockerfile.jetson
+    image: aria-demo:jetson
+    container_name: aria-demo-jetson
+
+    # Runtime NVIDIA para Jetson
+    runtime: nvidia
+
+    ports:
+      - "5000:5000"
+
+    volumes:
+      # USB passthrough para RealSense D435
+      - /dev/bus/usb:/dev/bus/usb
+      # Datos y modelos
+      - ./data:/app/data
+      - ./models:/app/models
+      # Código fuente (desarrollo sin rebuild)
+      - ./run.py:/app/run.py:ro
+      - ./src:/app/src:ro
+      - ./scripts:/app/scripts:ro
+
+    devices:
+      # Audio para TTS
+      - /dev/snd:/dev/snd
+      # I2C para BNO086 IMU (Jetson GPIO pins)
+      - /dev/i2c-0:/dev/i2c-0
+      - /dev/i2c-1:/dev/i2c-1
+
+    environment:
+      # Jetson GPU
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+
+    # Terminal interactiva
+    stdin_open: true
+    tty: true
+
+    # Privileged para acceso completo a USB e I2C
+    privileged: true
+
+    # Comando: RealSense por defecto
+    command: python3 run.py realsense

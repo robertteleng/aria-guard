@@ -1,9 +1,10 @@
 # =============================================================================
-# Dockerfile.jetson - ARIA Demo para Jetson Orin Nano
+# Dockerfile.jetson - ARIA Demo para Jetson Orin
 # =============================================================================
-# - Jetson Orin Nano: ARM64 (aarch64), Compute Capability 8.7
+# - Jetson Orin NX/Nano: ARM64 (aarch64), Compute Capability 8.7
 # - Base: L4T (Linux for Tegra) con PyTorch pre-instalado
-# - RealSense D435 en lugar de Meta Aria (Aria SDK no soporta ARM)
+# - RealSense D435: RGB + Depth hardware (en lugar de Meta Aria)
+# - BNO086 IMU: Orientación 9-DOF para alertas direccionales
 # - NO compila OpenCV (usa el de L4T o pip)
 #
 # Build (en el Jetson o con QEMU):
@@ -78,6 +79,11 @@ RUN pip3 install --no-cache-dir \
 # NeMo TTS (puede fallar en ARM, usar fallback)
 RUN pip3 install --no-cache-dir "nemo_toolkit[tts]" || \
     echo "NeMo TTS not available on ARM, using espeak fallback"
+
+# BNO086 IMU (I2C/SPI)
+RUN pip3 install --no-cache-dir \
+    adafruit-circuitpython-bno08x \
+    adafruit-blinka
 
 # =============================================================================
 # Código fuente
