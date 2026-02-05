@@ -278,6 +278,9 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
 
             print(f"[SERVER] Frame {frame_count}, {fps:.1f} FPS")
 
+        # Throttle server loop to ~60 FPS max (reduces CPU busy-waiting)
+        time.sleep(0.016)
+
 
 @app.route('/')
 def index():

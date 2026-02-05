@@ -21,8 +21,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 MODELS_DIR = PROJECT_ROOT / "models"
 MODELS_DIR.mkdir(exist_ok=True)
 
-ONNX_PATH = MODELS_DIR / "depth_anything_v2_small.onnx"
-ENGINE_PATH = MODELS_DIR / "depth_anything_v2_small.engine"
+ONNX_PATH = MODELS_DIR / "depth_anything_v2_vits.onnx"
+ENGINE_PATH = MODELS_DIR / "depth_anything_v2_vits.engine"
 
 # Input size for Depth Anything V2
 INPUT_SIZE = 518
@@ -42,6 +42,7 @@ def export_to_onnx():
     print(f"[2/3] Exportando a ONNX ({ONNX_PATH})...")
     dummy_input = torch.randn(1, 3, INPUT_SIZE, INPUT_SIZE).cuda()
 
+    # Use dynamo=False to avoid external data files and onnxscript issues
     torch.onnx.export(
         model,
         dummy_input,
@@ -54,6 +55,7 @@ def export_to_onnx():
         },
         opset_version=17,
         do_constant_folding=True,
+        dynamo=False,
     )
     print(f"    ONNX guardado: {ONNX_PATH} ({ONNX_PATH.stat().st_size / 1e6:.1f} MB)")
 
@@ -79,6 +81,11 @@ def convert_to_tensorrt():
     # Configure builder
     config = builder.create_builder_config()
     config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 30)  # 1GB
+
+    # Add optimization profile for dynamic batch size
+    profile = builder.create_optimization_profile()
+    profile.set_shape("pixel_values", (1, 3, INPUT_SIZE, INPUT_SIZE), (1, 3, INPUT_SIZE, INPUT_SIZE), (1, 3, INPUT_SIZE, INPUT_SIZE))
+    config.add_optimization_profile(profile)
 
     # Enable FP16
     if builder.platform_has_fast_fp16:
@@ -121,7 +128,7 @@ def verify_engine():
 
     # Get output shape
     output_name = engine.get_tensor_name(1)
-    output_shape = engine.get_tensor_shape(output_name)
+    output_shape = tuple(engine.get_tensor_shape(output_name))
     output_tensor = torch.empty(output_shape, dtype=torch.float32, device="cuda")
 
     # Set addresses

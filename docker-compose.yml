@@ -37,6 +37,7 @@ services:
       # Código fuente (para desarrollo sin rebuild)
       - ./run.py:/app/run.py:ro
       - ./src:/app/src:ro
+      - ./scripts:/app/scripts:ro
       # PulseAudio socket para audio output
       - /run/user/1000/pulse:/run/user/1000/pulse:ro
       - ~/.config/pulse/cookie:/root/.config/pulse/cookie:ro
