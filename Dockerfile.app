@@ -15,16 +15,21 @@
 
 FROM aria-base:opencv-nvdec
 
+# Build dependencies for NeMo
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential gcc g++ \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install PyTorch with CUDA 12.8
 RUN pip install --no-cache-dir \
     torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
 # Install TensorRT
 RUN pip install --no-cache-dir \
-    tensorrt==10.8.0 \
-    tensorrt-cu12==10.8.0 \
-    tensorrt_lean==10.8.0 \
-    tensorrt_dispatch==10.8.0
+    tensorrt==10.8.0.43 \
+    tensorrt-cu12==10.8.0.43 \
+    tensorrt_lean==10.8.0.43 \
+    tensorrt_dispatch==10.8.0.43
 
 # Install project dependencies
 COPY requirements.txt .
@@ -44,7 +49,7 @@ RUN git lfs install && \
     git clone --depth 1 https://github.com/facebookresearch/projectaria_eyetracking.git /tmp/aria_gaze && \
     cd /tmp/aria_gaze && \
     git lfs pull --include="projectaria_eyetracking/inference/model/pretrained_weights/**" && \
-    pip install /tmp/aria_gaze &&
+    pip install /tmp/aria_gaze && \
     mkdir -p /opt/venv/lib/python3.11/site-packages/projectaria_eyetracking/inference/model/pretrained_weights && \
     # Copy LFS weights manually (pip install does not include them) \
     cp -r /tmp/aria_gaze/projectaria_eyetracking/inference/model/pretrained_weights/* \

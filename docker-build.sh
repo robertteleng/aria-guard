@@ -56,6 +56,7 @@ run_container() {
 
     echo -e "${YELLOW}Running aria-demo with video: $VIDEO, mode: $MODE${NC}"
     docker run --rm -it --gpus all \
+        -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,video \
         -p 5000:5000 \
         -v "$(pwd)/models:/app/models" \
         -v "$(pwd)/data:/app/data" \
@@ -69,6 +70,7 @@ run_dev() {
 
     echo -e "${YELLOW}Running in DEV mode (src mounted)${NC}"
     docker run --rm -it --gpus all \
+        -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,video \
         -p 5000:5000 \
         -v "$(pwd)/src:/app/src:ro" \
         -v "$(pwd)/models:/app/models" \

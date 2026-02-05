@@ -47,6 +47,7 @@ class MockObserver(BaseObserver):
         self._start_time = time.time()
         self._use_nvdec = False
         self._gpu_reader = None
+        self._video_path = video_path
 
         # Intentar NVDEC para videos (no webcam)
         if source != "webcam" and use_nvdec and video_path:
@@ -60,6 +61,13 @@ class MockObserver(BaseObserver):
                     self._target_fps = format_info.fps if hasattr(format_info, 'fps') else 30
                     print(f"[OBSERVER] ✓ NVDEC habilitado - Video FPS: {self._target_fps:.1f}")
             except Exception as e:
+                msg = str(e)
+                if "(-213" in msg or "disabled for current build or platform" in msg:
+                    print(
+                        "[OBSERVER] NVDEC no disponible en runtime. "
+                        "Verifica NVIDIA_DRIVER_CAPABILITIES=compute,utility,video "
+                        "y que libnvcuvid del host esté visible en el contenedor."
+                    )
                 print(f"[OBSERVER] NVDEC no disponible: {e}, usando CPU")
                 self._use_nvdec = False
 
@@ -117,10 +125,9 @@ class MockObserver(BaseObserver):
                     if self.source != "webcam":
                         try:
                             # cudacodec doesn't have seek, recreate reader
-                            self._gpu_reader = cv2.cudacodec.createVideoReader(
-                                self._cap.get(cv2.CAP_PROP_POS_FRAMES) if hasattr(self, '_cap') else 0
-                            )
-                        except:
+                            if self._video_path:
+                                self._gpu_reader = cv2.cudacodec.createVideoReader(self._video_path)
+                        except Exception:
                             pass
             else:
                 # CPU decode

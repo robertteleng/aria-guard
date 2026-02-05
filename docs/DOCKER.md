@@ -425,11 +425,21 @@ sudo systemctl restart docker
 
 ### NVDEC no funciona
 ```bash
-# Verificar OpenCV cudacodec
+# Verificar módulo (build-time)
 docker run --gpus all aria-demo:tensorrt python -c \
   "import cv2; print(hasattr(cv2, 'cudacodec'))"
 
-# Si es False, reconstruir base image con NVDEC
+# Verificar runtime NVDEC (debe crear reader sin error -213)
+docker run --rm --gpus all \
+  -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,video \
+  -v $(pwd)/data:/app/data \
+  aria-demo:tensorrt python -c \
+  "import cv2; cv2.cudacodec.createVideoReader('/app/data/test.mp4'); print('NVDEC OK')"
+
+# Si falla con error -213:
+# 1) Asegurar NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+# 2) Verificar driver del host (nvidia-smi)
+# 3) Reconstruir base image con NVDEC (si cudacodec=False)
 ./docker-build.sh base
 ./docker-build.sh app
 ```

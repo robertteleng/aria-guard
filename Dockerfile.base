@@ -37,6 +37,12 @@ WORKDIR /tmp
 RUN git clone --depth 1 --branch n13.0.19.0 https://github.com/FFmpeg/nv-codec-headers.git && \
     cd nv-codec-headers && make install
 
+# Create NVDEC/NVENC stub libraries for cmake to link against during build.
+# At runtime, nvidia-container-runtime mounts the real driver libraries.
+RUN echo "void __nvcuvid_stub(void){}" | gcc -shared -x c -o /usr/local/lib/libnvcuvid.so - && \
+    echo "void __nvenc_stub(void){}" | gcc -shared -x c -o /usr/local/lib/libnvidia-encode.so - && \
+    ldconfig
+
 RUN git clone --depth 1 --branch 4.10.0 https://github.com/opencv/opencv.git && \
     git clone --depth 1 --branch 4.10.0 https://github.com/opencv/opencv_contrib.git && \
     sed -i 's/virtual void clear() = 0;/virtual void clear() override = 0;/g' opencv_contrib/modules/cudafeatures2d/include/opencv2/cudafeatures2d.hpp && \
@@ -95,7 +101,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavcodec-dev libavformat-dev libswscale-dev \
     libjpeg-dev libpng-dev libtiff-dev \
     libtbb12 libtbb-dev \
-    libgtk-3-0 \
+    libgtk-3-0 libprotobuf23 \
     portaudio19-dev libsndfile1 alsa-utils pulseaudio \
     git git-lfs \
     && rm -rf /var/lib/apt/lists/*
@@ -107,14 +113,13 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 # Create venv
 RUN python3.11 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --upgrade pip setuptools wheel
+RUN pip install --upgrade pip setuptools wheel numpy
 
 # Copy OpenCV from builder
 COPY --from=opencv-builder /opt/opencv /opt/opencv
 ENV LD_LIBRARY_PATH="/opt/opencv/lib:${LD_LIBRARY_PATH}"
 RUN cp -r /opt/opencv/lib/python3.11/site-packages/cv2 /opt/venv/lib/python3.11/site-packages/
 
-# Verify OpenCV with CUDA
-RUN python -c "import cv2; print('OpenCV:', cv2.__version__); print('CUDA devices:', cv2.cuda.getCudaEnabledDeviceCount()); print('cudacodec:', hasattr(cv2, 'cudacodec'))"
+# Verify se hace en runtime con GPU (docker run --gpus all)
 
 WORKDIR /app
