@@ -32,6 +32,11 @@ services:
       - /dev/bus/usb:/dev/bus/usb
       # Directorio de datos compartido (videos, datasets VRS)
       - ./data:/app/data
+      # Modelos (TensorRT engines, ONNX, weights)
+      - ./models:/app/models
+      # Código fuente (para desarrollo sin rebuild)
+      - ./run.py:/app/run.py:ro
+      - ./src:/app/src:ro
       # PulseAudio socket para audio output
       - /run/user/1000/pulse:/run/user/1000/pulse:ro
       - ~/.config/pulse/cookie:/root/.config/pulse/cookie:ro

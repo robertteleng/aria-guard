@@ -52,7 +52,39 @@ if __name__ == '__main__':
     import threading
 
     # Parsear source desde argumentos
-    source = sys.argv[1] if len(sys.argv) > 1 else "webcam"
+    if len(sys.argv) > 1:
+        source = sys.argv[1]
+    else:
+        print()
+        print("╔══════════════════════════════════════╗")
+        print("║          ARIA DEMO v1.0              ║")
+        print("║   Visual Assistance System           ║")
+        print("╚══════════════════════════════════════╝")
+        print()
+        print("  Selecciona la fuente de entrada:")
+        print()
+        print("    [1] Webcam")
+        print("    [2] Video file")
+        print("    [3] Aria Glasses (USB)")
+        print("    [4] RealSense D435")
+        print()
+        while True:
+            choice = input("  Fuente [1/2/3/4]: ").strip()
+            if choice == "1":
+                source = "webcam"
+                break
+            elif choice == "2":
+                video = input("  Ruta al video (ej: /app/data/test_60fps.mp4): ").strip()
+                source = video if video else "/app/data/test_60fps.mp4"
+                break
+            elif choice == "3":
+                source = "aria"
+                break
+            elif choice == "4":
+                source = "realsense"
+                break
+            else:
+                print("  Opción no válida. Introduce 1, 2, 3 o 4.")
 
     # Check for dataset source (VRS files)
     if source == "dataset":
@@ -90,12 +122,14 @@ if __name__ == '__main__':
                 print(f"        Y en: {data_path}")
                 sys.exit(1)
 
-    print()
-    print("╔══════════════════════════════════════╗")
-    print("║          ARIA DEMO v1.0              ║")
-    print("║   Visual Assistance System           ║")
-    print("╚══════════════════════════════════════╝")
-    print()
+    # Banner si se pasó source por argumento (el menú interactivo ya lo muestra)
+    if len(sys.argv) > 1:
+        print()
+        print("╔══════════════════════════════════════╗")
+        print("║          ARIA DEMO v1.0              ║")
+        print("║   Visual Assistance System           ║")
+        print("╚══════════════════════════════════════╝")
+        print()
 
     if source.startswith("dataset:"):
         print(f"  Fuente: Aria Dataset (VRS + Eye Gaze)")
