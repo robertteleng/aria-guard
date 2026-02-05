@@ -9,8 +9,9 @@ Soporta múltiples fuentes de entrada:
 
 ## Características
 
-- **YOLO26s** - Detección de objetos con GPU (TensorRT/PyTorch)
-- **Depth Anything V2** - Estimación de profundidad monocular (FP16/torch.compile)
+- **YOLO26s** - Detección de objetos (TensorRT FP16)
+- **Depth Anything V2** - Estimación de profundidad monocular (TensorRT FP16)
+- **NVDEC** - Decodificación de video por hardware (OpenCV 4.13.0 + Video Codec SDK 13.0)
 - **Meta Eye Gaze** - Modelo oficial de Meta para estimación de mirada
 - **SimpleTracker** - Tracking de objetos entre frames con IoU matching
 - **AlertDecisionEngine** - Sistema de decisión de alertas con priorización
@@ -39,8 +40,8 @@ graph TB
     subgraph Detection["Detection Layer (GPU)"]
         DET[ParallelDetector]
         subgraph Models["CUDA Streams"]
-            YOLO[YOLO26s<br/>TensorRT]
-            DEPTH[Depth Anything V2<br/>FP16 + torch.compile]
+            YOLO[YOLO26s<br/>TensorRT FP16]
+            DEPTH[Depth Anything V2<br/>TensorRT FP16]
             GAZE[Meta Eye Gaze]
         end
     end
@@ -696,32 +697,39 @@ pip install projectaria-client-sdk projectaria-tools
 
 ## Rendimiento
 
-Probado en RTX 3090:
+Probado en RTX 5060 Ti (Blackwell):
 
-| Configuración                  | FPS   |
-| ------------------------------ | ----- |
-| YOLO + Depth + Gaze + Tracking | 15-19 |
-| Con TensorRT                   | ~30   |
-| Sin profundidad                | ~25   |
-| Solo YOLO TensorRT             | ~40   |
+| Configuración | FPS | CPU |
+|---------------|-----|-----|
+| YOLO + Depth TensorRT + Gaze | **42** | ~100% |
+| Solo YOLO TensorRT | ~70 | ~50% |
+| Con RealSense (sin Depth IA) | ~70 | ~50% |
 
 ### Optimizaciones
 
-- **TensorRT** para YOLO (auto-exporta .engine)
-- **torch.compile** para Depth Anything V2
-- **FP16** para todos los modelos
+- **NVDEC** - Decodificación de video en GPU (OpenCV 4.13.0 + Video Codec SDK 13.0)
+- **TensorRT FP16** para YOLO y Depth Anything V2
+- **Server throttle** - Limita CPU busy-waiting a 60 FPS
 - **CUDA Streams** para ejecución paralela
 - **NeMo en proceso separado** (evita conflictos CUDA)
 - **Pre-caching TTS** para latencia mínima
+
+### GPUs Soportadas
+
+- RTX 20xx (Turing)
+- RTX 30xx (Ampere)
+- RTX 40xx (Ada Lovelace)
+- **RTX 50xx (Blackwell)** - Requiere CUDA 12.8+ y Video Codec SDK 13.0
 
 ## VRAM Usage
 
 ```mermaid
 pie title VRAM (~2.5GB total)
     "YOLO26s TensorRT" : 0.4
-    "Depth Anything V2" : 0.8
+    "Depth Anything V2 TensorRT" : 0.5
     "Meta Eye Gaze" : 0.2
     "NeMo TTS (proceso separado)" : 1.1
+    "OpenCV CUDA buffers" : 0.3
 ```
 
 ## Roadmap
