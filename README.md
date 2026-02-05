@@ -709,7 +709,7 @@ Probado en RTX 5060 Ti (Blackwell):
 
 - **NVDEC** - Decodificación de video en GPU (OpenCV 4.13.0 + Video Codec SDK 13.0)
 - **TensorRT FP16** para YOLO y Depth Anything V2
-- **Server throttle** - Limita CPU busy-waiting a 60 FPS
+- **Server throttle** - Limita loop principal a 30 FPS (suficiente para asistencia visual)
 - **CUDA Streams** para ejecución paralela
 - **NeMo en proceso separado** (evita conflictos CUDA)
 - **Pre-caching TTS** para latencia mínima
@@ -737,17 +737,28 @@ pie title VRAM (~2.5GB total)
 ### Completado
 
 - ✅ Conexión Meta Aria Glasses (USB + WiFi)
+- ✅ Intel RealSense D435 (RGB + Depth hardware)
 - ✅ Sistema de tracking con priorización
 - ✅ AlertDecisionEngine para alertas inteligentes
 - ✅ NeMo TTS en proceso separado
+- ✅ TensorRT FP16 para YOLO y Depth Anything V2
+- ✅ NVDEC para decodificación de video en GPU
+- ✅ Server throttle 30 FPS para reducir CPU
 
-### Próximo
+### Próximo: Jetson + RealSense + IMU
 
-- Ajuste fino de umbrales de alerta con usuarios reales
-- Uso de cámaras SLAM laterales para detección periférica
+Ver [docs/JETSON.md](docs/JETSON.md) para detalles.
+
+- Dockerfile.jetson para ARM64 (Orin/NX/Nano)
+- Intel RealSense D435 (RGB + Depth hardware)
+- BNO086 IMU (orientación 9-DOF para alertas direccionales)
+- TensorRT engine específico para Jetson GPU
+- Modo "lite" single-process (sin multiprocessing)
+- Evaluar DeepStream si Python no es suficiente
 
 ### Futuro
 
+- Ajuste fino de umbrales de alerta con usuarios reales
 - FastVLM para descripciones de escena
 - Control por voz (Whisper)
 - Detección de semáforos y señales
