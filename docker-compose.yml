@@ -16,9 +16,6 @@
 
 services:
   aria-demo:
-    build:
-      context: .
-      dockerfile: Dockerfile.tensorrt
     image: aria-demo:tensorrt
     container_name: aria-demo
 

@@ -13,7 +13,7 @@ graph TB
 
         subgraph BASE_CONTENT["Contenido"]
             CUDA["CUDA 12.8.1 + cuDNN 9"]
-            OPENCV["OpenCV 4.10.0<br/>✓ CUDA support<br/>✓ NVDEC decode<br/>✓ NVENC encode"]
+            OPENCV["OpenCV 4.13.0<br/>✓ CUDA support<br/>✓ NVDEC decode<br/>✓ NVENC encode"]
             NVCODEC["Video Codec SDK 13.0<br/>✓ Blackwell (RTX 50xx)"]
             PYTHON["Python 3.11 + venv"]
             TBB["TBB + OpenGL + V4L"]
@@ -201,7 +201,7 @@ flowchart TB
 
 ### NVDEC (Decodificación de Video GPU)
 
-El Dockerfile incluye soporte para NVDEC usando **NVIDIA Video Codec SDK 13.0** (`nv-codec-headers n13.0.19.0`), permitiendo decodificar video en la GPU:
+El Dockerfile incluye soporte para NVDEC usando **NVIDIA Video Codec SDK 13.0.37** (headers + stub libs), permitiendo decodificar video en la GPU:
 
 **GPUs soportadas:** RTX 20xx (Turing), RTX 30xx (Ampere), RTX 40xx (Ada), **RTX 50xx (Blackwell)**
 

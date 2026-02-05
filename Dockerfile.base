@@ -33,20 +33,17 @@ RUN pip3 install numpy
 
 WORKDIR /tmp
 
-# Download NVIDIA Video Codec SDK 13.0 headers for NVDEC/NVENC (Blackwell support)
-RUN git clone --depth 1 --branch n13.0.19.0 https://github.com/FFmpeg/nv-codec-headers.git && \
-    cd nv-codec-headers && make install
+# NVIDIA Video Codec SDK 13.0 - headers + stub libs for NVDEC/NVENC
+# Download from: https://developer.nvidia.com/nvidia-video-codec-sdk/download
+COPY Video_Codec_SDK_13.0.37.zip /tmp/
+RUN apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/* && \
+    cd /tmp && unzip -q Video_Codec_SDK_13.0.37.zip && \
+    cp Video_Codec_SDK_13.0.37/Interface/*.h /usr/local/cuda/include/ && \
+    cp Video_Codec_SDK_13.0.37/Lib/linux/stubs/x86_64/*.so /usr/local/cuda/lib64/ && \
+    rm -rf Video_Codec_SDK_13.0.37 Video_Codec_SDK_13.0.37.zip
 
-# Create NVDEC/NVENC stub libraries for cmake to link against during build.
-# At runtime, nvidia-container-runtime mounts the real driver libraries.
-RUN echo "void __nvcuvid_stub(void){}" | gcc -shared -x c -o /usr/local/lib/libnvcuvid.so - && \
-    echo "void __nvenc_stub(void){}" | gcc -shared -x c -o /usr/local/lib/libnvidia-encode.so - && \
-    ldconfig
-
-RUN git clone --depth 1 --branch 4.10.0 https://github.com/opencv/opencv.git && \
-    git clone --depth 1 --branch 4.10.0 https://github.com/opencv/opencv_contrib.git && \
-    sed -i 's/virtual void clear() = 0;/virtual void clear() override = 0;/g' opencv_contrib/modules/cudafeatures2d/include/opencv2/cudafeatures2d.hpp && \
-    sed -i 's/virtual bool empty() const = 0;/virtual bool empty() const override = 0;/g' opencv_contrib/modules/cudafeatures2d/include/opencv2/cudafeatures2d.hpp
+RUN git clone --depth 1 --branch 4.13.0 https://github.com/opencv/opencv.git && \
+    git clone --depth 1 --branch 4.13.0 https://github.com/opencv/opencv_contrib.git
 
 WORKDIR /tmp/opencv/build
 RUN NUMPY_INCLUDE=$(python3 -c "import numpy; print(numpy.get_include())") && \
@@ -64,6 +61,7 @@ RUN NUMPY_INCLUDE=$(python3 -c "import numpy; print(numpy.get_include())") && \
     -D WITH_CUBLAS=1 \
     -D WITH_NVCUVID=ON \
     -D WITH_NVCUVENC=ON \
+    -D CUDA_CUDA_LIBRARY=/usr/local/cuda/lib64/stubs/libcuda.so \
     -D WITH_TBB=ON \
     -D WITH_V4L=ON \
     -D WITH_OPENGL=ON \
