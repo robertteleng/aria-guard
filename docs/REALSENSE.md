@@ -116,13 +116,28 @@ docker compose -f docker/docker-compose.yml run --rm --service-ports aria-demo \
 ## Shared Memory (IPC)
 
 El depth de RealSense se pasa al `DetectorProcess` por shared memory para evitar
-serialización:
+serialización. Los buffers se dimensionan dinámicamente según la resolución real del
+observer (no hardcodeado).
 
-| Buffer | Tipo | Tamaño (1280x720) |
-|---|---|---|
-| `aria_frame` | uint8 BGR | 2.76 MB |
-| `aria_depth` | uint8 grayscale | 0.92 MB (salida del detector) |
-| `aria_hw_depth` | uint16 mm | 1.84 MB (entrada de RealSense) |
+| Buffer | Tipo | Tamaño (1280x720) | Dirección |
+|---|---|---|---|
+| `aria_frame` | uint8 BGR | 2.76 MB | main → detector |
+| `aria_depth` | uint8 grayscale | 0.92 MB | detector → main |
+| `aria_hw_depth` | uint16 mm | 1.84 MB | main → detector |
+
+### Flujo de datos
+
+```
+Observer (main process)
+  ├── get_frame("rgb") → uint8 BGR → shm_frame → DetectorProcess (YOLO)
+  ├── get_depth()       → uint16 mm → shm_hw_depth → DetectorProcess (distancias)
+  └── get_depth_visual() → uint8 normalized → Dashboard (visualización)
+```
+
+- `get_depth()` devuelve profundidad raw en milímetros (uint16, para calcular distancias reales)
+- `get_depth_visual()` devuelve profundidad normalizada 0-255 (uint8, para visualizar en el dashboard)
+- Los buffers se escriben/leen con `tobytes()`/`np.frombuffer()` para evitar problemas de memoryview
+- El `frame_shape` se detecta dinámicamente al arrancar, leyendo un frame real del observer
 
 ## Troubleshooting
 

@@ -466,6 +466,40 @@ docker run --rm --gpus all \
 ./docker/docker-build.sh app
 ```
 
+### TensorRT engine incompatible
+
+Si aparece `kSERIALIZATION_VERSION failed`, los engines se compilaron con otra versión de TensorRT:
+
+```bash
+rm models/*.engine
+docker compose -f docker/docker-compose.yml run --rm aria-demo python scripts/export_tensorrt.py
+docker compose -f docker/docker-compose.yml run --rm aria-demo python scripts/export_depth_tensorrt.py
+```
+
+### Disco lleno en `/` (Docker)
+
+Si Docker usa `/var/lib/docker` y el disco raíz es pequeño, mover a otro disco:
+
+```bash
+sudo systemctl stop docker docker.socket
+sudo mkdir -p /home/docker-data
+sudo tee /etc/docker/daemon.json << 'EOF'
+{
+    "data-root": "/home/docker-data",
+    "runtimes": {
+        "nvidia": {
+            "path": "nvidia-container-runtime",
+            "runtimeArgs": []
+        }
+    }
+}
+EOF
+sudo rsync -aP /var/lib/docker/ /home/docker-data/
+sudo systemctl start docker
+# Verificar: docker info | grep "Docker Root Dir"
+# Limpiar: sudo rm -rf /var/lib/docker
+```
+
 ### TTS tarda mucho
 ```bash
 # Primera vez descarga modelos (~2GB)

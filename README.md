@@ -704,22 +704,31 @@ pip install projectaria-client-sdk projectaria-tools
 
 ## Rendimiento
 
-Probado en RTX 5060 Ti (Blackwell):
+El dashboard muestra **detector FPS** (velocidad real de detección YOLO + depth).
 
-| Configuración | FPS | CPU |
-|---------------|-----|-----|
-| YOLO + Depth TensorRT + Gaze | **42** | ~100% |
-| Solo YOLO TensorRT | ~70 | ~50% |
-| Con RealSense (sin Depth IA) | ~70 | ~50% |
+| GPU | Configuración | Detector FPS |
+|-----|---------------|-------------|
+| RTX 5060 Ti | YOLO + Depth TensorRT + Gaze | ~42 |
+| RTX 5060 Ti | Solo YOLO TensorRT | ~70 |
+| RTX 2060 | YOLO + Depth TensorRT + Gaze | ~16 |
+| RTX 2060 | YOLO + RealSense depth (sin Depth IA) | ~30 |
+
+### Detección
+
+- **YOLO26s** con threshold de confianza `conf=0.4` (reduce falsos positivos)
+- Los engines de TensorRT son específicos por GPU y versión de TRT
+- Si cambia la versión de TensorRT, regenerar: `python scripts/export_tensorrt.py`
 
 ### Optimizaciones
 
 - **NVDEC** - Decodificación de video en GPU (OpenCV 4.13.0 + Video Codec SDK 13.0)
 - **TensorRT FP16** para YOLO y Depth Anything V2
-- **Server throttle** - Limita loop principal a 30 FPS (suficiente para asistencia visual)
+- **RealSense hardware depth** - Usa depth nativo (mm), sin modelo IA. Ver [docs/REALSENSE.md](docs/REALSENSE.md)
+- **Shared memory IPC** - Zero-copy entre procesos (RGB + depth)
 - **CUDA Streams** para ejecución paralela
 - **NeMo en proceso separado** (evita conflictos CUDA)
 - **Pre-caching TTS** para latencia mínima
+- **GPU auto-detection** - `docker-build.sh` detecta compute capability y solo compila para la GPU local
 
 ### GPUs Soportadas
 
@@ -751,6 +760,9 @@ pie title VRAM (~2.5GB total)
 - ✅ TensorRT FP16 para YOLO y Depth Anything V2
 - ✅ NVDEC para decodificación de video en GPU
 - ✅ Server throttle 30 FPS para reducir CPU
+- ✅ Shared memory IPC para RealSense hardware depth (uint16 mm)
+- ✅ GPU auto-detection en docker-build.sh
+- ✅ Distancias absolutas con RealSense (mm → categorías: very_close/close/medium/far)
 
 ### Próximo: Jetson + RealSense + IMU
 
