@@ -135,8 +135,8 @@ def _detector_worker(
                     # Read hardware depth if available (RealSense D435)
                     if has_hardware_depth and shm_hw_depth:
                         hw_depth_shape = (frame_shape[0], frame_shape[1])
-                        hardware_depth = np.ndarray(hw_depth_shape, dtype=np.uint16, buffer=shm_hw_depth.buf)
-                        hardware_depth = hardware_depth.copy()
+                        hw_nbytes = hw_depth_shape[0] * hw_depth_shape[1] * 2
+                        hardware_depth = np.frombuffer(bytes(shm_hw_depth.buf[:hw_nbytes]), dtype=np.uint16).reshape(hw_depth_shape)
                 else:
                     continue
             else:
@@ -160,8 +160,8 @@ def _detector_worker(
             # Process frame
             detections, depth_colored, gaze_info, _ = detector.process(rgb, eye, hardware_depth)
 
-            # Send results
-            if use_shared_memory and shm_depth and depth_colored is not None and result_ready_event:
+            # Send results (skip shm depth write when using hardware depth - main process has it)
+            if use_shared_memory and shm_depth and depth_colored is not None and result_ready_event and not has_hardware_depth:
                 # Write depth to shared memory
                 depth_flat = depth_colored.flatten()
                 shm_depth.buf[:len(depth_flat)] = depth_flat.tobytes()
@@ -392,7 +392,8 @@ class DetectorProcess:
                     if hardware_depth.shape[:2] != hw_depth_shape:
                         import cv2
                         hardware_depth = cv2.resize(hardware_depth, (hw_depth_shape[1], hw_depth_shape[0]))
-                    np.ndarray(hw_depth_shape, dtype=np.uint16, buffer=self._shm_hw_depth.buf)[:] = hardware_depth
+                    hw = hardware_depth.astype(np.uint16)
+                    self._shm_hw_depth.buf[:hw.nbytes] = hw.tobytes()
 
                 # Signal frame is ready
                 self._frame_ready_event.set()
