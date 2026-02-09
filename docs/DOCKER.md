@@ -46,12 +46,34 @@ graph TB
 ## Quick Start
 
 ```bash
-# Usar el helper script
+# Usar el helper script (auto-detecta tu GPU)
 ./docker-build.sh all      # Primera vez: base + app (~25 min)
 ./docker-build.sh dev      # Desarrollo: sin rebuild
 ./docker-build.sh app      # Solo app: cambios deps (~3 min)
 ./docker-build.sh run      # Ejecutar
 ```
+
+### Auto-detección de GPU
+
+El script detecta automáticamente la GPU del host y compila OpenCV solo para esa arquitectura, reduciendo el tiempo de build y el tamaño de la imagen.
+
+```bash
+# Auto-detecta (ej: RTX 2060 → compila solo para 7.5)
+./docker-build.sh base
+
+# Forzar una arquitectura manualmente
+CUDA_ARCH_BIN="8.6" ./docker-build.sh base
+
+# Compilar para varias (ej: imagen portable)
+CUDA_ARCH_BIN="7.5,8.6,8.9" ./docker-build.sh base
+```
+
+| GPU | Compute Capability |
+|-----|--------------------|
+| RTX 20xx (Turing) | 7.5 |
+| RTX 30xx (Ampere) | 8.6 |
+| RTX 40xx (Ada) | 8.9 |
+| RTX 50xx (Blackwell) | 12.0 |
 
 ---
 

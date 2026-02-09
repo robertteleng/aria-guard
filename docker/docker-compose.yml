@@ -3,11 +3,11 @@
 # =============================================================================
 #
 # Uso:
-#   docker compose up              # Iniciar (primera vez hace build)
-#   docker compose up --build      # Reconstruir imagen
-#   docker compose down            # Parar y limpiar
-#   docker compose up -d           # Iniciar en background
-#   docker compose logs -f         # Ver logs en tiempo real
+#   docker compose -f docker/docker-compose.yml up
+#   docker compose -f docker/docker-compose.yml up --build
+#   docker compose -f docker/docker-compose.yml down
+#   docker compose -f docker/docker-compose.yml up -d
+#   docker compose -f docker/docker-compose.yml logs -f
 #
 # Acceso:
 #   Dashboard: http://localhost:5000
@@ -31,13 +31,13 @@ services:
       # USB passthrough para conectar Aria glasses
       - /dev/bus/usb:/dev/bus/usb
       # Directorio de datos compartido (videos, datasets VRS)
-      - ./data:/app/data
+      - ../data:/app/data
       # Modelos (TensorRT engines, ONNX, weights)
-      - ./models:/app/models
+      - ../models:/app/models
       # Código fuente (para desarrollo sin rebuild)
-      - ./run.py:/app/run.py:ro
-      - ./src:/app/src:ro
-      - ./scripts:/app/scripts:ro
+      - ../run.py:/app/run.py:ro
+      - ../src:/app/src:ro
+      - ../scripts:/app/scripts:ro
       # PulseAudio socket para audio output
       - /run/user/1000/pulse:/run/user/1000/pulse:ro
       - ~/.config/pulse/cookie:/root/.config/pulse/cookie:ro

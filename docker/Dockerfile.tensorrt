@@ -45,6 +45,7 @@ RUN git clone --depth 1 --branch 4.10.0 https://github.com/opencv/opencv.git && 
     sed -i 's/virtual bool empty() const = 0;/virtual bool empty() const override = 0;/g' opencv_contrib/modules/cudafeatures2d/include/opencv2/cudafeatures2d.hpp
 
 WORKDIR /tmp/opencv/build
+ARG CUDA_ARCH_BIN="7.5,8.6,8.9,12.0"
 RUN NUMPY_INCLUDE=$(python3 -c "import numpy; print(numpy.get_include())") && \
     cmake .. \
     -D CMAKE_BUILD_TYPE=RELEASE \
@@ -56,8 +57,8 @@ RUN NUMPY_INCLUDE=$(python3 -c "import numpy; print(numpy.get_include())") && \
     -D OPENCV_DNN_CUDA=ON \
     -D ENABLE_FAST_MATH=1 \
     -D CUDA_FAST_MATH=1 \
-    -D CUDA_ARCH_BIN="7.5,8.6,8.9,12.0" \
-    -D CUDA_ARCH_PTX="12.0" \
+    -D CUDA_ARCH_BIN="${CUDA_ARCH_BIN}" \
+    -D CUDA_ARCH_PTX="${CUDA_ARCH_BIN}" \
     -D WITH_CUBLAS=1 \
     -D WITH_NVCUVID=ON \
     -D WITH_NVCUVENC=ON \

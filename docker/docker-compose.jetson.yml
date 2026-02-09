@@ -3,8 +3,8 @@
 # =============================================================================
 #
 # Uso:
-#   docker compose -f docker-compose.jetson.yml up
-#   docker compose -f docker-compose.jetson.yml up --build  # Reconstruir
+#   docker compose -f docker/docker-compose.jetson.yml up
+#   docker compose -f docker/docker-compose.jetson.yml up --build
 #
 # Hardware requerido:
 #   - Jetson Orin NX/Nano con JetPack 6.x
@@ -19,8 +19,8 @@
 services:
   aria-demo:
     build:
-      context: .
-      dockerfile: Dockerfile.jetson
+      context: ..
+      dockerfile: docker/Dockerfile.jetson
     image: aria-demo:jetson
     container_name: aria-demo-jetson
 
@@ -34,12 +34,12 @@ services:
       # USB passthrough para RealSense D435
       - /dev/bus/usb:/dev/bus/usb
       # Datos y modelos
-      - ./data:/app/data
-      - ./models:/app/models
+      - ../data:/app/data
+      - ../models:/app/models
       # Código fuente (desarrollo sin rebuild)
-      - ./run.py:/app/run.py:ro
-      - ./src:/app/src:ro
-      - ./scripts:/app/scripts:ro
+      - ../run.py:/app/run.py:ro
+      - ../src:/app/src:ro
+      - ../scripts:/app/scripts:ro
 
     devices:
       # Audio para TTS

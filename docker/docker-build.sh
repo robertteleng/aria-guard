@@ -6,13 +6,43 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_ROOT"
 
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
+
+# Auto-detect GPU compute capability
+detect_gpu_arch() {
+    if [ -n "${CUDA_ARCH_BIN:-}" ]; then
+        echo -e "${YELLOW}Using manual CUDA_ARCH_BIN=${CUDA_ARCH_BIN}${NC}"
+        return
+    fi
+
+    if ! command -v nvidia-smi &>/dev/null; then
+        CUDA_ARCH_BIN="7.5,8.6,8.9,12.0"
+        echo -e "${YELLOW}nvidia-smi not found, using all architectures: ${CUDA_ARCH_BIN}${NC}"
+        return
+    fi
+
+    local gpu_name
+    gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+    local compute_cap
+    compute_cap=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1)
+
+    if [ -z "$compute_cap" ]; then
+        CUDA_ARCH_BIN="7.5,8.6,8.9,12.0"
+        echo -e "${YELLOW}Could not detect GPU arch, using all: ${CUDA_ARCH_BIN}${NC}"
+        return
+    fi
+
+    CUDA_ARCH_BIN="$compute_cap"
+    echo -e "${GREEN}Detected GPU: ${gpu_name} (compute ${compute_cap})${NC}"
+    echo -e "${GREEN}Building only for CUDA_ARCH_BIN=${CUDA_ARCH_BIN}${NC}"
+}
 
 usage() {
     echo "Usage: $0 [command]"
@@ -32,9 +62,12 @@ usage() {
 }
 
 build_base() {
+    detect_gpu_arch
     echo -e "${YELLOW}Building base image (OpenCV+CUDA+NVDEC)...${NC}"
     echo "This will take ~20 minutes..."
-    DOCKER_BUILDKIT=1 docker build -f Dockerfile.base -t aria-base:opencv-nvdec .
+    DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile.base \
+        --build-arg CUDA_ARCH_BIN="$CUDA_ARCH_BIN" \
+        -t aria-base:opencv-nvdec .
     echo -e "${GREEN}✓ Base image built: aria-base:opencv-nvdec${NC}"
 }
 
@@ -46,7 +79,7 @@ build_app() {
     fi
 
     echo -e "${YELLOW}Building app image...${NC}"
-    DOCKER_BUILDKIT=1 docker build -f Dockerfile.app -t aria-demo:tensorrt .
+    DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile.app -t aria-demo:tensorrt .
     echo -e "${GREEN}✓ App image built: aria-demo:tensorrt${NC}"
 }
 
