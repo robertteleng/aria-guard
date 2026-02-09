@@ -535,9 +535,16 @@ graph LR
 ```
 aria-demo/
 ├── run.py                      # Entry point
-├── Dockerfile                  # Docker básico (desarrollo)
-├── Dockerfile.tensorrt         # OpenCV CUDA + TensorRT (producción x86_64)
-├── Dockerfile.jetson           # Jetson Orin Nano + RealSense (ARM64)
+├── docker/
+│   ├── Dockerfile              # Docker básico (desarrollo)
+│   ├── Dockerfile.base         # OpenCV+CUDA+NVDEC (base image)
+│   ├── Dockerfile.app          # App sobre base (builds rápidos)
+│   ├── Dockerfile.tensorrt     # Todo-en-uno (legacy)
+│   ├── Dockerfile.jetson       # Jetson Orin Nano + RealSense (ARM64)
+│   ├── docker-build.sh         # Helper script (auto-detecta GPU)
+│   ├── docker-compose.yml      # Compose x86_64
+│   └── docker-compose.jetson.yml
+├── tests/                      # Test scripts
 ├── src/
 │   ├── core/
 │   │   ├── __init__.py
@@ -572,9 +579,9 @@ Esta es la **forma más segura** de ejecutar el proyecto, ya que aísla todas la
 ```mermaid
 flowchart LR
     subgraph "Quick Start"
-        A[./docker-build.sh all] --> B[Primera vez ~25 min]
-        C[./docker-build.sh dev] --> D[Desarrollo 0 min]
-        E[./docker-build.sh app] --> F[Deps ~3 min]
+        A[./docker/docker-build.sh all] --> B[Primera vez ~25 min]
+        C[./docker/docker-build.sh dev] --> D[Desarrollo 0 min]
+        E[./docker/docker-build.sh app] --> F[Deps ~3 min]
     end
 ```
 
@@ -595,7 +602,7 @@ Clona el proyecto y simplemente ejecuta:
 
 ```bash
 # Construye la imagen y levanta el contenedor con GPU
-docker compose up --build
+docker compose -f docker/docker-compose.yml up --build
 ```
 
 El sistema descargará automáticamente la imagen base de Ubuntu 22.04, instalará las versiones correctas de Python, PyTorch y Aria SDK, compilará todo y lanzará la aplicación.

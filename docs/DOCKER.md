@@ -47,10 +47,10 @@ graph TB
 
 ```bash
 # Usar el helper script (auto-detecta tu GPU)
-./docker-build.sh all      # Primera vez: base + app (~25 min)
-./docker-build.sh dev      # Desarrollo: sin rebuild
-./docker-build.sh app      # Solo app: cambios deps (~3 min)
-./docker-build.sh run      # Ejecutar
+./docker/docker-build.sh all      # Primera vez: base + app (~25 min)
+./docker/docker-build.sh dev      # Desarrollo: sin rebuild
+./docker/docker-build.sh app      # Solo app: cambios deps (~3 min)
+./docker/docker-build.sh run      # Ejecutar
 ```
 
 ### Auto-detección de GPU
@@ -59,13 +59,13 @@ El script detecta automáticamente la GPU del host y compila OpenCV solo para es
 
 ```bash
 # Auto-detecta (ej: RTX 2060 → compila solo para 7.5)
-./docker-build.sh base
+./docker/docker-build.sh base
 
 # Forzar una arquitectura manualmente
-CUDA_ARCH_BIN="8.6" ./docker-build.sh base
+CUDA_ARCH_BIN="8.6" ./docker/docker-build.sh base
 
 # Compilar para varias (ej: imagen portable)
-CUDA_ARCH_BIN="7.5,8.6,8.9" ./docker-build.sh base
+CUDA_ARCH_BIN="7.5,8.6,8.9" ./docker/docker-build.sh base
 ```
 
 | GPU | Compute Capability |
@@ -81,10 +81,10 @@ CUDA_ARCH_BIN="7.5,8.6,8.9" ./docker-build.sh base
 
 | Dockerfile | Descripción | Build Time | Uso |
 |------------|-------------|------------|-----|
-| `Dockerfile.base` | OpenCV+CUDA+NVDEC | ~20 min | Base image (1 vez) |
-| `Dockerfile.app` | App sobre base | ~3 min | Cambios de deps |
-| `Dockerfile.tensorrt` | Todo-en-uno | ~25 min | Legacy |
-| `Dockerfile.jetson` | Jetson Orin | ~15 min | ARM64 |
+| `docker/Dockerfile.base` | OpenCV+CUDA+NVDEC | ~20 min | Base image (1 vez) |
+| `docker/Dockerfile.app` | App sobre base | ~3 min | Cambios de deps |
+| `docker/Dockerfile.tensorrt` | Todo-en-uno | ~25 min | Legacy |
+| `docker/Dockerfile.jetson` | Jetson Orin | ~15 min | ARM64 |
 
 ---
 
@@ -99,9 +99,9 @@ flowchart TB
     end
 
     subgraph ACTION["⚡ Acción"]
-        DEV["./docker-build.sh dev<br/>Volume mount"]
-        APP["./docker-build.sh app<br/>Rebuild app layer"]
-        BASE["./docker-build.sh base<br/>Rebuild desde cero"]
+        DEV["./docker/docker-build.sh dev<br/>Volume mount"]
+        APP["./docker/docker-build.sh app<br/>Rebuild app layer"]
+        BASE["./docker/docker-build.sh base<br/>Rebuild desde cero"]
     end
 
     subgraph TIME["⏱️ Tiempo"]
@@ -129,7 +129,7 @@ flowchart TB
 ### Cambios de código (sin rebuild)
 ```bash
 # Montar código como volumen
-./docker-build.sh dev /app/data/video.mp4 outdoor
+./docker/docker-build.sh dev /app/data/video.mp4 outdoor
 
 # O manualmente:
 docker run --gpus all -p 5000:5000 \
@@ -140,13 +140,13 @@ docker run --gpus all -p 5000:5000 \
 
 ### Cambios de dependencias Python
 ```bash
-./docker-build.sh app   # ~3 min
+./docker/docker-build.sh app   # ~3 min
 ```
 
 ### Cambios de OpenCV/CUDA (raro)
 ```bash
-./docker-build.sh base  # ~20 min
-./docker-build.sh app   # ~3 min
+./docker/docker-build.sh base  # ~20 min
+./docker/docker-build.sh app   # ~3 min
 ```
 
 ---
@@ -311,21 +311,21 @@ flowchart LR
 
 ### Opción 1: Helper Script (Recomendado)
 ```bash
-./docker-build.sh all
+./docker/docker-build.sh all
 ```
 
 ### Opción 2: Paso a Paso
 ```bash
 # 1. Base image (solo primera vez o cambios OpenCV)
-docker build -f Dockerfile.base -t aria-base:opencv-nvdec .
+docker build -f docker/Dockerfile.base -t aria-base:opencv-nvdec .
 
 # 2. App image
-docker build -f Dockerfile.app -t aria-demo:tensorrt .
+docker build -f docker/Dockerfile.app -t aria-demo:tensorrt .
 ```
 
 ### Opción 3: Todo-en-uno (Legacy)
 ```bash
-docker build -f Dockerfile.tensorrt -t aria-demo:tensorrt .
+docker build -f docker/Dockerfile.tensorrt -t aria-demo:tensorrt .
 ```
 
 ---
@@ -407,7 +407,7 @@ Para ARM64, usa RealSense D435 (Aria SDK no soporta ARM):
 
 ```bash
 # Build EN el Jetson
-docker build -f Dockerfile.jetson -t aria-demo:jetson .
+docker build -f docker/Dockerfile.jetson -t aria-demo:jetson .
 
 # Run
 docker run -it --rm \
@@ -462,8 +462,8 @@ docker run --rm --gpus all \
 # 1) Asegurar NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
 # 2) Verificar driver del host (nvidia-smi)
 # 3) Reconstruir base image con NVDEC (si cudacodec=False)
-./docker-build.sh base
-./docker-build.sh app
+./docker/docker-build.sh base
+./docker/docker-build.sh app
 ```
 
 ### TTS tarda mucho

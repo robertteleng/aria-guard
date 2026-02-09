@@ -59,11 +59,9 @@ docs/
 !README.md
 
 # Docker files (no need to copy into image)
-Dockerfile*
-docker-compose*.yml
+docker/
+!docker/Video_Codec_SDK_13.0.37.zip
 .dockerignore
 
-# Test files (optional - uncomment if not needed in container)
-# tests/
-# *_test.py
-# test_*.py
+# Test files
+tests/

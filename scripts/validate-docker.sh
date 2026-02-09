@@ -25,7 +25,7 @@ echo "=== Validating Docker build files ==="
 echo ""
 
 # --- Check files exist ---
-for f in Dockerfile.base Dockerfile.app docker-compose.yml docker-build.sh requirements.txt; do
+for f in docker/Dockerfile.base docker/Dockerfile.app docker/docker-compose.yml docker/docker-build.sh requirements.txt; do
     if [ -f "$ROOT/$f" ]; then
         ok "$f exists"
     else
@@ -37,7 +37,7 @@ echo ""
 
 # --- Dockerfile.base checks ---
 echo "--- Dockerfile.base ---"
-BASE="$ROOT/Dockerfile.base"
+BASE="$ROOT/docker/Dockerfile.base"
 
 # Check NVDEC stubs (the key fix)
 if grep -q "libnvcuvid.so" "$BASE"; then
@@ -83,7 +83,7 @@ echo ""
 
 # --- Dockerfile.app checks ---
 echo "--- Dockerfile.app ---"
-APP="$ROOT/Dockerfile.app"
+APP="$ROOT/docker/Dockerfile.app"
 
 # Check base image reference
 if grep -q "FROM aria-base:opencv-nvdec" "$APP"; then
@@ -123,7 +123,7 @@ echo ""
 
 # --- docker-compose.yml checks ---
 echo "--- docker-compose.yml ---"
-COMPOSE="$ROOT/docker-compose.yml"
+COMPOSE="$ROOT/docker/docker-compose.yml"
 
 if grep -q "NVIDIA_DRIVER_CAPABILITIES=compute,utility,video" "$COMPOSE"; then
     ok "NVIDIA_DRIVER_CAPABILITIES includes video"
@@ -135,7 +135,7 @@ echo ""
 
 # --- docker-build.sh checks ---
 echo "--- docker-build.sh ---"
-BUILD="$ROOT/docker-build.sh"
+BUILD="$ROOT/docker/docker-build.sh"
 
 NVDEC_RUNS=$(grep -c "NVIDIA_DRIVER_CAPABILITIES=compute,utility,video" "$BUILD")
 if [ "$NVDEC_RUNS" -ge 2 ]; then
@@ -153,7 +153,7 @@ echo "--- Docker images ---"
 if docker image inspect aria-base:opencv-nvdec >/dev/null 2>&1; then
     ok "aria-base:opencv-nvdec exists"
 else
-    warn "aria-base:opencv-nvdec not found (run: ./docker-build.sh base)"
+    warn "aria-base:opencv-nvdec not found (run: ./docker/docker-build.sh base)"
 fi
 
 echo ""
