@@ -269,7 +269,8 @@ class ParallelDetector:
         self._frame_idx += 1
 
         # Si hay depth por hardware, usarlo directamente (RealSense D435)
-        if hardware_depth is not None:
+        self._hardware_depth_mode = hardware_depth is not None
+        if self._hardware_depth_mode:
             self._cached_depth = hardware_depth
             should_compute_depth = False
         else:
@@ -311,7 +312,7 @@ class ParallelDetector:
 
         # Combinar YOLO + Depth para crear detecciones con distancia
         if yolo_results:
-            detections = self._create_detections(yolo_results, depth_map, frame.shape)
+            detections = self._create_detections(yolo_results, depth_map, frame.shape, self._hardware_depth_mode)
 
         # Marcar objetos que el usuario está mirando
         if gaze_point:
@@ -328,7 +329,7 @@ class ParallelDetector:
         if self.yolo is None:
             return None
         try:
-            results = self.yolo(frame, verbose=False, half=(self.device == "cuda"))
+            results = self.yolo(frame, verbose=False, half=(self.device == "cuda"), conf=0.4)
             return results[0] if results else None
         except Exception as e:
             print(f"[DETECTOR ERROR] YOLO: {e}")
@@ -413,7 +414,8 @@ class ParallelDetector:
         return depth
 
     def _create_detections(
-        self, yolo_result, depth_map: Optional[np.ndarray], frame_shape
+        self, yolo_result, depth_map: Optional[np.ndarray], frame_shape,
+        hardware_depth: bool = False
     ) -> List[Detection]:
         """Combina YOLO + Depth para crear detecciones con distancia."""
         detections = []
@@ -449,10 +451,19 @@ class ParallelDetector:
             distance = "unknown"
             depth_value = 0.5
             if depth_map is not None:
-                depth_value = self._get_depth_in_bbox(
-                    depth_map, int(x1), int(y1), int(x2), int(y2), h, w
-                )
-                distance = self._depth_to_distance(depth_value)
+                if hardware_depth:
+                    # RealSense: depth en mm (uint16), convertir a metros
+                    depth_mm = self._get_depth_in_bbox_raw(
+                        depth_map, int(x1), int(y1), int(x2), int(y2), h, w
+                    )
+                    depth_value = depth_mm / 1000.0  # a metros
+                    distance = self._depth_mm_to_distance(depth_mm)
+                else:
+                    # AI depth: valores relativos normalizados
+                    depth_value = self._get_depth_in_bbox(
+                        depth_map, int(x1), int(y1), int(x2), int(y2), h, w
+                    )
+                    distance = self._depth_to_distance(depth_value)
 
             detections.append(Detection(
                 name=name,
@@ -499,8 +510,51 @@ class ParallelDetector:
 
         return 0.5
 
+    def _get_depth_in_bbox_raw(
+        self, depth_map: np.ndarray, x1: int, y1: int, x2: int, y2: int, h: int, w: int
+    ) -> float:
+        """Obtiene valor de profundidad promedio en bbox (RealSense, mm)."""
+        dh, dw = depth_map.shape[:2]
+        scale_x = dw / w
+        scale_y = dh / h
+
+        dx1 = max(0, int(x1 * scale_x))
+        dy1 = max(0, int(y1 * scale_y))
+        dx2 = min(dw, int(x2 * scale_x))
+        dy2 = min(dh, int(y2 * scale_y))
+
+        # Región central del bbox (más precisa)
+        margin_x = (dx2 - dx1) // 4
+        margin_y = (dy2 - dy1) // 4
+        cx1 = dx1 + margin_x
+        cy1 = dy1 + margin_y
+        cx2 = dx2 - margin_x
+        cy2 = dy2 - margin_y
+
+        if cx2 > cx1 and cy2 > cy1:
+            region = depth_map[cy1:cy2, cx1:cx2].astype(np.float32)
+            # Filtrar píxeles sin lectura (0 = sin dato en RealSense)
+            valid = region[region > 0]
+            if valid.size > 0:
+                return float(np.median(valid))  # Mediana más robusta que media
+
+        return 0.0
+
+    def _depth_mm_to_distance(self, depth_mm: float) -> str:
+        """Convierte profundidad en mm a categoría de distancia (RealSense)."""
+        if depth_mm <= 0:
+            return "unknown"
+        elif depth_mm < 800:       # < 0.8m
+            return "very_close"
+        elif depth_mm < 2000:      # < 2m
+            return "close"
+        elif depth_mm < 4000:      # < 4m
+            return "medium"
+        else:
+            return "far"
+
     def _depth_to_distance(self, depth_value: float) -> str:
-        """Convierte valor de profundidad a categoría de distancia."""
+        """Convierte valor de profundidad a categoría de distancia (AI depth)."""
         # Depth Anything: valores altos = cerca, valores bajos = lejos
         if depth_value > 0.7:
             return "very_close"

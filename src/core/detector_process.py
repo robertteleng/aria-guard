@@ -26,8 +26,10 @@ _ctx = mp.get_context('spawn')
 # Shared memory configuration
 SHM_FRAME_NAME = "aria_frame"
 SHM_DEPTH_NAME = "aria_depth"
+SHM_HW_DEPTH_NAME = "aria_hw_depth"
 MAX_FRAME_SIZE = 1920 * 1080 * 3  # Max 1080p BGR
 MAX_DEPTH_SIZE = 1920 * 1080      # Max 1080p grayscale
+MAX_HW_DEPTH_SIZE = 1920 * 1080 * 2  # Max 1080p uint16 (RealSense, mm)
 
 
 def _detector_worker(
@@ -41,7 +43,9 @@ def _detector_worker(
     shm_depth_name: str = None,
     frame_shape: tuple = None,
     frame_ready_event = None,
-    result_ready_event = None
+    result_ready_event = None,
+    shm_hw_depth_name: str = None,
+    has_hardware_depth: bool = False
 ):
     """
     Worker process that runs CUDA models.
@@ -74,11 +78,14 @@ def _detector_worker(
     # Shared memory setup
     shm_frame = None
     shm_depth = None
+    shm_hw_depth = None
     if use_shared_memory and shm_frame_name and frame_shape:
         try:
             shm_frame = shared_memory.SharedMemory(name=shm_frame_name)
             if shm_depth_name:
                 shm_depth = shared_memory.SharedMemory(name=shm_depth_name)
+            if shm_hw_depth_name:
+                shm_hw_depth = shared_memory.SharedMemory(name=shm_hw_depth_name)
             print(f"[DETECTOR PROCESS] ✓ Shared memory attached", flush=True)
         except Exception as e:
             print(f"[DETECTOR PROCESS] Shared memory failed: {e}, using queues", flush=True)
@@ -110,6 +117,7 @@ def _detector_worker(
 
     frame_count = 0
     last_log = time.time()
+    detector_fps = 0.0
 
     while True:
         try:
@@ -124,6 +132,11 @@ def _detector_worker(
                     # Read from shared memory (zero-copy)
                     rgb = np.ndarray(frame_shape, dtype=np.uint8, buffer=shm_frame.buf)
                     rgb = rgb.copy()  # Make a copy to release the buffer
+                    # Read hardware depth if available (RealSense D435)
+                    if has_hardware_depth and shm_hw_depth:
+                        hw_depth_shape = (frame_shape[0], frame_shape[1])
+                        hardware_depth = np.ndarray(hw_depth_shape, dtype=np.uint16, buffer=shm_hw_depth.buf)
+                        hardware_depth = hardware_depth.copy()
                 else:
                     continue
             else:
@@ -157,7 +170,8 @@ def _detector_worker(
                 "detections": detections,
                 "depth": depth_colored,  # Always send depth via queue (small overhead)
                 "gaze": gaze_info,
-                "timestamp": time.time()
+                "timestamp": time.time(),
+                "detector_fps": detector_fps
             }
 
             try:
@@ -172,8 +186,8 @@ def _detector_worker(
             # Periodic logging
             now = time.time()
             if now - last_log >= 5.0:
-                fps = frame_count / (now - last_log)
-                print(f"[DETECTOR PROCESS] {frame_count} frames, {fps:.1f} FPS", flush=True)
+                detector_fps = frame_count / (now - last_log)
+                print(f"[DETECTOR PROCESS] {frame_count} frames, {detector_fps:.1f} FPS", flush=True)
                 frame_count = 0
                 last_log = now
 
@@ -218,10 +232,11 @@ class DetectorProcess:
         detector.stop()
     """
 
-    def __init__(self, mode: str = "all", enable_depth: bool = True, use_shared_memory: bool = True):
+    def __init__(self, mode: str = "all", enable_depth: bool = True, use_shared_memory: bool = True, has_hardware_depth: bool = False):
         self._mode = mode
         self._enable_depth = enable_depth
         self._use_shared_memory = use_shared_memory
+        self._has_hardware_depth = has_hardware_depth
         self._process: Optional[mp.Process] = None
         self._input_queue: Optional[mp.Queue] = None
         self._output_queue: Optional[mp.Queue] = None
@@ -232,6 +247,7 @@ class DetectorProcess:
         # Shared memory
         self._shm_frame = None
         self._shm_depth = None
+        self._shm_hw_depth = None
         self._frame_shape = None
         self._frame_ready_event = None
         self._result_ready_event = None
@@ -259,6 +275,7 @@ class DetectorProcess:
         # Initialize shared memory if enabled
         shm_frame_name = None
         shm_depth_name = None
+        shm_hw_depth_name = None
         self._frame_shape = frame_shape
 
         if self._use_shared_memory:
@@ -282,6 +299,16 @@ class DetectorProcess:
                 )
                 shm_depth_name = self._shm_depth.name
 
+                # Create shared memory for hardware depth input (RealSense uint16 mm)
+                if self._has_hardware_depth:
+                    hw_depth_size = frame_shape[0] * frame_shape[1] * 2  # uint16
+                    self._shm_hw_depth = shared_memory.SharedMemory(
+                        create=True,
+                        size=hw_depth_size,
+                        name=f"{SHM_HW_DEPTH_NAME}_{id(self)}"
+                    )
+                    shm_hw_depth_name = self._shm_hw_depth.name
+
                 # Events for synchronization
                 self._frame_ready_event = _ctx.Event()
                 self._result_ready_event = _ctx.Event()
@@ -292,6 +319,7 @@ class DetectorProcess:
                 self._use_shared_memory = False
                 self._shm_frame = None
                 self._shm_depth = None
+                self._shm_hw_depth = None
 
         self._process = _ctx.Process(
             target=_detector_worker,
@@ -306,7 +334,9 @@ class DetectorProcess:
                 shm_depth_name,
                 frame_shape,
                 self._frame_ready_event,
-                self._result_ready_event
+                self._result_ready_event,
+                shm_hw_depth_name,
+                self._has_hardware_depth
             ),
             daemon=True
         )
@@ -355,6 +385,14 @@ class DetectorProcess:
 
                 # Write to shared memory (direct copy)
                 np.ndarray(self._frame_shape, dtype=np.uint8, buffer=self._shm_frame.buf)[:] = rgb
+
+                # Write hardware depth if available (RealSense D435)
+                if hardware_depth is not None and self._shm_hw_depth:
+                    hw_depth_shape = (self._frame_shape[0], self._frame_shape[1])
+                    if hardware_depth.shape[:2] != hw_depth_shape:
+                        import cv2
+                        hardware_depth = cv2.resize(hardware_depth, (hw_depth_shape[1], hw_depth_shape[0]))
+                    np.ndarray(hw_depth_shape, dtype=np.uint16, buffer=self._shm_hw_depth.buf)[:] = hardware_depth
 
                 # Signal frame is ready
                 self._frame_ready_event.set()
@@ -436,6 +474,14 @@ class DetectorProcess:
             except:
                 pass
             self._shm_depth = None
+
+        if self._shm_hw_depth:
+            try:
+                self._shm_hw_depth.close()
+                self._shm_hw_depth.unlink()
+            except:
+                pass
+            self._shm_hw_depth = None
 
         self._started = False
         print("[DetectorProcess] Stopped", flush=True)

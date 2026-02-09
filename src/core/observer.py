@@ -192,6 +192,7 @@ class RealSenseObserver(BaseObserver):
         self._lock = threading.Lock()
         self._current_frame = None
         self._current_depth = None
+        self._current_depth_raw = None  # uint16 en mm (para distancias reales)
         self._frame_count = 0
         self._start_time = time.time()
 
@@ -248,6 +249,7 @@ class RealSenseObserver(BaseObserver):
                     with self._lock:
                         self._current_frame = color_image
                         self._current_depth = depth_normalized
+                        self._current_depth_raw = depth_image  # uint16 en mm
                         self._frame_count += 1
 
             except Exception as e:
@@ -270,7 +272,14 @@ class RealSenseObserver(BaseObserver):
         return None
 
     def get_depth(self) -> Optional[np.ndarray]:
-        """Obtiene el mapa de profundidad directamente (sin modelo)."""
+        """Obtiene el mapa de profundidad raw en mm (uint16)."""
+        with self._lock:
+            if self._current_depth_raw is not None:
+                return self._current_depth_raw.copy()
+        return None
+
+    def get_depth_visual(self) -> Optional[np.ndarray]:
+        """Obtiene el mapa de profundidad normalizado para visualización (uint8)."""
         with self._lock:
             if self._current_depth is not None:
                 return self._current_depth.copy()

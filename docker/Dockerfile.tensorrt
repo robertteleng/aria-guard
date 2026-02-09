@@ -108,7 +108,7 @@ RUN mkdir -p /etc/apt/keyrings && \
     echo "deb [signed-by=/etc/apt/keyrings/librealsense.pgp] https://librealsense.intel.com/Debian/apt-repo jammy main" | \
     tee /etc/apt/sources.list.d/librealsense.list && \
     apt-get update && apt-get install -y --no-install-recommends \
-    librealsense2-dev librealsense2-utils \
+    librealsense2-dev librealsense2-utils libusb-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Python 3.11 como default ANTES de crear venv

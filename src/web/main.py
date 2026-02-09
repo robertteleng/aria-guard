@@ -109,21 +109,7 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
 
     print(f"[SERVER] Iniciando con fuente: {source}, modo: {mode}")
 
-    # Start CUDA in separate process FIRST (before any Aria SDK)
-    print("[SERVER] Iniciando DetectorProcess (CUDA en proceso separado)...")
-    detector = DetectorProcess(mode=mode, enable_depth=True)
-    if not detector.start(timeout=60):
-        print("[SERVER] ✗ Failed to start DetectorProcess")
-        return
-
-    # Non-CUDA components in main process
-    dashboard = Dashboard()
-    audio = AudioFeedback(enabled=enable_audio, use_nemo=enable_audio)
-    alert_engine = AlertDecisionEngine()
-    tracker = SimpleTracker()
-    print("[SERVER] ✓ Componentes inicializados")
-
-    # NOW create observer (Aria SDK in main process - safe because no CUDA here)
+    # Create observer FIRST to know if hardware depth is available
     use_precomputed_gaze = False
     if source.startswith("dataset:"):
         parts = source.split(":", 2)
@@ -149,16 +135,40 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
         observer = MockObserver(source="video", video_path=source)
 
     print("[SERVER] ✓ Observer listo")
-    print("[SERVER] Iniciando procesamiento...")
-
-    frame_count = 0
-    start_time = time.time()
 
     # Check if observer provides hardware depth (RealSense D435)
     has_hardware_depth = hasattr(observer, 'get_depth')
     if has_hardware_depth:
         print("[SERVER] Hardware depth disponible (RealSense) - desactivando modelo de depth IA")
         print("[SERVER] Gaze no disponible (RealSense no tiene eye tracking)")
+
+    # Start CUDA in separate process (after observer so we know about hardware depth)
+    # Get actual frame shape from observer for correct shared memory sizing
+    test_frame = None
+    for _ in range(30):
+        test_frame = observer.get_frame("rgb")
+        if test_frame is not None:
+            break
+        time.sleep(0.1)
+    frame_shape = test_frame.shape if test_frame is not None else (720, 1280, 3)
+    print(f"[SERVER] Frame shape: {frame_shape}")
+
+    print("[SERVER] Iniciando DetectorProcess (CUDA en proceso separado)...")
+    detector = DetectorProcess(mode=mode, enable_depth=True, has_hardware_depth=has_hardware_depth)
+    if not detector.start(timeout=60, frame_shape=frame_shape):
+        print("[SERVER] ✗ Failed to start DetectorProcess")
+        return
+
+    # Non-CUDA components in main process
+    dashboard = Dashboard()
+    audio = AudioFeedback(enabled=enable_audio, use_nemo=enable_audio)
+    alert_engine = AlertDecisionEngine()
+    tracker = SimpleTracker()
+    print("[SERVER] ✓ Componentes inicializados")
+    print("[SERVER] Iniciando procesamiento...")
+
+    frame_count = 0
+    start_time = time.time()
 
     while True:
         # Get frame from observer
@@ -187,6 +197,12 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
             detections = result.get("detections", [])
             depth_map = result.get("depth")
             gaze_point = result.get("gaze")
+
+        # Para RealSense: usar depth visual (uint8 normalizado) para el dashboard
+        if has_hardware_depth:
+            depth_visual = observer.get_depth_visual()
+            if depth_visual is not None:
+                depth_map = depth_visual
 
         # Check for precomputed gaze from dataset
         if use_precomputed_gaze and hasattr(observer, 'get_precomputed_gaze'):
@@ -238,9 +254,13 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
 
         # FPS and stats
         frame_count += 1
+
+        # Use detector FPS (real detection speed) as the main FPS metric
+        if result and "detector_fps" in result:
+            fps = result["detector_fps"]
+
         if frame_count % 30 == 0:
             elapsed = time.time() - start_time
-            fps = frame_count / elapsed if elapsed > 0 else 0
 
             # Calculate latency from result timestamp
             latency = 0
@@ -270,13 +290,14 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
             # Update global stats
             with stats_lock:
                 system_stats["server_fps"] = fps
+                system_stats["detector_fps"] = fps
                 system_stats["latency_ms"] = latency
                 system_stats["input_queue_size"] = input_q_size
                 system_stats["output_queue_size"] = output_q_size
                 system_stats["observer_fps"] = obs_fps
                 system_stats["uptime_sec"] = elapsed
 
-            print(f"[SERVER] Frame {frame_count}, {fps:.1f} FPS")
+            print(f"[SERVER] Frame {frame_count}, detector {fps:.1f} FPS")
 
         # Throttle server loop to ~30 FPS (sufficient for visual assistance, saves CPU)
         time.sleep(0.033)
