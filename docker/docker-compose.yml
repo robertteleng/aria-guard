@@ -65,6 +65,9 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
       # PulseAudio para audio output
       - PULSE_SERVER=unix:/run/user/1000/pulse/native
+      # jemalloc: workaround para heap corruption en FastDDS (Aria SDK 2.2.0)
+      # Sin esto, streaming de Aria segfaults en munmap_chunk()/double-free
+      - LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
 
     # Terminal interactiva (para menu de seleccion)
     stdin_open: true

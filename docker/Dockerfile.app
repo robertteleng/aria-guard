@@ -15,9 +15,10 @@
 
 FROM aria-base:opencv-nvdec
 
-# Build dependencies for NeMo
+# Build dependencies for NeMo + jemalloc (workaround for FastDDS heap corruption in Aria SDK 2.2.0)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential gcc g++ \
+    libjemalloc2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install PyTorch with CUDA 12.8
