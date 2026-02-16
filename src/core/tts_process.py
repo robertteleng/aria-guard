@@ -38,8 +38,11 @@ def _tts_worker(queue, sample_rate_out):
     """Worker process for NeMo TTS. Has its own CUDA context."""
     import os
     # Restore CUDA visibility BEFORE importing torch (main process hides it for FastDDS)
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+    os.environ["NVIDIA_VISIBLE_DEVICES"] = "all"
     os.environ.pop("NUMBA_DISABLE_CUDA", None)
+    # Remove jemalloc LD_PRELOAD - only needed for main process (Aria SDK/FastDDS)
+    os.environ.pop("LD_PRELOAD", None)
 
     import numpy as np
     import sounddevice as sd

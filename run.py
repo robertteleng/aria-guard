@@ -21,6 +21,11 @@ from pathlib import Path
 os.environ["CUDA_VISIBLE_DEVICES"] = ""  # Hide GPUs from main process
 os.environ["NUMBA_DISABLE_CUDA"] = "1"   # Disable numba CUDA
 
+# Remove LD_PRELOAD so child processes (detector/TTS) don't inherit jemalloc
+# jemalloc is already loaded in main process memory by ld.so, stays active for Aria/FastDDS
+# But CUDA/PyTorch in child processes can conflict with jemalloc
+os.environ.pop("LD_PRELOAD", None)
+
 # Force TMPDIR to /home to avoid disk space issues on /
 # NeMo uses tempfile module directly, so we must patch tempfile.tempdir too
 _tmp_dir = Path.home() / "tmp"
@@ -65,7 +70,7 @@ if __name__ == '__main__':
         print()
         print("    [1] Webcam")
         print("    [2] Video file")
-        print("    [3] Aria Glasses (USB)")
+        print("    [3] Aria Glasses")
         print("    [4] RealSense D435")
         print()
         while True:
@@ -78,7 +83,22 @@ if __name__ == '__main__':
                 source = video if video else "/app/data/test_60fps.mp4"
                 break
             elif choice == "3":
-                source = "aria"
+                print()
+                print("    [a] USB")
+                print("    [b] WiFi")
+                print()
+                while True:
+                    aria_choice = input("  Conexión [a/b]: ").strip().lower()
+                    if aria_choice == "a":
+                        source = "aria:usb"
+                        break
+                    elif aria_choice == "b":
+                        ip = input("  IP de Aria (Enter = <ARIA_IP>): ").strip()
+                        ip = ip if ip else "<ARIA_IP>"
+                        source = f"aria:wifi:{ip}"
+                        break
+                    else:
+                        print("  Opción no válida. Introduce a o b.")
                 break
             elif choice == "4":
                 source = "realsense"

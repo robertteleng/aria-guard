@@ -65,11 +65,12 @@ def _detector_worker(
     """
     import os
     # Restore CUDA visibility in worker process (main process hides it to avoid FastDDS conflict)
-    if "NVIDIA_VISIBLE_DEVICES" in os.environ:
-        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
-    else:
-        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+    os.environ["NVIDIA_VISIBLE_DEVICES"] = "all"
     os.environ.pop("NUMBA_DISABLE_CUDA", None)
+    # Remove jemalloc LD_PRELOAD - only needed for main process (Aria SDK/FastDDS)
+    # Can conflict with CUDA runtime initialization
+    os.environ.pop("LD_PRELOAD", None)
 
     print("[DETECTOR PROCESS] Starting...", flush=True)
     print(f"[DETECTOR PROCESS] CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}", flush=True)
