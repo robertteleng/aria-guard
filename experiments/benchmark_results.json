@@ -1,0 +1,89 @@
+{
+  "system": {
+    "pytorch": "2.10.0+cu128",
+    "cuda": "12.8",
+    "gpu": "NVIDIA GeForce RTX 2060",
+    "vram_gb": "6.0",
+    "opencv": "4.13.0",
+    "opencv_cuda": true,
+    "tensorrt": "10.8.0.43"
+  },
+  "yolo_trt": {
+    "fps": 188.16014888571442,
+    "latency_mean_ms": 5.314621645029547,
+    "latency_median_ms": 4.8975929998960055,
+    "latency_p95_ms": 8.166736999555724,
+    "latency_p99_ms": 8.820242000183498,
+    "avg_detections": 0.485,
+    "n_frames": 200,
+    "backend": "TensorRT FP16"
+  },
+  "yolo_pytorch": {
+    "fps": 95.9250934909495,
+    "latency_mean_ms": 10.424800890023107,
+    "latency_median_ms": 10.396109500561579,
+    "latency_p95_ms": 13.54866800011223,
+    "latency_p99_ms": 15.547000999504235,
+    "avg_detections": 0.48,
+    "n_frames": 200,
+    "backend": "PyTorch CUDA FP16"
+  },
+  "depth_trt": {
+    "fps": 126.83471987074,
+    "latency_mean_ms": 7.884276490058255,
+    "latency_median_ms": 7.7950655004315195,
+    "latency_p95_ms": 9.605010000086622,
+    "latency_p99_ms": 10.152470999855723,
+    "input_size": "518x518",
+    "n_frames": 200,
+    "backend": "TensorRT FP16"
+  },
+  "depth_fp16": {
+    "fps": 71.55313326942726,
+    "latency_mean_ms": 13.975628380026137,
+    "latency_median_ms": 13.923601000442432,
+    "latency_p95_ms": 15.163697999923897,
+    "latency_p99_ms": 20.55251500041777,
+    "input_size": "518x518",
+    "n_frames": 200,
+    "backend": "HuggingFace FP16"
+  },
+  "gaze": {
+    "fps": 261.02844869575296,
+    "latency_mean_ms": 3.8310000499814123,
+    "latency_median_ms": 3.741535999779444,
+    "latency_p95_ms": 4.700892999608186,
+    "latency_p99_ms": 4.949546999341692,
+    "input_size": "640x240",
+    "n_frames": 200,
+    "backend": "PyTorch CUDA"
+  },
+  "full_pipeline": {
+    "fps": 66.72189097463232,
+    "latency_mean_ms": 14.987584815007722,
+    "latency_median_ms": 10.005352000007406,
+    "latency_p95_ms": 26.31689100053336,
+    "latency_p99_ms": 27.931409999837342,
+    "avg_detections": 0.365,
+    "n_frames": 200,
+    "yolo_backend": "TensorRT",
+    "depth_backend": "TensorRT",
+    "depth_interval": 3,
+    "has_gaze": true
+  },
+  "full_no_depth": {
+    "fps": 108.22399307292727,
+    "latency_mean_ms": 9.24009520999789,
+    "latency_median_ms": 9.267708499919536,
+    "latency_p95_ms": 10.355926000556792,
+    "latency_p99_ms": 10.971314999551396,
+    "avg_detections": 0.365,
+    "n_frames": 200,
+    "backend": "TensorRT"
+  },
+  "vram": {
+    "allocated_mb": 106.634752,
+    "reserved_mb": 448.790528,
+    "max_allocated_mb": 1235.572224
+  }
+}

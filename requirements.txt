@@ -16,5 +16,8 @@ flask>=3.0.0
 sounddevice>=0.4.6
 pyttsx3>=2.90
 
+# Aria SDK
+projectaria-client-sdk>=2.2.0
+
 # Utilities
 Pillow>=10.0.0

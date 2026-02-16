@@ -704,20 +704,62 @@ pip install projectaria-client-sdk projectaria-tools
 
 ## Rendimiento
 
-El dashboard muestra **detector FPS** (velocidad real de detección YOLO + depth).
+### Metodología de Benchmark
 
-| GPU | Configuración | Detector FPS |
-|-----|---------------|-------------|
-| RTX 5060 Ti | YOLO + Depth TensorRT + Gaze | ~42 |
-| RTX 5060 Ti | Solo YOLO TensorRT | ~70 |
-| RTX 2060 | YOLO + Depth TensorRT + Gaze | ~16 |
-| RTX 2060 | YOLO + RealSense depth (sin Depth IA) | ~30 |
+Las mediciones se realizaron dentro del contenedor Docker de producción (`aria-demo:tensorrt`) para garantizar reproducibilidad. El procedimiento:
+
+1. **Carga de frames**: 200 frames de video real (768x432, escena indoor) cargados en memoria RAM antes de medir, eliminando I/O del benchmark.
+2. **Warmup**: 10 frames de calentamiento por componente para estabilizar caches de GPU, JIT de TensorRT y memory pools de CUDA.
+3. **Medición individual**: Cada componente (YOLO, Depth, Gaze) se mide aislado con `torch.cuda.synchronize()` antes y después de cada frame para capturar la latencia real en GPU (no solo el tiempo de enqueue).
+4. **Medición de pipeline**: El pipeline completo (`ParallelDetector`) ejecuta YOLO + Depth + Gaze en CUDA streams paralelos, midiendo el tiempo wall-clock incluyendo sincronización.
+5. **Estadísticas**: Se reportan media, mediana, P95 y P99 sobre los 200 frames. Depth se ejecuta cada 3 frames (configurable) para balancear precisión y throughput.
+6. **Comparativa de backends**: Cada modelo se mide con TensorRT FP16 (optimizado) y PyTorch/HuggingFace FP16 (baseline) para cuantificar el speedup de TensorRT.
+
+El script de benchmark está en `experiments/benchmark_paper.py` y genera resultados en JSON (`experiments/benchmark_results.json`).
+
+**Entorno**: NVIDIA GeForce RTX 2060 (6 GB VRAM), CUDA 12.8, TensorRT 10.8.0.43, PyTorch 2.10.0, OpenCV 4.13.0 (CUDA).
+
+### Componentes Individuales
+
+| Componente | Backend | FPS | Latencia media | Mediana | P95 |
+|---|---|---:|---:|---:|---:|
+| YOLO26s (9.5M params, 20.7 GFLOPs) | TensorRT FP16 | **188.2** | 5.31 ms | 4.90 ms | 8.17 ms |
+| YOLO26s | PyTorch CUDA FP16 | 95.9 | 10.42 ms | 10.40 ms | 13.55 ms |
+| Depth Anything V2-S (518x518) | TensorRT FP16 | **126.8** | 7.88 ms | 7.80 ms | 9.61 ms |
+| Depth Anything V2-S | HuggingFace FP16 | 71.6 | 13.98 ms | 13.92 ms | 15.16 ms |
+| Meta Eye Gaze (640x240) | PyTorch CUDA | **261.0** | 3.83 ms | 3.74 ms | 4.70 ms |
+
+### Pipeline Completo
+
+| Configuración | FPS | Latencia media | Mediana | P95 |
+|---|---:|---:|---:|---:|
+| YOLO + Depth + Gaze (todo TensorRT) | **66.7** | 14.99 ms | 10.01 ms | 26.32 ms |
+| YOLO + Gaze sin Depth (TensorRT) | **108.2** | 9.24 ms | 9.27 ms | 10.36 ms |
+
+> Depth se ejecuta cada 3 frames para mantener >60 FPS en el pipeline completo.
+
+### Speedup TensorRT vs PyTorch
+
+| Componente | Speedup |
+|---|---:|
+| YOLO26s | **1.96x** (188 vs 96 FPS) |
+| Depth Anything V2-S | **1.77x** (127 vs 72 FPS) |
+
+### Tamaños de Modelo
+
+| Modelo | Formato | Tamaño |
+|---|---|---:|
+| YOLO26s | TensorRT FP16 (.engine) | 22.9 MB |
+| YOLO26s | PyTorch (.pt) | 20.4 MB |
+| Depth Anything V2-S | TensorRT FP16 (.engine) | 53.7 MB |
+| Depth Anything V2-S | ONNX | 99.2 MB |
 
 ### Detección
 
 - **YOLO26s** con threshold de confianza `conf=0.4` (reduce falsos positivos)
 - Los engines de TensorRT son específicos por GPU y versión de TRT
 - Si cambia la versión de TensorRT, regenerar: `python scripts/export_tensorrt.py`
+- Benchmark reproducible: `python experiments/benchmark_paper.py`
 
 ### Optimizaciones
 
@@ -738,6 +780,8 @@ El dashboard muestra **detector FPS** (velocidad real de detección YOLO + depth
 - **RTX 50xx (Blackwell)** - Requiere CUDA 12.8+ y Video Codec SDK 13.0
 
 ## VRAM Usage
+
+Peak allocated: **1,236 MB** | Reserved: **449 MB**
 
 ```mermaid
 pie title VRAM (~2.5GB total)

@@ -23,9 +23,16 @@ services:
     # Requerido por Aria SDK para comunicacion con las gafas
     privileged: true
 
-    # Puerto del dashboard web
-    ports:
-      - "5000:5000"
+    # Host network: necesario para que FastDDS/Aria reciba frames
+    # La interfaz USB 'aria' (192.168.42.x) se crea en el host
+    network_mode: host
+
+    # Shared memory para FastDDS (Aria SDK) y multiprocessing (NeMo TTS)
+    shm_size: '256m'
+
+    # Puerto 5000 se expone directamente via host network
+    # ports:  # No se usa con network_mode: host
+    #   - "5000:5000"
 
     volumes:
       # USB passthrough para conectar Aria glasses
@@ -38,6 +45,8 @@ services:
       - ../run.py:/app/run.py:ro
       - ../src:/app/src:ro
       - ../scripts:/app/scripts:ro
+      # Aria SDK pairing credentials (persist across containers)
+      - ~/.aria:/root/.aria
       # PulseAudio socket para audio output
       - /run/user/1000/pulse:/run/user/1000/pulse:ro
       - ~/.config/pulse/cookie:/root/.config/pulse/cookie:ro
