@@ -14,6 +14,9 @@ import numpy as np
 class BaseObserver(ABC):
     """Interfaz base para observers."""
 
+    # Horizontal field of view in radians (subclasses override)
+    fov_h: float = 1.15  # ~66° default (typical webcam)
+
     @abstractmethod
     def get_frame(self, camera: str = "rgb") -> Optional[np.ndarray]:
         """Obtiene el frame más reciente."""
@@ -31,6 +34,8 @@ class BaseObserver(ABC):
 
 class MockObserver(BaseObserver):
     """Observer para webcam o video (desarrollo sin Aria)."""
+
+    fov_h = 1.15  # ~66° typical webcam
 
     def __init__(self, source: str = "webcam", video_path: str = None, use_nvdec: bool = True):
         """
@@ -181,6 +186,8 @@ class RealSenseObserver(BaseObserver):
     modelo de depth estimation (Depth Anything).
     """
 
+    fov_h = 1.518  # ~87° D435 RGB sensor
+
     def __init__(self, width: int = 1280, height: int = 720, fps: int = 30):
         """
         Args:
@@ -316,6 +323,8 @@ class AriaDemoObserver(BaseObserver):
         # WiFi
         observer = AriaDemoObserver(interface="wifi", ip_address="<ARIA_IP>")
     """
+
+    fov_h = 1.919  # ~110° Aria RGB camera
 
     # Streaming profiles
     PROFILE_USB = "profile28"   # 30 FPS USB
@@ -538,6 +547,8 @@ class AriaDemoObserver(BaseObserver):
 
 class AriaDatasetObserver(BaseObserver):
     """Observer para datasets pregrabados de Aria (VRS + eye gaze CSV)."""
+
+    fov_h = 1.919  # ~110° Aria RGB camera
 
     def __init__(self, vrs_path: str, eyegaze_csv: str = None, loop: bool = True, target_fps: float = 10.0):
         """

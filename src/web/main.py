@@ -217,7 +217,8 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
                 gaze_point = (gaze_x, gaze_y)
 
         # Update tracker (gaze info is already in detections)
-        tracked = tracker.update(detections)
+        frame_w = rgb.shape[1] if rgb is not None else 1280
+        tracked = tracker.update(detections, frame_width=frame_w, fov_h=observer.fov_h)
 
         # Audio feedback via decision engine
         if tracked:

@@ -6,6 +6,7 @@ Tracks objects across frames to detect approach and prioritize alerts.
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 from collections import deque
+import math
 import numpy as np
 
 
@@ -20,21 +21,38 @@ class TrackedObject:
     depth_value: float
     confidence: float
     is_gazed: bool = False
+    frame_width: int = 1280
+    fov_h: float = 1.15  # horizontal FOV in radians
 
     # Tracking data
     depth_history: deque = field(default_factory=lambda: deque(maxlen=10))
+    bearing_history: deque = field(default_factory=lambda: deque(maxlen=10))  # bearing in radians (0 = center, negative = left, positive = right)
     frames_seen: int = 1
     frames_missing: int = 0
 
     # Computed
     is_approaching: bool = False
     approach_speed: float = 0.0  # positive = approaching
+    lateral_speed: float = 0.0  # rad/frame, positive = moving right
+    enters_path: bool = False  # object moving laterally into user's path (center)
+    bearing: float = 0.0  # current bearing in radians
     priority: float = 0.0
 
     def __post_init__(self):
         if not self.depth_history:
             self.depth_history = deque(maxlen=10)
+        if not self.bearing_history:
+            self.bearing_history = deque(maxlen=10)
         self.depth_history.append(self.depth_value)
+        self.bearing = self._pixel_to_bearing(self.bbox)
+        self.bearing_history.append(self.bearing)
+
+    def _pixel_to_bearing(self, bbox) -> float:
+        """Convert bbox center_x to bearing angle in radians using FOV."""
+        x, y, w, h = bbox
+        center_x = (x + w / 2) / self.frame_width if self.frame_width > 0 else 0.5
+        # Map pixel position to angle: atan((normalized - 0.5) * 2 * tan(fov/2))
+        return math.atan((center_x - 0.5) * 2 * math.tan(self.fov_h / 2))
 
 
 # Object type priority (higher = more dangerous)
@@ -106,12 +124,14 @@ class SimpleTracker:
         self.tracks: Dict[int, TrackedObject] = {}
         self.next_id = 0
 
-    def update(self, detections: List) -> List[TrackedObject]:
+    def update(self, detections: List, frame_width: int = 1280, fov_h: float = 1.15) -> List[TrackedObject]:
         """
         Update tracks with new detections.
 
         Args:
             detections: List of Detection objects from detector
+            frame_width: Width of the frame in pixels
+            fov_h: Horizontal field of view in radians
 
         Returns:
             List of TrackedObject with tracking info
@@ -160,12 +180,17 @@ class SimpleTracker:
                 track.depth_value = det.depth_value
                 track.confidence = det.confidence
                 track.is_gazed = det.is_gazed
+                track.frame_width = frame_width
+                track.fov_h = fov_h
                 track.depth_history.append(det.depth_value)
+                track.bearing = track._pixel_to_bearing(det.bbox)
+                track.bearing_history.append(track.bearing)
                 track.frames_seen += 1
                 track.frames_missing = 0
 
-                # Calculate approach speed
+                # Calculate approach + lateral speed
                 self._update_approach(track)
+                self._update_lateral(track)
 
                 # Calculate priority
                 self._update_priority(track)
@@ -187,6 +212,8 @@ class SimpleTracker:
                 depth_value=det.depth_value,
                 confidence=det.confidence,
                 is_gazed=det.is_gazed,
+                frame_width=frame_width,
+                fov_h=fov_h,
             )
             self._update_priority(new_track)
             self.tracks[self.next_id] = new_track
@@ -226,6 +253,36 @@ class SimpleTracker:
         track.approach_speed = slope
         track.is_approaching = slope > 0.01  # Threshold for noise
 
+    def _update_lateral(self, track: TrackedObject):
+        """Calculate lateral speed and whether object enters user's path.
+
+        Uses bearing (radians) instead of pixel position so the threshold
+        is consistent across different camera FOVs.
+        """
+        if len(track.bearing_history) < 3:
+            track.lateral_speed = 0.0
+            track.enters_path = False
+            return
+
+        history = list(track.bearing_history)
+        recent = history[-3:]
+
+        # Slope of bearing over frames (rad/frame): positive = moving right
+        x = np.arange(len(recent))
+        slope = np.polyfit(x, recent, 1)[0]
+        track.lateral_speed = slope
+
+        # "enters_path" = object moving toward center (bearing=0) from either side
+        # ~0.17 rad ≈ 10° — object is off-center but not at the edge
+        current_bearing = recent[-1]
+        # ~0.005 rad/frame threshold filters noise
+        moving_toward_center = (
+            (current_bearing < -0.17 and slope > 0.005) or  # on left, moving right
+            (current_bearing > 0.17 and slope < -0.005)     # on right, moving left
+        )
+        close_enough = track.distance in ("very_close", "close")
+        track.enters_path = moving_toward_center and close_enough
+
     def _update_priority(self, track: TrackedObject):
         """Calculate priority score for the track."""
         # Base priority from object type
@@ -237,11 +294,14 @@ class SimpleTracker:
         # Approach bonus (2x if approaching)
         approach_mult = 2.0 if track.is_approaching else 1.0
 
+        # Lateral intercept bonus (2.5x if entering user's path)
+        path_mult = 2.5 if track.enters_path else 1.0
+
         # Not gazed bonus (1.5x if user not looking)
         gaze_mult = 1.5 if not track.is_gazed else 1.0
 
         # Combine
-        track.priority = type_priority * dist_mult * approach_mult * gaze_mult
+        track.priority = type_priority * dist_mult * approach_mult * path_mult * gaze_mult
 
     def _cleanup(self):
         """Remove tracks that have been missing too long."""
@@ -264,6 +324,10 @@ class SimpleTracker:
     def get_approaching_objects(self) -> List[TrackedObject]:
         """Get objects that are approaching."""
         return [t for t in self.tracks.values() if t.is_approaching]
+
+    def get_path_entering_objects(self) -> List[TrackedObject]:
+        """Get objects moving laterally into the user's path."""
+        return [t for t in self.tracks.values() if t.enters_path]
 
     def get_top_vehicle(self) -> Optional[TrackedObject]:
         """Get highest priority vehicle (car, truck, bus, motorcycle, bicycle)."""

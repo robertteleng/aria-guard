@@ -31,14 +31,16 @@ MODELS_DIR = _PROJECT_ROOT / "models"
 class ParallelDetector:
     """YOLO + Depth en paralelo con CUDA streams."""
 
-    def __init__(self, enable_depth: bool = True, device: str = "cuda", depth_interval: int = 3, mode: str = "all"):
+    def __init__(self, enable_depth: bool = True, device: str = "cuda", depth_interval: int = 3, mode: str = "all", fov_h: float = 1.15):
         """
         Args:
             enable_depth: Activar estimación de profundidad
             device: "cuda" o "cpu"
             depth_interval: Procesar depth cada N frames (para performance)
             mode: "indoor", "outdoor" o "all" - filtra clases relevantes
+            fov_h: Horizontal FOV in radians (from observer)
         """
+        self._fov_h = fov_h
         self.filter_classes = CLASS_FILTERS.get(mode, None)
         if self.filter_classes:
             print(f"[DETECTOR] Modo {mode}: filtrando a {len(self.filter_classes)} clases")
@@ -320,7 +322,7 @@ class ParallelDetector:
                 det.is_gazed = self.check_gaze_on_detection(gaze_point, det, frame.shape)
 
         # Update tracker and get tracked objects with priority
-        tracked_objects = self.tracker.update(detections)
+        tracked_objects = self.tracker.update(detections, frame_width=frame.shape[1], fov_h=self._fov_h)
 
         return detections, depth_map, gaze_point, tracked_objects
 
