@@ -54,15 +54,15 @@ show_system() {
 test_docker() {
     info "=== Test: Docker (Ubuntu 22.04, glibc 2.35) ==="
 
-    if ! docker image inspect aria-demo:tensorrt &>/dev/null; then
-        fail "Image aria-demo:tensorrt not found. Build with: docker/docker-build.sh all"
+    if ! docker image inspect aria-guard:tensorrt &>/dev/null; then
+        fail "Image aria-guard:tensorrt not found. Build with: docker/docker-build.sh all"
         return 1
     fi
 
     info "Running test_aria_only.py inside Docker..."
     docker compose -f docker/docker-compose.yml run --rm \
         -v "$PROJECT_ROOT/tests:/app/tests:ro" \
-        aria-demo \
+        aria-guard \
         python tests/test_aria_only.py 2>&1 | tee /tmp/aria_test_docker.log
 
     if [ ${PIPESTATUS[0]} -eq 0 ]; then

@@ -8,14 +8,14 @@
 # - NO compila OpenCV (usa el de L4T o pip)
 #
 # Build (en el Jetson o con QEMU):
-#   docker build -f Dockerfile.jetson -t aria-demo:jetson .
+#   docker build -f Dockerfile.jetson -t aria-guard:jetson .
 #
 # Run:
 #   docker run --runtime nvidia -it --rm \
 #     --device /dev/video0 \
 #     -v /dev/bus/usb:/dev/bus/usb \
 #     -p 5000:5000 \
-#     aria-demo:jetson
+#     aria-guard:jetson
 # =============================================================================
 
 # L4T PyTorch base - incluye CUDA, cuDNN, PyTorch precompilados para ARM64

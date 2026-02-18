@@ -17,12 +17,12 @@
 # =============================================================================
 
 services:
-  aria-demo:
+  aria-guard:
     build:
       context: ..
       dockerfile: docker/Dockerfile.jetson
-    image: aria-demo:jetson
-    container_name: aria-demo-jetson
+    image: aria-guard:jetson
+    container_name: aria-guard-jetson
 
     # Runtime NVIDIA para Jetson
     runtime: nvidia

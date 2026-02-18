@@ -79,21 +79,21 @@ build_app() {
     fi
 
     echo -e "${YELLOW}Building app image...${NC}"
-    DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile.app -t aria-demo:tensorrt .
-    echo -e "${GREEN}✓ App image built: aria-demo:tensorrt${NC}"
+    DOCKER_BUILDKIT=1 docker build -f docker/Dockerfile.app -t aria-guard:tensorrt .
+    echo -e "${GREEN}✓ App image built: aria-guard:tensorrt${NC}"
 }
 
 run_container() {
     VIDEO="${1:-/app/data/test_60fps.mp4}"
     MODE="${2:-outdoor}"
 
-    echo -e "${YELLOW}Running aria-demo with video: $VIDEO, mode: $MODE${NC}"
+    echo -e "${YELLOW}Running aria-guard with video: $VIDEO, mode: $MODE${NC}"
     docker run --rm -it --gpus all \
         -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,video \
         -p 5000:5000 \
         -v "$(pwd)/models:/app/models" \
         -v "$(pwd)/data:/app/data" \
-        aria-demo:tensorrt \
+        aria-guard:tensorrt \
         python run.py "$VIDEO" "$MODE"
 }
 
@@ -109,7 +109,7 @@ run_dev() {
         -v "$(pwd)/models:/app/models" \
         -v "$(pwd)/data:/app/data" \
         -v "$(pwd)/run.py:/app/run.py:ro" \
-        aria-demo:tensorrt \
+        aria-guard:tensorrt \
         python run.py "$VIDEO" "$MODE"
 }
 

@@ -533,7 +533,7 @@ graph LR
 ## Estructura del Proyecto
 
 ```
-aria-demo/
+aria-guard/
 ├── run.py                      # Entry point
 ├── docker/
 │   ├── Dockerfile              # Docker básico (desarrollo)
@@ -610,7 +610,7 @@ El sistema descargará automáticamente la imagen base de Ubuntu 22.04, instalar
 Si necesitas lanzar opciones personalizadas (como un video específico), entra en el contenedor:
 
 ```bash
-docker exec -it aria-demo bash
+docker exec -it aria-guard bash
 # Dentro:
 python run.py video.mp4
 ```
@@ -620,7 +620,7 @@ python run.py video.mp4
 ## Instalación Manual (Legacy)
 
 ```bash
-cd aria-demo
+cd aria-guard
 python -m venv .venv
 source .venv/bin/activate
 
@@ -706,7 +706,7 @@ pip install projectaria-client-sdk projectaria-tools
 
 ### Metodología de Benchmark
 
-Las mediciones se realizaron dentro del contenedor Docker de producción (`aria-demo:tensorrt`) para garantizar reproducibilidad. El procedimiento:
+Las mediciones se realizaron dentro del contenedor Docker de producción (`aria-guard:tensorrt`) para garantizar reproducibilidad. El procedimiento:
 
 1. **Carga de frames**: 200 frames de video real (768x432, escena indoor) cargados en memoria RAM antes de medir, eliminando I/O del benchmark.
 2. **Warmup**: 10 frames de calentamiento por componente para estabilizar caches de GPU, JIT de TensorRT y memory pools de CUDA.

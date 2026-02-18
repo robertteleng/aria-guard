@@ -3,14 +3,14 @@
 # =============================================================================
 # Usa aria-base:opencv-nvdec como base (ya tiene OpenCV+CUDA+NVDEC)
 #
-# Build: docker build -f Dockerfile.app -t aria-demo:tensorrt .
-# Run:   docker run --gpus all -p 5000:5000 aria-demo:tensorrt
+# Build: docker build -f Dockerfile.app -t aria-guard:tensorrt .
+# Run:   docker run --gpus all -p 5000:5000 aria-guard:tensorrt
 #
 # Para desarrollo con hot-reload de código:
 #   docker run --gpus all -p 5000:5000 \
 #     -v $(pwd)/src:/app/src:ro \
 #     -v $(pwd)/models:/app/models \
-#     aria-demo:tensorrt python run.py webcam
+#     aria-guard:tensorrt python run.py webcam
 # =============================================================================
 
 FROM aria-base:opencv-nvdec

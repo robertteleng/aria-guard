@@ -20,7 +20,7 @@ graph TB
         end
     end
 
-    subgraph APP["🚀 App Image: aria-demo:tensorrt"]
+    subgraph APP["🚀 App Image: aria-guard:tensorrt"]
         direction TB
         A1["🔧 Build Time: ~3 min"]
         A2["📦 Size: ~28 GB adicionales"]
@@ -135,7 +135,7 @@ flowchart TB
 docker run --gpus all -p 5000:5000 \
   -v $(pwd)/src:/app/src:ro \
   -v $(pwd)/models:/app/models \
-  aria-demo:tensorrt python run.py webcam
+  aria-guard:tensorrt python run.py webcam
 ```
 
 ### Cambios de dependencias Python
@@ -256,7 +256,7 @@ flowchart LR
 
 Verificar NVDEC:
 ```bash
-docker run --gpus all aria-demo:tensorrt python -c \
+docker run --gpus all aria-guard:tensorrt python -c \
   "import cv2; print('cudacodec:', hasattr(cv2, 'cudacodec'))"
 ```
 
@@ -320,12 +320,12 @@ flowchart LR
 docker build -f docker/Dockerfile.base -t aria-base:opencv-nvdec .
 
 # 2. App image
-docker build -f docker/Dockerfile.app -t aria-demo:tensorrt .
+docker build -f docker/Dockerfile.app -t aria-guard:tensorrt .
 ```
 
 ### Opción 3: Todo-en-uno (Legacy)
 ```bash
-docker build -f docker/Dockerfile.tensorrt -t aria-demo:tensorrt .
+docker build -f docker/Dockerfile.tensorrt -t aria-guard:tensorrt .
 ```
 
 ---
@@ -338,7 +338,7 @@ docker run -it --rm --privileged \
   -v /dev/bus/usb:/dev/bus/usb \
   -p 5000:5000 \
   --gpus all \
-  aria-demo:tensorrt
+  aria-guard:tensorrt
 ```
 
 ### Con Webcam
@@ -347,7 +347,7 @@ docker run -it --rm \
   --device /dev/video0 \
   -p 5000:5000 \
   --gpus all \
-  aria-demo:tensorrt python run.py webcam outdoor
+  aria-guard:tensorrt python run.py webcam outdoor
 ```
 
 ### Con Video
@@ -356,7 +356,7 @@ docker run -it --rm \
   -v $(pwd)/data:/app/data \
   -p 5000:5000 \
   --gpus all \
-  aria-demo:tensorrt python run.py /app/data/video.mp4 outdoor
+  aria-guard:tensorrt python run.py /app/data/video.mp4 outdoor
 ```
 
 ### Con RealSense D435
@@ -365,13 +365,13 @@ docker run -it --rm \
   -v /dev/bus/usb:/dev/bus/usb \
   -p 5000:5000 \
   --gpus all \
-  aria-demo:tensorrt python run.py realsense
+  aria-guard:tensorrt python run.py realsense
 ```
 
 ### Sin TTS (desarrollo)
 ```bash
 docker run --gpus all -p 5000:5000 \
-  aria-demo:tensorrt python run.py webcam outdoor --no-tts
+  aria-guard:tensorrt python run.py webcam outdoor --no-tts
 ```
 
 ---
@@ -407,14 +407,14 @@ Para ARM64, usa RealSense D435 (Aria SDK no soporta ARM):
 
 ```bash
 # Build EN el Jetson
-docker build -f docker/Dockerfile.jetson -t aria-demo:jetson .
+docker build -f docker/Dockerfile.jetson -t aria-guard:jetson .
 
 # Run
 docker run -it --rm \
   --runtime nvidia \
   -v /dev/bus/usb:/dev/bus/usb \
   -p 5000:5000 \
-  aria-demo:jetson
+  aria-guard:jetson
 ```
 
 | Característica | Aria Glasses | RealSense D435 |
@@ -448,14 +448,14 @@ sudo systemctl restart docker
 ### NVDEC no funciona
 ```bash
 # Verificar módulo (build-time)
-docker run --gpus all aria-demo:tensorrt python -c \
+docker run --gpus all aria-guard:tensorrt python -c \
   "import cv2; print(hasattr(cv2, 'cudacodec'))"
 
 # Verificar runtime NVDEC (debe crear reader sin error -213)
 docker run --rm --gpus all \
   -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,video \
   -v $(pwd)/data:/app/data \
-  aria-demo:tensorrt python -c \
+  aria-guard:tensorrt python -c \
   "import cv2; cv2.cudacodec.createVideoReader('/app/data/test.mp4'); print('NVDEC OK')"
 
 # Si falla con error -213:
@@ -472,8 +472,8 @@ Si aparece `kSERIALIZATION_VERSION failed`, los engines se compilaron con otra v
 
 ```bash
 rm models/*.engine
-docker compose -f docker/docker-compose.yml run --rm aria-demo python scripts/export_tensorrt.py
-docker compose -f docker/docker-compose.yml run --rm aria-demo python scripts/export_depth_tensorrt.py
+docker compose -f docker/docker-compose.yml run --rm aria-guard python scripts/export_tensorrt.py
+docker compose -f docker/docker-compose.yml run --rm aria-guard python scripts/export_depth_tensorrt.py
 ```
 
 ### Disco lleno en `/` (Docker)
@@ -537,13 +537,13 @@ docker logs <container> | grep OBSERVER
 
 ```bash
 # Guardar (~18GB comprimido)
-docker save aria-demo:tensorrt | gzip > aria-demo.tar.gz
+docker save aria-guard:tensorrt | gzip > aria-guard.tar.gz
 
 # Transferir
-scp aria-demo.tar.gz user@host:/path/
+scp aria-guard.tar.gz user@host:/path/
 
 # Cargar
-gunzip -c aria-demo.tar.gz | docker load
+gunzip -c aria-guard.tar.gz | docker load
 ```
 
 **Nota**: Imágenes x86_64 NO funcionan en ARM64 (Jetson).

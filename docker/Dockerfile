@@ -7,7 +7,7 @@
 # crashes (munmap_chunk(): invalid pointer) al conectar con las gafas.
 #
 # Build:
-#   docker build -t aria-demo .
+#   docker build -t aria-guard .
 #   docker compose build
 #
 # Run (con acceso USB y GPU):
@@ -15,7 +15,7 @@
 #     -v /dev/bus/usb:/dev/bus/usb \
 #     -p 5000:5000 \
 #     --gpus all \
-#     aria-demo
+#     aria-guard
 #
 #   O con docker compose:
 #   docker compose up

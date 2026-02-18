@@ -137,13 +137,13 @@ docker compose -f docker-compose.jetson.yml build
 docker compose -f docker-compose.jetson.yml up
 
 # O directamente
-docker build -f Dockerfile.jetson -t aria-demo:jetson .
+docker build -f Dockerfile.jetson -t aria-guard:jetson .
 docker run --runtime nvidia -it --rm \
     --privileged \
     -v /dev/bus/usb:/dev/bus/usb \
     --device /dev/i2c-1 \
     -p 5000:5000 \
-    aria-demo:jetson
+    aria-guard:jetson
 ```
 
 ## Modo Single-Process

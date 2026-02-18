@@ -106,10 +106,10 @@ privileged: true
 
 ```bash
 # Interactivo (elige opción 4)
-docker compose -f docker/docker-compose.yml run --rm --service-ports aria-demo
+docker compose -f docker/docker-compose.yml run --rm --service-ports aria-guard
 
 # Directo
-docker compose -f docker/docker-compose.yml run --rm --service-ports aria-demo \
+docker compose -f docker/docker-compose.yml run --rm --service-ports aria-guard \
   python run.py realsense indoor
 ```
 

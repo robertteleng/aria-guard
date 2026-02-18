@@ -9,8 +9,8 @@
 #
 # Soporta GPUs: RTX 20xx (7.5), RTX 30xx (8.6), RTX 40xx (8.9), RTX 50xx (12.0)
 #
-# Build: docker build -f Dockerfile.tensorrt -t aria-demo:tensorrt .
-# Run:   docker run --gpus all -p 5000:5000 aria-demo:tensorrt
+# Build: docker build -f Dockerfile.tensorrt -t aria-guard:tensorrt .
+# Run:   docker run --gpus all -p 5000:5000 aria-guard:tensorrt
 # =============================================================================
 
 # Stage 1: Build OpenCV con CUDA

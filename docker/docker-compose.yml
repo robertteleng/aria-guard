@@ -15,9 +15,9 @@
 # =============================================================================
 
 services:
-  aria-demo:
-    image: aria-demo:tensorrt
-    container_name: aria-demo
+  aria-guard:
+    image: aria-guard:tensorrt
+    container_name: aria-guard
 
     # Modo privilegiado: necesario para acceso completo a USB
     # Requerido por Aria SDK para comunicacion con las gafas
