@@ -1,6 +1,11 @@
-# ARIA Demo
+# ARIA Guard
 
-Demo de asistencia visual con detección de objetos en tiempo real + estimación de profundidad + eye tracking + tracking temporal + alertas inteligentes.
+> **L1 — Critical Reactive Layer** | Prototipo Python de detección de colisiones en tiempo real.
+> La versión C++ de producción se porta a [aria-core](https://github.com/aria-core).
+
+**Phase 1 ✅ (12 milestones)** · **Phase 2 ⏳ (advanced detection)**
+
+Detección de objetos en tiempo real + estimación de profundidad + eye tracking + tracking temporal + alertas inteligentes.
 
 Soporta múltiples fuentes de entrada:
 - **Meta Aria Glasses** - RGB + Eye Tracking + Gaze (x86_64)
@@ -792,39 +797,66 @@ pie title VRAM (~2.5GB total)
     "OpenCV CUDA buffers" : 0.3
 ```
 
-## Roadmap
+## Project Milestones
 
-### Completado
+> Fuente de verdad: [Notion](https://notion.so) — estas tablas se sincronizan manualmente.
 
-- ✅ Conexión Meta Aria Glasses (USB + WiFi)
-- ✅ Intel RealSense D435 (RGB + Depth hardware)
-- ✅ Sistema de tracking con priorización
-- ✅ AlertDecisionEngine para alertas inteligentes
-- ✅ NeMo TTS en proceso separado
-- ✅ TensorRT FP16 para YOLO y Depth Anything V2
-- ✅ NVDEC para decodificación de video en GPU
-- ✅ Server throttle 30 FPS para reducir CPU
-- ✅ Shared memory IPC para RealSense hardware depth (uint16 mm)
-- ✅ GPU auto-detection en docker-build.sh
-- ✅ Distancias absolutas con RealSense (mm → categorías: very_close/close/medium/far)
+### Phase 1 — MVP ✅
 
-### Próximo: Jetson + RealSense + IMU
+| # | Milestone | Descripción |
+|---|-----------|-------------|
+| H1 | Project Setup + Docker | Dockerfile base CUDA, GPU auto-detect, multi-GPU (RTX 20xx/30xx/40xx/50xx) |
+| H2 | YOLO TensorRT | YOLO26s FP16, 188 FPS, 5.3ms |
+| H3 | Depth Estimation TRT | Depth Anything V2-S FP16, 127 FPS, 7.9ms (monocular, para Aria/webcam) |
+| H4 | Object Tracking | SimpleTracker IoU matching entre frames |
+| H5 | Alert System | AlertDecisionEngine, priorización por riesgo, anti-spam cooldowns, zone filtering |
+| H6 | Spatial Audio | Beeps 3D estéreo, 4 zonas distancia (very_close/close/medium/far) + panning L/R |
+| H7 | TTS (NeMo) | Proceso separado, aislamiento CUDA, cola de prioridad |
+| H8 | Meta Aria Glasses | RGB + gaze-aware filtering (alerta solo objetos no vistos por el usuario) |
+| H9 | Intel RealSense D435 | Hardware depth mm, align depth-to-color, distancias absolutas |
+| H10 | Shared Memory IPC | Zero-copy RGB + depth entre procesos |
+| H11 | NVDEC Video Decode | Hardware video decoding |
+| H12 | Benchmarks Paper | benchmark_paper.py reproducible + results JSON (IWINAC 2026) |
 
-Ver [docs/JETSON.md](docs/JETSON.md) para detalles.
+### Phase 2 — Advanced Detection ⏳
 
-- Dockerfile.jetson para ARM64 (Orin/NX/Nano)
-- Intel RealSense D435 (RGB + Depth hardware)
-- BNO086 IMU (orientación 9-DOF para alertas direccionales)
-- TensorRT engine específico para Jetson GPU
-- Modo "lite" single-process (sin multiprocessing)
-- Evaluar DeepStream si Python no es suficiente
+| # | Milestone | Prioridad | Descripción |
+|---|-----------|-----------|-------------|
+| H13 | YOLO Fine-tune Navigation | 🔴 Alta | Clases custom: doors, stairs, curbs, traffic_light, signs |
+| H14 | Traffic Light Classification | 🔴 Alta | Clasificación estado semáforo (rojo/amarillo/verde) sobre bbox YOLO |
+| H15 | Key Sign Detection | 🟡 Media | Detección señales: stop, ceda, paso peatones |
+| H16 | Risk Prioritization v2 | 🟡 Media | Riesgo refinado: tipo objeto + zona + distancia + velocidad approach |
+| H17 | Haptic Feedback Prototype | 🟢 Baja | Vibración via BLE/serial (pulsera o controlador) |
 
-### Futuro
+> **Nota:** Una vez completada Phase 2 en Python, todo se porta a aria-core (C++) como parte de H22 (Obstacle Avoidance).
 
-- Ajuste fino de umbrales de alerta con usuarios reales
-- FastVLM para descripciones de escena
-- Control por voz (Whisper)
-- Detección de semáforos y señales
+```mermaid
+gantt
+    title aria-guard Milestones
+    dateFormat YYYY-MM-DD
+    axisFormat %b %Y
+
+    section Phase 1 — MVP ✅
+    H1  Project Setup + Docker        :done, h1, 2025-01-01, 14d
+    H2  YOLO TensorRT                 :done, h2, after h1, 14d
+    H3  Depth Estimation TRT          :done, h3, after h2, 14d
+    H4  Object Tracking               :done, h4, after h3, 7d
+    H5  Alert System                  :done, h5, after h4, 7d
+    H6  Spatial Audio                 :done, h6, after h5, 7d
+    H7  TTS (NeMo)                    :done, h7, after h6, 7d
+    H8  Meta Aria Glasses             :done, h8, after h7, 14d
+    H9  Intel RealSense D435          :done, h9, after h8, 14d
+    H10 Shared Memory IPC             :done, h10, after h9, 7d
+    H11 NVDEC Video Decode            :done, h11, after h10, 7d
+    H12 Benchmarks Paper              :done, h12, after h11, 7d
+
+    section Phase 2 — Advanced Detection ⏳
+    H13 YOLO Fine-tune Navigation     :active, h13, 2026-02-18, 21d
+    H14 Traffic Light Classification  :h14, after h13, 14d
+    H15 Key Sign Detection            :h15, after h14, 14d
+    H16 Risk Prioritization v2        :h16, after h15, 14d
+    H17 Haptic Feedback Prototype     :h17, after h16, 14d
+```
 
 ## Créditos
 
