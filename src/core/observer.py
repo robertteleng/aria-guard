@@ -334,7 +334,8 @@ class AriaDemoObserver(BaseObserver):
         self,
         interface: str = "usb",
         ip_address: Optional[str] = None,
-        enable_slam: bool = True
+        enable_slam: bool = True,
+        auto_subscribe: bool = True
     ):
         """
         Inicializa conexión con Aria.
@@ -426,10 +427,25 @@ class AriaDemoObserver(BaseObserver):
         # === REGISTRAR OBSERVER ===
         self._streaming_client = self._streaming_manager.streaming_client
         self._streaming_client.set_streaming_client_observer(self)
-        self._streaming_client.subscribe()
+        if auto_subscribe:
+            self._streaming_client.subscribe()
 
         print("[OBSERVER] ✓ AriaDemoObserver listo")
         print(f"[OBSERVER] Cámaras: RGB + Eye" + (" + SLAM1 + SLAM2" if enable_slam else ""))
+
+    def pause_streaming(self):
+        """Pausa la suscripción DDS (deja de recibir frames)."""
+        try:
+            self._streaming_client.unsubscribe()
+        except Exception as e:
+            print(f"[OBSERVER WARN] Pause failed: {e}")
+
+    def resume_streaming(self):
+        """Reanuda la suscripción DDS."""
+        try:
+            self._streaming_client.subscribe()
+        except Exception as e:
+            print(f"[OBSERVER WARN] Resume failed: {e}")
 
     def on_image_received(self, image: np.ndarray, record) -> None:
         """Callback del SDK para nuevas imágenes."""

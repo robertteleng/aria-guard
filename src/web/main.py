@@ -120,12 +120,12 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
         use_precomputed_gaze = gaze_csv is not None
     elif source == "aria" or source == "aria:usb":
         print("[SERVER] Conectando con Aria (USB)...")
-        observer = AriaDemoObserver(interface="usb")
+        observer = AriaDemoObserver(interface="usb", auto_subscribe=False)
     elif source.startswith("aria:wifi"):
         parts = source.split(":")
         ip = parts[2] if len(parts) > 2 else None
         print(f"[SERVER] Conectando con Aria (WiFi{': ' + ip if ip else ''})...")
-        observer = AriaDemoObserver(interface="wifi", ip_address=ip)
+        observer = AriaDemoObserver(interface="wifi", ip_address=ip, auto_subscribe=False)
     elif source == "webcam":
         observer = MockObserver(source="webcam")
     elif source == "realsense":
@@ -143,21 +143,31 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
         print("[SERVER] Gaze no disponible (RealSense no tiene eye tracking)")
 
     # Start CUDA in separate process (after observer so we know about hardware depth)
-    # Get actual frame shape from observer for correct shared memory sizing
-    test_frame = None
-    for _ in range(30):
-        test_frame = observer.get_frame("rgb")
-        if test_frame is not None:
-            break
-        time.sleep(0.1)
-    frame_shape = test_frame.shape if test_frame is not None else (720, 1280, 3)
-    print(f"[SERVER] Frame shape: {frame_shape}")
+    # For Aria, use known frame shape (no DDS subscription yet, can't get frames)
+    # For other sources, get actual frame shape from observer
+    if isinstance(observer, AriaDemoObserver):
+        frame_shape = (1408, 1408, 3)  # profile28/profile18 always 1408x1408
+        print(f"[SERVER] Frame shape (Aria): {frame_shape}")
+    else:
+        test_frame = None
+        for _ in range(30):
+            test_frame = observer.get_frame("rgb")
+            if test_frame is not None:
+                break
+            time.sleep(0.1)
+        frame_shape = test_frame.shape if test_frame is not None else (720, 1280, 3)
+        print(f"[SERVER] Frame shape: {frame_shape}")
 
     print("[SERVER] Iniciando DetectorProcess (CUDA en proceso separado)...")
     detector = DetectorProcess(mode=mode, enable_depth=True, has_hardware_depth=has_hardware_depth)
     if not detector.start(timeout=60, frame_shape=frame_shape):
         print("[SERVER] ✗ Failed to start DetectorProcess")
         return
+
+    # Suscribir a DDS DESPUÉS de que el detector esté listo (evita flood de "sample lost")
+    if isinstance(observer, AriaDemoObserver):
+        observer.resume_streaming()
+        print("[SERVER] ✓ DDS suscrito")
 
     # Non-CUDA components in main process
     dashboard = Dashboard()
