@@ -252,6 +252,7 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
                     distance=obj.distance,
                     user_looking=obj.is_gazed,
                     force_tts=channel_a.use_tts,
+                    threat_level=channel_a.threat_level,
                 )
 
             # Channel B: context (traffic light / sign)

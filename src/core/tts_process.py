@@ -21,19 +21,11 @@ tempfile.tempdir = str(_tmp_dir)
 
 # Common phrases to pre-cache at startup (short: object + direction)
 PRECACHE_PHRASES = [
-    "person left", "person right", "person straight",
-    "car left", "car right", "car straight",
-    "bicycle left", "bicycle right", "bicycle straight",
-    "motorcycle left", "motorcycle right", "motorcycle straight",
-    "bus left", "bus right", "bus straight",
-    "truck left", "truck right", "truck straight",
-    "chair left", "chair right", "chair straight",
-    "dog left", "dog right", "dog straight",
-    "backpack left", "backpack right", "backpack straight",
-    "handbag left", "handbag right", "handbag straight",
-    # Traffic light states
+    # H20: threat-level TTS (replaces object-name TTS)
+    "danger left", "danger right", "danger straight",
+    "warning left", "warning right", "warning straight",
+    # Channel B context
     "red light", "green light", "yellow light",
-    # Road signs
     "stop sign ahead",
 ]
 
