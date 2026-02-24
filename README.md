@@ -826,7 +826,7 @@ pie title VRAM (~2.5GB total)
 | H14 | Traffic Light Classification | ✅ Done | HSV sobre crop YOLO: red/yellow/green, canal alerta independiente |
 | H15 | Key Sign Detection | 🟡 Media | Detección señales: stop, ceda, paso peatones |
 | H16 | Risk Prioritization v2 | 🟡 Media | Riesgo refinado: tipo objeto + zona + distancia + velocidad approach |
-| H17 | Haptic Feedback Prototype | 🟢 Baja | Vibración via BLE/serial (pulsera o controlador) |
+| H17 | ~~Haptic Feedback Prototype~~ | ⚪ Nice to have | Vibración via BLE/serial — requiere hardware custom, bajo ROI vs audio |
 
 > **Nota:** Una vez completada Phase 2 en Python, todo se porta a aria-core (C++) como parte de H22 (Obstacle Avoidance).
 
@@ -855,7 +855,7 @@ gantt
     H14 Traffic Light Classification  :done, h14, after h13, 14d
     H15 Key Sign Detection            :active, h15, after h14, 14d
     H16 Risk Prioritization v2        :h16, after h15, 14d
-    H17 Haptic Feedback Prototype     :h17, after h16, 14d
+    H17 Haptic Feedback (nice to have) :h17, after h16, 14d
 ```
 
 ## Créditos
