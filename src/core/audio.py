@@ -218,6 +218,18 @@ class AudioFeedback:
             zone_word = {"left": "left", "right": "right", "center": "straight"}.get(zone, "")
             self.speak(f"{object_name} {zone_word}")
 
+    def alert_traffic_light(self, state: str, zone: str) -> None:
+        """Alert user about traffic light state (red/green/yellow)."""
+        # Short beep to get attention
+        is_red = state == "red"
+        self.play_spatial_beep(
+            zone=zone,
+            distance="medium",
+            is_critical=is_red,
+        )
+        # TTS: "red light", "green light", "yellow light"
+        self.speak(f"{state} light", force=True)
+
     def shutdown(self):
         """Clean shutdown of TTS process."""
         if self._tts_process:

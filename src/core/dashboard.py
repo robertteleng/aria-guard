@@ -15,6 +15,13 @@ from .types import Detection
 class Dashboard:
     """Dashboard visual."""
 
+    # Traffic light state colors (BGR)
+    _TL_COLORS = {
+        "red": (0, 0, 255),
+        "yellow": (0, 255, 255),
+        "green": (0, 200, 0),
+    }
+
     def __init__(self):
         self._colors = {
             "very_close": (0, 0, 255),    # Rojo
@@ -87,7 +94,13 @@ class Dashboard:
         """
         for det in detections:
             x, y, w, h = det.bbox
-            color = self._colors.get(det.distance, (128, 128, 128))
+            tl_state = getattr(det, 'traffic_light_state', None)
+
+            # Traffic lights use their state color; others use distance color
+            if det.name == "traffic light" and tl_state:
+                color = self._TL_COLORS.get(tl_state, self._colors.get(det.distance, (128, 128, 128)))
+            else:
+                color = self._colors.get(det.distance, (128, 128, 128))
 
             # If user is looking at this object, fill with semi-transparent color
             if getattr(det, 'is_gazed', False):
@@ -101,7 +114,10 @@ class Dashboard:
                 cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
 
             # Label con fondo
-            label = f"{det.name} ({det.distance})"
+            if det.name == "traffic light" and tl_state:
+                label = f"{tl_state.upper()} light ({det.distance})"
+            else:
+                label = f"{det.name} ({det.distance})"
             if getattr(det, 'is_gazed', False):
                 label = f"[LOOKING] {label}"
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)

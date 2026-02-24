@@ -31,6 +31,8 @@ PRECACHE_PHRASES = [
     "dog left", "dog right", "dog straight",
     "backpack left", "backpack right", "backpack straight",
     "handbag left", "handbag right", "handbag straight",
+    # Traffic light states
+    "red light", "green light", "yellow light",
 ]
 
 

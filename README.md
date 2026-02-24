@@ -822,8 +822,8 @@ pie title VRAM (~2.5GB total)
 
 | # | Milestone | Prioridad | Descripción |
 |---|-----------|-----------|-------------|
-| H13 | YOLO Fine-tune Navigation | 🔴 Alta | Clases custom: doors, stairs, curbs, traffic_light, signs |
-| H14 | Traffic Light Classification | 🔴 Alta | Clasificación estado semáforo (rojo/amarillo/verde) sobre bbox YOLO |
+| H13 | YOLO Fine-tune Navigation | ✅ Done | Clases custom: doors, stairs, curbs, traffic_light, signs |
+| H14 | Traffic Light Classification | ✅ Done | HSV sobre crop YOLO: red/yellow/green, canal alerta independiente |
 | H15 | Key Sign Detection | 🟡 Media | Detección señales: stop, ceda, paso peatones |
 | H16 | Risk Prioritization v2 | 🟡 Media | Riesgo refinado: tipo objeto + zona + distancia + velocidad approach |
 | H17 | Haptic Feedback Prototype | 🟢 Baja | Vibración via BLE/serial (pulsera o controlador) |
@@ -851,9 +851,9 @@ gantt
     H12 Benchmarks Paper              :done, h12, after h11, 7d
 
     section Phase 2 — Advanced Detection ⏳
-    H13 YOLO Fine-tune Navigation     :active, h13, 2026-02-18, 21d
-    H14 Traffic Light Classification  :h14, after h13, 14d
-    H15 Key Sign Detection            :h15, after h14, 14d
+    H13 YOLO Fine-tune Navigation     :done, h13, 2026-02-18, 21d
+    H14 Traffic Light Classification  :done, h14, after h13, 14d
+    H15 Key Sign Detection            :active, h15, after h14, 14d
     H16 Risk Prioritization v2        :h16, after h15, 14d
     H17 Haptic Feedback Prototype     :h17, after h16, 14d
 ```

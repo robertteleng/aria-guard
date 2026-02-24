@@ -232,7 +232,15 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
 
         # Audio feedback via decision engine
         if tracked:
-            vehicle_alert, other_alert = alert_engine.decide(tracker)
+            vehicle_alert, other_alert, tl_alert = alert_engine.decide(tracker)
+
+            # Traffic light alert (independent channel)
+            if tl_alert and tl_alert.should_alert:
+                obj = tl_alert.object
+                audio.alert_traffic_light(
+                    state=obj.traffic_light_state,
+                    zone=obj.zone,
+                )
 
             if vehicle_alert and vehicle_alert.should_alert:
                 obj = vehicle_alert.object
@@ -339,7 +347,8 @@ def status():
             'name': d.name,
             'zone': d.zone,
             'distance': d.distance,
-            'is_gazed': getattr(d, 'is_gazed', False)
+            'is_gazed': getattr(d, 'is_gazed', False),
+            'traffic_light_state': getattr(d, 'traffic_light_state', None),
         } for d in current_detections] if current_detections else []
     return jsonify({
         'fps': fps,

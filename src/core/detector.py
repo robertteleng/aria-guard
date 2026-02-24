@@ -357,7 +357,7 @@ class ParallelDetector:
 
         # Combinar YOLO + Depth para crear detecciones con distancia
         if yolo_results:
-            detections = self._create_detections(yolo_results, depth_map, frame.shape, self._hardware_depth_mode)
+            detections = self._create_detections(yolo_results, depth_map, frame.shape, self._hardware_depth_mode, frame=frame)
 
         # Marcar objetos que el usuario está mirando
         if gaze_point:
@@ -458,9 +458,60 @@ class ParallelDetector:
 
         return depth
 
+    @staticmethod
+    def _classify_traffic_light(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int) -> Optional[str]:
+        """Classify traffic light state via HSV color analysis on the YOLO crop.
+
+        Divides the crop into top/middle/bottom thirds and checks which region
+        has the strongest saturated color matching red, yellow, or green.
+
+        Returns: "red", "yellow", "green", or None if undetermined.
+        """
+        # Clamp to frame bounds
+        h, w = frame.shape[:2]
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0 or crop.shape[0] < 6 or crop.shape[1] < 3:
+            return None
+
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        crop_h = hsv.shape[0]
+        third = crop_h // 3
+
+        # Regions: top=red, middle=yellow, bottom=green (standard vertical layout)
+        regions = {
+            "red": hsv[:third],
+            "yellow": hsv[third:2*third],
+            "green": hsv[2*third:],
+        }
+
+        # HSV masks — only count bright, saturated pixels (the lit lamp)
+        # S > 80 filters out gray/white, V > 100 filters out dark
+        masks = {
+            "red": lambda h_ch, s, v: ((h_ch < 10) | (h_ch > 160)) & (s > 80) & (v > 100),
+            "yellow": lambda h_ch, s, v: (h_ch >= 15) & (h_ch <= 35) & (s > 80) & (v > 100),
+            "green": lambda h_ch, s, v: (h_ch >= 36) & (h_ch <= 90) & (s > 80) & (v > 100),
+        }
+
+        best_state = None
+        best_ratio = 0.05  # Minimum 5% of the region must match
+
+        for state, region in regions.items():
+            if region.size == 0:
+                continue
+            h_ch, s, v = region[:,:,0], region[:,:,1], region[:,:,2]
+            mask = masks[state](h_ch, s, v)
+            ratio = np.count_nonzero(mask) / max(1, mask.size)
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_state = state
+
+        return best_state
+
     def _create_detections(
         self, yolo_result, depth_map: Optional[np.ndarray], frame_shape,
-        hardware_depth: bool = False
+        hardware_depth: bool = False, frame: Optional[np.ndarray] = None
     ) -> List[Detection]:
         """Combina YOLO + Depth para crear detecciones con distancia."""
         detections = []
@@ -510,13 +561,19 @@ class ParallelDetector:
                     )
                     distance = self._depth_to_distance(depth_value)
 
+            # Classify traffic light state via HSV
+            tl_state = None
+            if name == "traffic light" and frame is not None:
+                tl_state = self._classify_traffic_light(frame, int(x1), int(y1), int(x2), int(y2))
+
             detections.append(Detection(
                 name=name,
                 confidence=conf,
                 bbox=bbox,
                 zone=zone,
                 distance=distance,
-                depth_value=depth_value
+                depth_value=depth_value,
+                traffic_light_state=tl_state,
             ))
 
         # Ordenar por relevancia (distancia cercana primero)

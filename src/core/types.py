@@ -6,7 +6,7 @@ IMPORTANT: This file must NOT import CUDA/torch to keep the main process clean.
 """
 
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Tuple
 
 
 @dataclass
@@ -19,6 +19,7 @@ class Detection:
     distance: str       # "very_close", "close", "medium", "far"
     depth_value: float  # 0.0 - 1.0 (normalizado)
     is_gazed: bool = False  # True if user is looking at this object
+    traffic_light_state: Optional[str] = None  # "red", "green", "yellow", None
 
 
 # Filtros de clases por modo

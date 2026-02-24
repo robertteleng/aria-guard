@@ -23,6 +23,7 @@ class TrackedObject:
     is_gazed: bool = False
     frame_width: int = 1280
     fov_h: float = 1.15  # horizontal FOV in radians
+    traffic_light_state: Optional[str] = None  # "red", "green", "yellow"
 
     # Tracking data
     depth_history: deque = field(default_factory=lambda: deque(maxlen=10))
@@ -60,6 +61,9 @@ OBJECT_PRIORITY = {
     # Vehicles - highest priority
     "car": 10, "truck": 10, "bus": 10,
     "motorcycle": 9, "bicycle": 8,
+
+    # Traffic signals — high priority for crossing decisions
+    "traffic light": 8, "stop sign": 7,
 
     # People/animals
     "person": 6, "dog": 5, "cat": 4,
@@ -180,6 +184,7 @@ class SimpleTracker:
                 track.depth_value = det.depth_value
                 track.confidence = det.confidence
                 track.is_gazed = det.is_gazed
+                track.traffic_light_state = getattr(det, 'traffic_light_state', None)
                 track.frame_width = frame_width
                 track.fov_h = fov_h
                 track.depth_history.append(det.depth_value)
@@ -214,6 +219,7 @@ class SimpleTracker:
                 is_gazed=det.is_gazed,
                 frame_width=frame_width,
                 fov_h=fov_h,
+                traffic_light_state=getattr(det, 'traffic_light_state', None),
             )
             self._update_priority(new_track)
             self.tracks[self.next_id] = new_track

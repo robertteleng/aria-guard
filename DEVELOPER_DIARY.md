@@ -927,6 +927,113 @@ Sync: [frame_ready_event] ←→ [result_ready_event] (mp.Event)
 
 ---
 
+## Feature: Traffic Light Classification — Estado del Semáforo por HSV
+**Fecha:** 2026-02-24
+**Branch:** `main`
+**Estado:** Completada
+
+---
+
+### P1: Historia del Usuario
+> "Yo llego a un cruce y hay un semáforo. El sistema ya lo detecta como 'traffic light', pero no me dice si está en rojo o verde. Necesito saber si puedo cruzar o debo esperar."
+
+### P2: Estados y Transiciones
+
+```
+[YOLO detecta "traffic light"] ──crop bbox──▶ [HSV analysis]
+    ──top third red──▶ [state="red"] ──TTS──▶ "red light"
+    ──mid third yellow──▶ [state="yellow"] ──TTS──▶ "yellow light"
+    ──bottom third green──▶ [state="green"] ──TTS──▶ "green light"
+    ──no match (>5%)──▶ [state=None] ──silencio──▶ (no alert)
+
+[state cambia] ──cooldown bypass──▶ [Alerta inmediata]
+[state igual] ──cooldown 4s──▶ [Esperar]
+```
+
+**¿Por qué estos estados?**
+- El semáforo tiene 3 estados mutuamente excluyentes — solo uno está encendido
+- El cambio de estado (rojo→verde) es la información más crítica — bypass cooldown
+- Si no hay match claro (oclusión, glare), mejor no decir nada que decir mal
+
+**¿Qué descarté?**
+- Modelo clasificador (ResNet/MobileNet) — overhead de VRAM y latencia innecesario, HSV es suficiente para LEDs brillantes
+- Clasificar todo el crop sin dividir en tercios — confunde el housing gris con la lámpara encendida
+
+### P3: Veo / Necesito
+
+| Estado | Lo que ve el usuario | Datos que necesito | De dónde vienen |
+|---|---|---|---|
+| Semáforo rojo | "red light" + beep crítico | Crop del bbox + HSV analysis | YOLO bbox → _classify_traffic_light() |
+| Semáforo verde | "green light" + beep normal | Crop del bbox + HSV analysis | YOLO bbox → _classify_traffic_light() |
+| Cambio rojo→verde | Alerta inmediata (bypass cooldown) | State change detection | AlertDecisionEngine._last_tl_state |
+| Dev monitoreando | Bbox coloreado rojo/verde/amarillo + label "RED light" | traffic_light_state en Detection | Dashboard._TL_COLORS |
+
+### P4: Inventario
+
+| Necesito | ¿Existe? | Decisión | Por qué |
+|---|---|---|---|
+| Detección de "traffic light" | Sí (YOLO COCO + CLASS_FILTERS outdoor) | Reusar | Ya detectado, solo falta clasificar el estado |
+| Clasificación de color | No | Crear _classify_traffic_light() con HSV | 0 VRAM, microsegundos, LEDs saturados son fáciles de detectar |
+| Campo de estado en Detection | No | Extender Detection con traffic_light_state | Optional[str] = None, no rompe nada existente |
+| Canal de alerta independiente | No | Extender AlertDecisionEngine | Semáforos no deben competir con vehículos por cooldown |
+| TTS para estados | No | Extender PRECACHE_PHRASES + alert_traffic_light() | 3 frases nuevas: "red light", "green light", "yellow light" |
+| Visual en dashboard | No | Extender _draw_detections con _TL_COLORS | Bbox coloreado por estado (rojo/verde/amarillo) en vez de por distancia |
+
+### P5: Diagrama de Pegamento
+
+```
+[YOLO] ──"traffic light" bbox──▶ [_classify_traffic_light(frame, bbox)]
+                                         │
+                                    HSV crop analysis
+                                    (top=red, mid=yellow, bot=green)
+                                         │
+                                  [Detection.traffic_light_state]
+                                         │
+                        ┌────────────────┼────────────────┐
+                        ▼                ▼                ▼
+                [AlertDecisionEngine]  [Dashboard]    [/status API]
+                (independent channel)  (TL colors)   (JSON field)
+                        │
+                   ¿state changed OR cooldown expired?
+                        │
+                  [audio.alert_traffic_light(state, zone)]
+                        │
+                  [TTS: "red light" / "green light"]
+```
+
+**¿Por qué esta conexión?**
+- HSV se ejecuta en CPU sobre el crop — no toca pipeline GPU
+- Canal de alerta independiente para semáforos — "red light" no debe ser silenciado por un cooldown de vehículo
+- State change detection permite bypass de cooldown — si cambió de rojo a verde, el usuario necesita saberlo YA
+
+### Implementación
+
+**Archivos modificados:**
+- `src/core/types.py` — Campo `traffic_light_state: Optional[str]` en Detection
+- `src/core/detector.py` — `_classify_traffic_light()` (HSV estático), pasar `frame` a `_create_detections()`
+- `src/core/tracker.py` — `traffic_light_state` en TrackedObject, propagación en update(), prioridad 8 para traffic light
+- `src/core/alert_engine.py` — Canal independiente con `_should_alert_traffic_light()`, state change detection, `decide()` retorna 3 valores
+- `src/core/audio.py` — `alert_traffic_light(state, zone)` method
+- `src/core/tts_process.py` — 3 frases nuevas en PRECACHE_PHRASES
+- `src/core/dashboard.py` — `_TL_COLORS`, label "RED light" en vez de "traffic light", bbox con color del estado
+- `src/web/main.py` — Manejo del tercer canal de alerta, `traffic_light_state` en /status endpoint
+
+**Decisiones clave:**
+- HSV sobre crop dividido en tercios (top/mid/bottom) — layout estándar de semáforo vertical
+- Umbral mínimo 5% de píxeles saturados para considerar un estado — filtra ruido
+- S > 80 y V > 100 para filtrar housing gris y píxeles oscuros — solo lámpara encendida
+- Cooldown de 4s para semáforos pero bypass si el estado cambió — prioriza el cambio
+- Canal de alerta independiente de vehículos y otros — la info de cruce nunca se pierde
+- `traffic_light: 8` en OBJECT_PRIORITY — por debajo de vehículos pero por encima de personas
+
+### Reflexión
+- **Lo que funcionó:** HSV es extremadamente simple y debería funcionar bien con LEDs modernos
+- **Lo que costó:** Diseñar la interacción con el sistema de cooldowns sin romper el contrato de `decide()`
+- **Lo que haría diferente:** Nada por ahora — si HSV falla en campo, escalar a MobileNet clasificador
+- **Patrón reutilizable:** Post-clasificador ligero sobre crop de YOLO (CPU, sin modelo). Canal de alerta independiente en AlertDecisionEngine
+
+---
+
 ## Plantilla por Feature
 
 Copia esto para cada feature nueva:
