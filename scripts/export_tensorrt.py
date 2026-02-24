@@ -152,40 +152,16 @@ class GazeModelWrapper(nn.Module):
         return torch.cat([preds["main"], preds["lower"], preds["upper"]], dim=1)
 
 
-def export_gaze():
-    """Exporta Meta Eye Gaze model a ONNX y TensorRT.
-
-    El modelo viene de projectaria_eyetracking (Meta) y usa ResNet-18
-    para estimar yaw/pitch de la mirada a partir de imágenes de eye tracking
-    de las gafas Aria.
-
-    Arquitectura: ResNet-18 (SocialEye backbone + SocialEyePredictionBoundHead)
-    Pesos originales: models/gaze_weights/social_eyes_uncertainty_v1/weights.pth
-    """
-    import tensorrt as trt
-
-    print()
-    print("=" * 60)
-    print("Exportando Meta Eye Gaze a TensorRT")
-    print("=" * 60)
-
-    onnx_path = MODELS_DIR / "gaze.onnx"
-    engine_path = MODELS_DIR / "gaze.engine"
+def _load_gaze_pytorch():
+    """Carga el modelo PyTorch de Meta Eye Gaze y lo devuelve como wrapper ONNX-ready."""
     weights_dir = MODELS_DIR / "gaze_weights" / "social_eyes_uncertainty_v1"
     weights_path = weights_dir / "weights.pth"
     config_path = weights_dir / "config.yaml"
-
-    if engine_path.exists():
-        print(f"Engine ya existe: {engine_path}")
-        return engine_path
 
     if not weights_path.exists():
         print(f"[ERROR] Pesos no encontrados: {weights_path}")
         print("Descarga desde projectaria_eyetracking o copia manualmente.")
         return None
-
-    # --- Step 1: Cargar modelo PyTorch ---
-    print("[1/3] Cargando modelo PyTorch...")
 
     # Monkey-patch torch.load para compatibilidad con PyTorch 2.6+ (EasyDict en checkpoint)
     _original_torch_load = torch.load
@@ -202,17 +178,21 @@ def export_gaze():
             model_config_path=str(config_path),
             device="cpu",
         )
-        pytorch_model = gaze.model
-        pytorch_model.eval()
+        wrapper = GazeModelWrapper(gaze.model)
+        wrapper.eval()
         print(f"    Modelo cargado desde {weights_dir.name}")
+        return wrapper
     finally:
         torch.load = _original_torch_load
 
-    # --- Step 2: Exportar a ONNX ---
-    print("[2/3] Exportando a ONNX...")
 
-    wrapper = GazeModelWrapper(pytorch_model)
-    wrapper.eval()
+def _gaze_to_onnx(wrapper):
+    """Exporta el wrapper gaze a ONNX. Devuelve path del ONNX."""
+    onnx_path = MODELS_DIR / "gaze.onnx"
+
+    if onnx_path.exists():
+        print(f"    ONNX ya existe: {onnx_path}")
+        return onnx_path
 
     # Input: imagen preprocesada (1, 2, 240, 320) — 2 canales: ojo izq/derecho
     dummy_input = torch.randn(1, 2, 240, 320)
@@ -227,9 +207,12 @@ def export_gaze():
         do_constant_folding=True,
     )
     print(f"    ONNX guardado: {onnx_path} ({onnx_path.stat().st_size / 1e6:.1f} MB)")
+    return onnx_path
 
-    # --- Step 3: Convertir a TensorRT ---
-    print("[3/3] Convirtiendo a TensorRT...")
+
+def _onnx_to_tensorrt(onnx_path, engine_path, workspace_gb=1):
+    """Convierte un ONNX a TensorRT engine con FP16."""
+    import tensorrt as trt
 
     logger = trt.Logger(trt.Logger.INFO)
     builder = trt.Builder(logger)
@@ -243,7 +226,7 @@ def export_gaze():
             raise RuntimeError("Failed to parse ONNX")
 
     config = builder.create_builder_config()
-    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 30)  # 1GB
+    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, workspace_gb << 30)
 
     if builder.platform_has_fast_fp16:
         config.set_flag(trt.BuilderFlag.FP16)
@@ -258,11 +241,56 @@ def export_gaze():
     with open(engine_path, "wb") as f:
         f.write(serialized_engine)
 
+    print(f"    Engine guardado: {engine_path} ({engine_path.stat().st_size / 1e6:.1f} MB)")
+    return engine_path
+
+
+def export_gaze():
+    """Exporta Meta Eye Gaze model a ONNX y TensorRT.
+
+    El modelo viene de projectaria_eyetracking (Meta) y usa ResNet-18
+    para estimar yaw/pitch de la mirada a partir de imágenes de eye tracking
+    de las gafas Aria.
+
+    Pipeline: .pth → ONNX (PyTorch) → TensorRT engine (requiere tensorrt)
+    Si tensorrt no está instalado, se exporta solo a ONNX.
+    """
+    print()
+    print("=" * 60)
+    print("Exportando Meta Eye Gaze a TensorRT")
+    print("=" * 60)
+
+    onnx_path = MODELS_DIR / "gaze.onnx"
+    engine_path = MODELS_DIR / "gaze.engine"
+
+    if engine_path.exists():
+        print(f"Engine ya existe: {engine_path}")
+        return engine_path
+
+    # Step 1: PyTorch → ONNX
+    if not onnx_path.exists():
+        print("[1/2] Cargando modelo PyTorch y exportando a ONNX...")
+        wrapper = _load_gaze_pytorch()
+        if wrapper is None:
+            return None
+        onnx_path = _gaze_to_onnx(wrapper)
+    else:
+        print(f"[1/2] ONNX ya existe: {onnx_path}")
+
+    # Step 2: ONNX → TensorRT
+    print("[2/2] Convirtiendo a TensorRT...")
+    try:
+        engine_path = _onnx_to_tensorrt(onnx_path, engine_path)
+    except ImportError:
+        print("    [WARN] tensorrt no instalado. ONNX listo para convertir en Docker:")
+        print(f"    trtexec --onnx={onnx_path} --saveEngine={engine_path} --fp16")
+        return onnx_path
+
     # Limpiar ONNX intermedio
     onnx_path.unlink()
     print(f"    ONNX intermedio eliminado")
 
-    print(f"✓ Engine guardado: {engine_path} ({engine_path.stat().st_size / 1e6:.1f} MB)")
+    print(f"✓ Engine guardado: {engine_path}")
     return engine_path
 
 
