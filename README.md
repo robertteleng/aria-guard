@@ -830,7 +830,7 @@ pie title VRAM (~2.5GB total)
 
 > **Nota:** Una vez completada Phase 2 en Python, todo se porta a aria-core (C++) como parte de H22 (Obstacle Avoidance).
 
-### Phase 3 — Threat Model & Audio (basado en papers) ⏳
+### Phase 3 — Threat Model & Audio (basado en papers) ✅
 
 Rediseño del sistema de alertas basado en evidencia académica (ver [docs/RESEARCH.md](docs/RESEARCH.md)).
 
@@ -839,7 +839,7 @@ Rediseño del sistema de alertas basado en evidencia académica (ver [docs/RESEA
 | H18 | Collision Risk Score | ✅ | `collision_risk()` 0.0–1.0: TTC (50%) + CBDR bearing (25%) + zone (15%) + class (10%). 4 factores ADAS |
 | H19 | Alert Arbiter (2 canales) | ✅ | Canal A: top-1 por risk (DANGER/WARNING/ATTENTION). Canal B: contexto. Rate limit 6/30s, anti-saturación |
 | H20 | Audio BRR + Pitch | ✅ | BRR burst 3/2/1 beeps. Pitch 400–1100Hz por distancia. TTS "danger left". Pan mejorado |
-| H21 | Benchmark Offline | 🔴 Alta | Script que procesa Tokyo_POV.mp4 sin audio: mide alerts/min, silent ratio, false alerts. Target: >80% silencio, 0 alertas simultáneas |
+| H21 | Benchmark Offline | ✅ | benchmark_offline.py: alerts/min, silent ratio, min gap, max concurrent. 3 escenarios sintéticos, 26 tests |
 
 > **Principio (Gao 2025, Nature):** Al usuario no le importa si es coche o bus. Le importa cuánto peligro hay y de dónde viene.
 
@@ -870,11 +870,11 @@ gantt
     H16 Risk Prioritization v2        :done, h16, after h15, 7d
     H17 Haptic Feedback (nice to have) :h17, after h16, 14d
 
-    section Phase 3 — Threat Model & Audio ⏳
+    section Phase 3 — Threat Model & Audio ✅
     H18 Collision Risk Score          :done, h18, 2026-02-25, 7d
     H19 Alert Arbiter (2 canales)     :done, h19, after h18, 7d
     H20 Audio BRR + Pitch             :done, h20, after h19, 7d
-    H21 Benchmark Offline             :h21, after h18, 14d
+    H21 Benchmark Offline             :done, h21, after h18, 14d
 ```
 
 ## Créditos

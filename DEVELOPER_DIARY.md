@@ -1541,6 +1541,73 @@ flowchart TD
 
 ---
 
+## Feature: Benchmark Offline — Métricas de Saturación (H21)
+**Fecha:** 2026-02-24
+**Branch:** `main`
+**Estado:** Completada
+
+---
+
+### P1: Historia del Usuario
+> "Necesito un script que procese un video (Tokyo_POV.mp4) offline sin audio, pase todos los frames por tracker + arbiter, y me diga: cuántas alertas/min, qué % del tiempo hay silencio, si el rate limiting funciona, y si hay alertas simultáneas. Con targets pass/fail basados en la investigación."
+
+### P2: Estados y Transiciones
+
+```
+[Video MP4] ──DetectorProcess(CUDA)──▶ [detections JSON per frame]
+    ──SimpleTracker──▶ [TrackedObjects con collision_risk]
+    ──AlertArbiter──▶ [alert decisions per frame]
+    ──aggregate──▶ [BenchmarkMetrics: alerts/min, silent_ratio, etc.]
+    ──pass/fail──▶ [exit code 0/1]
+```
+
+### P3: Qué Veo / Qué Necesito
+
+| Veo | Necesito |
+|---|---|
+| Pipeline online con audio | Pipeline offline sin audio, solo métricas |
+| Sin forma de medir saturación | alerts/min, silent_ratio, min_gap, max_concurrent |
+| Sin test de rate limiting real | Escenarios sintéticos: calma, 1 peligro, caos |
+
+### P4: Inventario
+
+| Necesito | ¿Existe? | Decisión | Por qué |
+|---|---|---|---|
+| Detector offline | DetectorProcess existe | Reusar: send_frame + get_result en loop | Mismo pipeline, solo sin Flask/audio |
+| Time simulation | time.time() en arbiter | Mock: unittest.mock.patch para video timestamp | Cooldowns deben usar tiempo de video, no wall clock |
+| JSON serialization | No | Crear: FrameResult dataclass + asdict | Permite re-correr benchmark sin CUDA |
+| Pass/fail targets | Definidos en RESEARCH.md | Implementar: >80% silencio, <12 alerts/min, >1s gap | Directamente de la literatura |
+
+### P5: Diagrama de Pegamento
+
+```
+[benchmark_offline.py] ──video──▶ [process_video()] ──JSON──▶ [run_benchmark()]
+                                                                     │
+                                                              ┌──────┴──────┐
+                                                              ▼             ▼
+                                                    [print_metrics()]  [save JSON]
+```
+
+### Implementación
+
+**Archivos creados:**
+- `scripts/benchmark_offline.py` — Script CLI: procesa video o JSON, calcula métricas, pass/fail
+- `tests/test_benchmark.py` — 7 tests con 3 escenarios sintéticos (calma, peligro, caos)
+
+**Decisiones clave:**
+- alerts_per_min cuenta solo Channel A (threats) — Channel B es informativo
+- Time mocking para que cooldowns funcionen con video timestamp
+- JSON save/load permite re-correr benchmark sin CUDA (CPU-only analysis)
+- 4 targets: silent_ratio >80%, alerts/min <=12, min_gap >1s, max_concurrent <=1
+
+### Reflexión
+- **Lo que funcionó:** Separar process_video (CUDA) de run_benchmark (CPU) — puedes grabar detecciones una vez y analizar muchas veces
+- **Lo que costó:** El time mocking — tuve que patchear el módulo correcto para que los cooldowns usen video time
+- **Lo que haría diferente:** Añadir visualización: generar video con overlay de alertas para revisión manual
+- **Patrón reutilizable:** Benchmark framework con targets pass/fail + JSON intermediario
+
+---
+
 ## Plantilla por Feature
 
 Copia esto para cada feature nueva:
