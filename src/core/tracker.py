@@ -37,8 +37,6 @@ class TrackedObject:
     lateral_speed: float = 0.0  # rad/frame, positive = moving right
     enters_path: bool = False  # object moving laterally into user's path (center)
     bearing: float = 0.0  # current bearing in radians
-    priority: float = 0.0
-
     # H18: collision risk score (0.0–1.0) and threat level
     collision_risk: float = 0.0
     threat_level: str = "NONE"  # NONE, ATTENTION, WARNING, DANGER
@@ -59,42 +57,6 @@ class TrackedObject:
         # Map pixel position to angle: atan((normalized - 0.5) * 2 * tan(fov/2))
         return math.atan((center_x - 0.5) * 2 * math.tan(self.fov_h / 2))
 
-
-# Object type priority (higher = more dangerous)
-OBJECT_PRIORITY = {
-    # Vehicles - highest priority
-    "car": 10, "truck": 10, "bus": 10,
-    "motorcycle": 9, "bicycle": 8,
-
-    # Traffic signals — high priority for crossing decisions
-    "traffic light": 8, "stop sign": 7,
-
-    # People/animals
-    "person": 6, "dog": 5, "cat": 4,
-
-    # Obstacles
-    "chair": 3, "couch": 3, "bed": 2,
-    "dining table": 2, "toilet": 2,
-
-    # Objects
-    "backpack": 1, "handbag": 1, "suitcase": 1,
-}
-
-# Distance priority multiplier
-DISTANCE_PRIORITY = {
-    "very_close": 4.0,
-    "close": 2.0,
-    "medium": 1.0,
-    "far": 0.5,
-    "unknown": 1.0,
-}
-
-# Zone priority multiplier (center = user walks into it)
-ZONE_PRIORITY = {
-    "center": 1.5,
-    "left": 1.0,
-    "right": 1.0,
-}
 
 # H18: Collision risk weights by object class (0.0–1.0)
 # Vehicles are lethal, people are unpredictable, static objects are low risk
@@ -197,10 +159,10 @@ class SimpleTracker:
         matched_tracks = set()
         matched_detections = set()
 
-        # Sort tracks by priority (process important ones first)
+        # Sort tracks by collision_risk (process important ones first)
         track_ids = sorted(
             self.tracks.keys(),
-            key=lambda tid: self.tracks[tid].priority,
+            key=lambda tid: self.tracks[tid].collision_risk,
             reverse=True
         )
 
@@ -242,8 +204,7 @@ class SimpleTracker:
                 self._update_approach(track)
                 self._update_lateral(track)
 
-                # Calculate priority (v2) + collision risk (H18)
-                self._update_priority(track)
+                # Calculate collision risk (H18)
                 self._update_collision_risk(track)
 
                 matched_tracks.add(track_id)
@@ -267,7 +228,6 @@ class SimpleTracker:
                 fov_h=fov_h,
                 traffic_light_state=getattr(det, 'traffic_light_state', None),
             )
-            self._update_priority(new_track)
             self._update_collision_risk(new_track)
             self.tracks[self.next_id] = new_track
             self.next_id += 1
@@ -280,10 +240,10 @@ class SimpleTracker:
         # Cleanup old tracks
         self._cleanup()
 
-        # Return sorted by priority
+        # Return sorted by collision_risk
         return sorted(
             self.tracks.values(),
-            key=lambda t: t.priority,
+            key=lambda t: t.collision_risk,
             reverse=True
         )
 
@@ -335,37 +295,6 @@ class SimpleTracker:
         )
         close_enough = track.distance in ("very_close", "close")
         track.enters_path = moving_toward_center and close_enough
-
-    def _update_priority(self, track: TrackedObject):
-        """Calculate priority score for the track (v2).
-
-        v1 used binary approach (2x on/off). v2 uses continuous approach speed
-        and adds zone factor so center objects rank higher.
-        """
-        # Base priority from object type
-        type_priority = OBJECT_PRIORITY.get(track.name, 1)
-
-        # Distance multiplier
-        dist_mult = DISTANCE_PRIORITY.get(track.distance, 1.0)
-
-        # Approach speed: continuous 1.0–3.0 (v2: replaces binary 2x)
-        # approach_speed is depth slope/frame; 0.01 = barely moving, 0.05+ = fast
-        if track.approach_speed > 0.01:
-            approach_mult = min(3.0, 1.0 + track.approach_speed * 40.0)
-        else:
-            approach_mult = 1.0
-
-        # Zone: center = higher risk (user walks straight into it)
-        zone_mult = ZONE_PRIORITY.get(track.zone, 1.0)
-
-        # Lateral intercept bonus (2.5x if entering user's path)
-        path_mult = 2.5 if track.enters_path else 1.0
-
-        # Not gazed bonus (1.5x if user not looking)
-        gaze_mult = 1.5 if not track.is_gazed else 1.0
-
-        # Combine
-        track.priority = type_priority * dist_mult * approach_mult * zone_mult * path_mult * gaze_mult
 
     def _update_collision_risk(self, track: TrackedObject):
         """Calculate collision risk score 0.0–1.0 and threat level (H18).
@@ -429,15 +358,6 @@ class SimpleTracker:
         for tid in to_remove:
             del self.tracks[tid]
 
-    def get_top_priority(self, n: int = 1) -> List[TrackedObject]:
-        """Get top N priority objects."""
-        sorted_tracks = sorted(
-            self.tracks.values(),
-            key=lambda t: t.priority,
-            reverse=True
-        )
-        return sorted_tracks[:n]
-
     def get_approaching_objects(self) -> List[TrackedObject]:
         """Get objects that are approaching."""
         return [t for t in self.tracks.values() if t.is_approaching]
@@ -445,20 +365,3 @@ class SimpleTracker:
     def get_path_entering_objects(self) -> List[TrackedObject]:
         """Get objects moving laterally into the user's path."""
         return [t for t in self.tracks.values() if t.enters_path]
-
-    def get_top_vehicle(self) -> Optional[TrackedObject]:
-        """Get highest priority vehicle (car, truck, bus, motorcycle, bicycle)."""
-        vehicles = {"car", "truck", "bus", "motorcycle", "bicycle"}
-        vehicle_tracks = [t for t in self.tracks.values() if t.name in vehicles]
-        if not vehicle_tracks:
-            return None
-        return max(vehicle_tracks, key=lambda t: t.priority)
-
-    def get_top_non_vehicle(self) -> Optional[TrackedObject]:
-        """Get highest priority non-vehicle (person, obstacle, etc).
-        Excludes traffic lights and signs — they have independent alert channels."""
-        exclude = {"car", "truck", "bus", "motorcycle", "bicycle", "traffic light", "stop sign"}
-        other_tracks = [t for t in self.tracks.values() if t.name not in exclude]
-        if not other_tracks:
-            return None
-        return max(other_tracks, key=lambda t: t.priority)
