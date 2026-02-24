@@ -405,7 +405,7 @@ if __name__ == '__main__':
 
     print()
     print("╔══════════════════════════════════════╗")
-    print("║          ARIA DEMO v1.0              ║")
+    print("║          ARIA GUARD v1.0              ║")
     print("║   Visual Assistance System           ║")
     print("╚══════════════════════════════════════╝")
     print()

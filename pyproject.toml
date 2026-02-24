@@ -1,0 +1,72 @@
+[project]
+name = "aria-guard"
+version = "1.0.0"
+description = "L1 Critical Reactive Layer — Real-time collision detection for visually impaired"
+requires-python = ">=3.11"
+
+dependencies = [
+    # Core
+    "numpy>=1.24.0",
+    "opencv-python>=4.8.0",
+    "Pillow>=10.0.0",
+
+    # ML/Vision — PyTorch installed from CUDA index
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "torchaudio>=2.0.0",
+    "ultralytics>=8.3.0",
+    "transformers>=4.35.0",
+
+    # Web dashboard
+    "flask>=3.0.0",
+
+    # Audio
+    "sounddevice>=0.4.6",
+    "pyttsx3>=2.90",
+]
+
+[project.optional-dependencies]
+# CUDA/GPU acceleration
+cuda = [
+    "nemo_toolkit[tts]>=2.2.0",
+]
+# Aria glasses support
+aria = [
+    "projectaria-client-sdk>=2.2.0",
+]
+# RealSense D435
+realsense = [
+    "pyrealsense2>=2.50.0",
+]
+# Development
+dev = [
+    "pytest>=8.0",
+    "PyTurboJPEG>=1.7.0",
+]
+
+[tool.uv]
+# Only resolve for Linux (project is Linux-only)
+environments = ["sys_platform == 'linux'"]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

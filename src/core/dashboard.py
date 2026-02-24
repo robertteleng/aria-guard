@@ -1,5 +1,5 @@
 """
-Dashboard para ARIA Demo.
+Dashboard para ARIA Guard.
 
 Renderiza RGB + Depth overlay + Radar + Status.
 """
@@ -288,7 +288,7 @@ class SimpleDashboard:
 
         # Combinar en layout
         top_row = np.hstack([rgb_resized, depth_resized])
-        cv2.imshow("ARIA Demo", top_row)
+        cv2.imshow("ARIA Guard", top_row)
 
         return cv2.waitKey(1) & 0xFF
 

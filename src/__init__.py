@@ -1,1 +1,1 @@
-# ARIA Demo - Visual Assistance System
+# ARIA Guard - Visual Assistance System

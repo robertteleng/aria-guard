@@ -1,6 +1,6 @@
-# ARIA Demo - Jetson Deployment
+# ARIA Guard - Jetson Deployment
 
-Documentación para desplegar ARIA Demo en NVIDIA Jetson con Intel RealSense D435 y BNO086 IMU.
+Documentación para desplegar ARIA Guard en NVIDIA Jetson con Intel RealSense D435 y BNO086 IMU.
 
 ## Hardware Target
 

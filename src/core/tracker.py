@@ -1,5 +1,5 @@
 """
-Simple object tracker for ARIA demo.
+Simple object tracker for ARIA Guard.
 
 Tracks objects across frames to detect approach and prioritize alerts.
 """

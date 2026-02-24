@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Comprehensive benchmark for ARIA Demo paper.
+Comprehensive benchmark for ARIA Guard paper.
 
 Tests all pipeline components individually and combined:
 - YOLO26s object detection (TensorRT vs PyTorch)
@@ -523,7 +523,7 @@ def print_results(results):
 
 def main():
     print("=" * 60)
-    print("ARIA Demo - Comprehensive Benchmark")
+    print("ARIA Guard - Comprehensive Benchmark")
     print("=" * 60)
 
     results = {}

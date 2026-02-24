@@ -1,4 +1,4 @@
-# ARIA Demo - Dependencies
+# ARIA Guard - Dependencies (legacy — use pyproject.toml + uv instead)
 
 # Core
 numpy>=1.24.0

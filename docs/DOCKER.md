@@ -1,4 +1,4 @@
-# Docker Setup para ARIA Demo
+# Docker Setup para ARIA Guard
 
 ## Arquitectura de Imágenes
 

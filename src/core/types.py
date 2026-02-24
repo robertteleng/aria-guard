@@ -1,5 +1,5 @@
 """
-Core types for ARIA demo.
+Core types for ARIA Guard.
 
 This file contains data structures that are shared between modules.
 IMPORTANT: This file must NOT import CUDA/torch to keep the main process clean.

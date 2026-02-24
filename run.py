@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Entry point for ARIA Demo.
+Entry point for ARIA Guard.
 
 CRITICAL: This wrapper sets multiprocessing spawn method BEFORE importing
 any torch/CUDA modules. This prevents CUDA context conflicts with Aria SDK.
@@ -62,7 +62,7 @@ if __name__ == '__main__':
     else:
         print()
         print("╔══════════════════════════════════════╗")
-        print("║          ARIA DEMO v1.0              ║")
+        print("║          ARIA GUARD v1.0             ║")
         print("║   Visual Assistance System           ║")
         print("╚══════════════════════════════════════╝")
         print()
@@ -146,7 +146,7 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         print()
         print("╔══════════════════════════════════════╗")
-        print("║          ARIA DEMO v1.0              ║")
+        print("║          ARIA GUARD v1.0              ║")
         print("║   Visual Assistance System           ║")
         print("╚══════════════════════════════════════╝")
         print()
