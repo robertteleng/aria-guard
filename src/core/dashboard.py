@@ -22,6 +22,13 @@ class Dashboard:
         "green": (0, 200, 0),
     }
 
+    # H18: Threat level colors (BGR)
+    _THREAT_COLORS = {
+        "DANGER": (0, 0, 255),      # Red
+        "WARNING": (0, 140, 255),    # Orange
+        "ATTENTION": (0, 255, 255),  # Yellow
+    }
+
     def __init__(self):
         self._colors = {
             "very_close": (0, 0, 255),    # Rojo
@@ -96,11 +103,14 @@ class Dashboard:
             x, y, w, h = det.bbox
             tl_state = getattr(det, 'traffic_light_state', None)
 
-            # Traffic lights use their state color; stop signs always red; others use distance color
+            # Color: threat level > traffic light state > stop sign > distance
+            threat = getattr(det, 'threat_level', None)
             if det.name == "traffic light" and tl_state:
                 color = self._TL_COLORS.get(tl_state, self._colors.get(det.distance, (128, 128, 128)))
             elif det.name == "stop sign":
                 color = (0, 0, 255)  # Red (BGR)
+            elif threat and threat in self._THREAT_COLORS:
+                color = self._THREAT_COLORS[threat]
             else:
                 color = self._colors.get(det.distance, (128, 128, 128))
 
@@ -116,10 +126,14 @@ class Dashboard:
                 cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
 
             # Label con fondo
+            threat = getattr(det, 'threat_level', None)
             if det.name == "traffic light" and tl_state:
                 label = f"{tl_state.upper()} light ({det.distance})"
             elif det.name == "stop sign":
                 label = f"STOP ({det.distance})"
+            elif threat and threat != "NONE":
+                risk_val = getattr(det, 'collision_risk', 0)
+                label = f"{det.name} [{threat} {risk_val:.0%}]"
             else:
                 label = f"{det.name} ({det.distance})"
             if getattr(det, 'is_gazed', False):

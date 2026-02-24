@@ -230,6 +230,15 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
         frame_w = rgb.shape[1] if rgb is not None else 1280
         tracked = tracker.update(detections, frame_width=frame_w, fov_h=observer.fov_h)
 
+        # Enrich detections with tracker info for dashboard display
+        # Build bbox→track lookup for matching
+        track_by_bbox = {t.bbox: t for t in tracked} if tracked else {}
+        for det in detections:
+            t = track_by_bbox.get(det.bbox)
+            if t:
+                det.threat_level = t.threat_level
+                det.collision_risk = t.collision_risk
+
         # Audio feedback via decision engine
         if tracked:
             vehicle_alert, other_alert, tl_alert, sign_alert = alert_engine.decide(tracker)
@@ -358,6 +367,8 @@ def status():
             'distance': d.distance,
             'is_gazed': getattr(d, 'is_gazed', False),
             'traffic_light_state': getattr(d, 'traffic_light_state', None),
+            'threat_level': getattr(d, 'threat_level', 'NONE'),
+            'collision_risk': round(getattr(d, 'collision_risk', 0.0), 3),
         } for d in current_detections] if current_detections else []
     return jsonify({
         'fps': fps,
