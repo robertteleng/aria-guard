@@ -17,6 +17,8 @@ models/*.pt
 models/*.onnx
 models/*.onnx.data
 models/*.engine
+!models/yolo26s_nav.engine
+!models/gaze.engine
 models/gaze_weights/
 
 # Data (test videos and samples)
