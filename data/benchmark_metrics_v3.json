@@ -1,0 +1,20 @@
+{
+  "video_path": "data/benchmark_detections.json",
+  "total_frames": 4586,
+  "total_seconds": 459.0,
+  "fps": 10.0,
+  "total_alerts": 90,
+  "danger_count": 43,
+  "warning_count": 30,
+  "attention_count": 17,
+  "channel_b_count": 0,
+  "alerts_per_min": 11.8,
+  "silent_ratio": 0.803,
+  "min_gap_s": 4.0,
+  "max_gap_s": 15.62,
+  "max_concurrent": 1,
+  "pass_silent_ratio": true,
+  "pass_alerts_per_min": true,
+  "pass_min_gap": true,
+  "pass_max_concurrent": true
+}
