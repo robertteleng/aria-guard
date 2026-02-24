@@ -39,6 +39,10 @@ class TrackedObject:
     bearing: float = 0.0  # current bearing in radians
     priority: float = 0.0
 
+    # H18: collision risk score (0.0–1.0) and threat level
+    collision_risk: float = 0.0
+    threat_level: str = "NONE"  # NONE, ATTENTION, WARNING, DANGER
+
     def __post_init__(self):
         if not self.depth_history:
             self.depth_history = deque(maxlen=10)
@@ -90,6 +94,40 @@ ZONE_PRIORITY = {
     "center": 1.5,
     "left": 1.0,
     "right": 1.0,
+}
+
+# H18: Collision risk weights by object class (0.0–1.0)
+# Vehicles are lethal, people are unpredictable, static objects are low risk
+CLASS_RISK = {
+    "car": 1.0, "truck": 1.0, "bus": 1.0,
+    "motorcycle": 0.9, "bicycle": 0.7,
+    "person": 0.3, "dog": 0.2, "cat": 0.15,
+    "chair": 0.15, "couch": 0.15, "bed": 0.1,
+    "dining table": 0.1, "toilet": 0.1,
+    "backpack": 0.05, "handbag": 0.05, "suitcase": 0.05,
+}
+
+# H18: Zone risk weights for collision_risk (center = user's path)
+ZONE_RISK = {
+    "center": 1.0,
+    "left": 0.4,
+    "right": 0.4,
+}
+
+# H18: Static proximity risk (objects not approaching but close)
+STATIC_PROXIMITY = {
+    "very_close": 0.8,
+    "close": 0.4,
+    "medium": 0.1,
+    "far": 0.0,
+    "unknown": 0.1,
+}
+
+# H18: Threat level thresholds (calibrated from ADAS literature)
+THREAT_THRESHOLDS = {
+    "DANGER": 0.6,     # ~TTC < 1.5s (Euro NCAP AEB activation)
+    "WARNING": 0.35,   # ~TTC < 3.0s (Mobileye FCW)
+    "ATTENTION": 0.15, # ~TTC < 5.0s
 }
 
 
@@ -204,8 +242,9 @@ class SimpleTracker:
                 self._update_approach(track)
                 self._update_lateral(track)
 
-                # Calculate priority
+                # Calculate priority (v2) + collision risk (H18)
                 self._update_priority(track)
+                self._update_collision_risk(track)
 
                 matched_tracks.add(track_id)
                 matched_detections.add(best_det_idx)
@@ -229,6 +268,7 @@ class SimpleTracker:
                 traffic_light_state=getattr(det, 'traffic_light_state', None),
             )
             self._update_priority(new_track)
+            self._update_collision_risk(new_track)
             self.tracks[self.next_id] = new_track
             self.next_id += 1
 
@@ -326,6 +366,59 @@ class SimpleTracker:
 
         # Combine
         track.priority = type_priority * dist_mult * approach_mult * zone_mult * path_mult * gaze_mult
+
+    def _update_collision_risk(self, track: TrackedObject):
+        """Calculate collision risk score 0.0–1.0 and threat level (H18).
+
+        Combines 4 weighted factors from ADAS literature:
+        - TTC proxy (50%): time-to-collision from depth approach speed
+        - CBDR (25%): constant bearing + decreasing range = collision course
+        - Zone (15%): center of path = higher risk
+        - Class (10%): vehicles are lethal, static objects are low risk
+        """
+        risk = 0.0
+
+        # Factor 1: TTC proxy (50%)
+        # TTC = depth / approach_speed (in frames)
+        # Normalize: TTC 0 = 1.0, TTC 150 frames (~5s @30fps) = 0.0
+        if track.approach_speed > 0.01:
+            ttc_frames = track.depth_value / track.approach_speed
+            ttc_factor = max(0.0, 1.0 - ttc_frames / 150.0)
+        else:
+            # Static object: use proximity as TTC proxy
+            ttc_factor = STATIC_PROXIMITY.get(track.distance, 0.1)
+
+        risk += ttc_factor * 0.50
+
+        # Factor 2: CBDR — bearing stable + approaching (25%)
+        # If bearing doesn't change while distance decreases → collision course
+        # Captures lateral bikes/motorcycles maintaining collision heading
+        if track.approach_speed > 0.01:
+            bearing_stability = max(0.0, 1.0 - abs(track.lateral_speed) / 0.02)
+            approach_intensity = min(1.0, track.approach_speed / 0.03)
+            cbdr_factor = bearing_stability * approach_intensity
+        else:
+            cbdr_factor = 0.0
+
+        risk += cbdr_factor * 0.25
+
+        # Factor 3: Zone (15%)
+        risk += ZONE_RISK.get(track.zone, 0.3) * 0.15
+
+        # Factor 4: Object class (10%)
+        risk += CLASS_RISK.get(track.name, 0.1) * 0.10
+
+        track.collision_risk = min(1.0, risk)
+
+        # Map to threat level
+        if track.collision_risk >= THREAT_THRESHOLDS["DANGER"]:
+            track.threat_level = "DANGER"
+        elif track.collision_risk >= THREAT_THRESHOLDS["WARNING"]:
+            track.threat_level = "WARNING"
+        elif track.collision_risk >= THREAT_THRESHOLDS["ATTENTION"]:
+            track.threat_level = "ATTENTION"
+        else:
+            track.threat_level = "NONE"
 
     def _cleanup(self):
         """Remove tracks that have been missing too long."""
