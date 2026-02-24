@@ -87,18 +87,34 @@ class TestChannelA:
         a2, _ = arbiter.decide(tracker)
         assert a2 is None  # Suppressed by cooldown
 
-    def test_danger_bypasses_cooldown(self):
-        """DANGER should fire even after recent alert."""
+    def test_danger_respects_min_cooldown(self):
+        """DANGER should respect its 1.5s cooldown (not fire immediately)."""
         tracker = build_tracker(make_car_approaching())
         arbiter = AlertArbiter()
 
         a1, _ = arbiter.decide(tracker)
         assert a1 is not None
 
-        # Immediately again — DANGER bypasses cooldown
+        # Immediately again — DANGER now respects 1.5s cooldown
         a2, _ = arbiter.decide(tracker)
-        assert a2 is not None
-        assert a2.threat_level == "DANGER"
+        assert a2 is None  # Suppressed by cooldown
+
+    def test_danger_bypasses_rate_limit(self):
+        """DANGER should fire even when rate limit is exceeded."""
+        tracker = build_tracker(make_car_approaching())
+        arbiter = AlertArbiter()
+
+        # Fill rate limit buffer
+        now = time.time()
+        for i in range(MAX_ALERTS_COUNT):
+            arbiter._alert_times.append(now - 5 - i)
+
+        # Set last alert far enough back to pass cooldown
+        arbiter._last_a_alert_time = now - 10
+
+        a, _ = arbiter.decide(tracker)
+        assert a is not None
+        assert a.threat_level == "DANGER"
 
     def test_gazed_object_no_tts(self):
         """Gazed WARNING object should beep but not TTS."""

@@ -63,7 +63,7 @@ class TrackedObject:
 CLASS_RISK = {
     "car": 1.0, "truck": 1.0, "bus": 1.0,
     "motorcycle": 0.9, "bicycle": 0.7,
-    "person": 0.3, "dog": 0.2, "cat": 0.15,
+    "person": 0.15, "dog": 0.15, "cat": 0.1,
     "chair": 0.15, "couch": 0.15, "bed": 0.1,
     "dining table": 0.1, "toilet": 0.1,
     "backpack": 0.05, "handbag": 0.05, "suitcase": 0.05,
@@ -87,9 +87,9 @@ STATIC_PROXIMITY = {
 
 # H18: Threat level thresholds (calibrated from ADAS literature)
 THREAT_THRESHOLDS = {
-    "DANGER": 0.6,     # ~TTC < 1.5s (Euro NCAP AEB activation)
-    "WARNING": 0.35,   # ~TTC < 3.0s (Mobileye FCW)
-    "ATTENTION": 0.15, # ~TTC < 5.0s
+    "DANGER": 0.7,     # ~TTC < 1s — fast vehicle or imminent collision
+    "WARNING": 0.35,   # ~TTC < 3s (Mobileye FCW)
+    "ATTENTION": 0.15, # ~TTC < 5s
 }
 
 

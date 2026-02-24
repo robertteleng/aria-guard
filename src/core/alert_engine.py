@@ -20,9 +20,9 @@ CONTEXT_CLASSES = {"traffic light", "stop sign"}
 
 # Cooldowns per threat level (seconds)
 THREAT_COOLDOWNS = {
-    "DANGER": 1.5,
-    "WARNING": 3.0,
-    "ATTENTION": 5.0,
+    "DANGER": 2.0,
+    "WARNING": 4.0,
+    "ATTENTION": 6.0,
 }
 
 # Rate limiting
@@ -101,20 +101,20 @@ class AlertArbiter:
         # Select top-1 by collision_risk
         top = max(candidates, key=lambda t: t.collision_risk)
 
-        # DANGER is never suppressed by cooldown or rate limit
+        # DANGER bypasses rate limit and same-object nag, but still has minimum cooldown
         is_danger = top.threat_level == "DANGER"
 
-        if not is_danger:
-            # Cooldown check (adaptive by last alert level)
-            cooldown = self._get_cooldown(now)
-            if now - self._last_a_alert_time < cooldown:
-                return None
+        # All threat levels respect their own cooldown (DANGER = 1.5s min)
+        cooldown = self._get_cooldown(now)
+        if now - self._last_a_alert_time < cooldown:
+            return None
 
-            # Rate limit check
+        if not is_danger:
+            # Rate limit check (DANGER bypasses)
             if self._is_rate_limited(now):
                 return None
 
-            # Same object cooldown (don't nag about same object)
+            # Same object cooldown — don't nag about same object (DANGER bypasses)
             if self._last_a_id == top.id:
                 same_obj_cooldown = THREAT_COOLDOWNS.get(top.threat_level, 3.0) * 1.5
                 if now - self._last_a_alert_time < same_obj_cooldown:
