@@ -838,7 +838,7 @@ Rediseño del sistema de alertas basado en evidencia académica (ver [docs/RESEA
 |---|-----------|-----------|-------------|
 | H18 | Collision Risk Score | ✅ | `collision_risk()` 0.0–1.0: TTC (50%) + CBDR bearing (25%) + zone (15%) + class (10%). 4 factores ADAS |
 | H19 | Alert Arbiter (2 canales) | ✅ | Canal A: top-1 por risk (DANGER/WARNING/ATTENTION). Canal B: contexto. Rate limit 6/30s, anti-saturación |
-| H20 | Audio BRR + Pitch | 🟡 Media | Beeps por ráfaga (3=danger, 2=warning, 1=attention). Pitch 400–1100Hz por distancia. TTS "danger left" en vez de "car left" |
+| H20 | Audio BRR + Pitch | ✅ | BRR burst 3/2/1 beeps. Pitch 400–1100Hz por distancia. TTS "danger left". Pan mejorado |
 | H21 | Benchmark Offline | 🔴 Alta | Script que procesa Tokyo_POV.mp4 sin audio: mide alerts/min, silent ratio, false alerts. Target: >80% silencio, 0 alertas simultáneas |
 
 > **Principio (Gao 2025, Nature):** Al usuario no le importa si es coche o bus. Le importa cuánto peligro hay y de dónde viene.
@@ -873,7 +873,7 @@ gantt
     section Phase 3 — Threat Model & Audio ⏳
     H18 Collision Risk Score          :done, h18, 2026-02-25, 7d
     H19 Alert Arbiter (2 canales)     :done, h19, after h18, 7d
-    H20 Audio BRR + Pitch             :h20, after h19, 7d
+    H20 Audio BRR + Pitch             :done, h20, after h19, 7d
     H21 Benchmark Offline             :h21, after h18, 14d
 ```
 

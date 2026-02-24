@@ -1465,6 +1465,82 @@ flowchart TD
 
 ---
 
+## Feature: Audio BRR + Pitch por Distancia (H20)
+**Fecha:** 2026-02-24
+**Branch:** `main`
+**Estado:** Completada
+
+---
+
+### P1: Historia del Usuario
+> "El audio actual tiene 2 frecuencias fijas y 1 beep por alerta — no comunica urgencia ni distancia de forma intuitiva. Necesito ráfagas BRR (como sensor de parking), pitch continuo por distancia, y TTS que diga 'danger left' en vez de 'car left'."
+
+### P2: Estados y Transiciones
+
+```
+[AlertArbiter → Channel A: DANGER/WARNING/ATTENTION]
+    ──BRR──▶ burst de 3/2/1 beeps
+    ──pitch──▶ 400Hz(far)..1100Hz(very_close)
+    ──pan──▶ L/R por zona
+    ──TTS──▶ "danger left" (si use_tts=True)
+
+[AlertArbiter → Channel B: CONTEXT]
+    ──beep──▶ 1 beep ATTENTION
+    ──TTS──▶ "red light" / "stop sign ahead"
+```
+
+### P3: Qué Veo / Qué Necesito
+
+| Veo | Necesito |
+|---|---|
+| 2 freq fijas (500/1000Hz) | Pitch continuo 400-1100Hz por distancia |
+| 1 beep por alerta | BRR: 3 beeps (DANGER), 2 (WARNING), 1 (ATTENTION) |
+| TTS "car left" | TTS "danger left" — threat level, no tipo de objeto |
+| Pan 100%/20% burdo | Pan mejorado: center=0.7/0.7 |
+| 31 frases precache | 10 frases (6 threat + 4 context) |
+
+### P4: Inventario
+
+| Necesito | ¿Existe? | Decisión | Por qué |
+|---|---|---|---|
+| Generador de burst | play_spatial_beep existía (1 beep) | Reescribir: _generate_burst() con count/gap/duration | BRR necesita secuencia de beeps con gaps |
+| Pitch map | FREQ_CRITICAL/NORMAL (binario) | Crear PITCH_MAP dict por distancia | Pitch continuo = canal secundario de distancia |
+| TTS por threat level | speak("car left") | Cambiar a speak("danger left") | Gao 2025: tipo de objeto es ruido cognitivo |
+| Pan map | Hardcoded en _play() | Crear PAN_MAP dict | Limpieza + center mejorado (0.7/0.7 vs 1.0/1.0) |
+
+### P5: Diagrama de Pegamento
+
+```
+[AlertArbiter.decide()] ──channel_a──▶ [main.py] ──threat_level──▶ [audio.alert_danger()]
+                                                                          │
+                                                          ┌───────────────┤
+                                                          ▼               ▼
+                                                   [_generate_burst()]  [speak("danger left")]
+                                                   BRR × pitch × pan
+```
+
+### Implementación
+
+**Archivos modificados:**
+- `src/core/audio.py` — Reescrito: BRR_CONFIG, PITCH_MAP, PAN_MAP, _generate_beep(), _generate_burst(), alert_danger() con threat_level
+- `src/core/tts_process.py` — PRECACHE_PHRASES reducido de 31 a 10 frases
+- `src/web/main.py` — Pasa threat_level a audio.alert_danger()
+
+**Decisiones clave:**
+- BRR como canal primario (EyeCane): 3/2/1 beeps más intuitivo que frecuencia
+- Pitch 400-1100Hz como secundario (bone conduction sweet spot)
+- TTS "danger left" en 2 palabras, procesable en <300ms
+- ATTENTION no habla TTS — solo beep informativo
+- Burst total <400ms para no solapar con TTS
+
+### Reflexión
+- **Lo que funcionó:** Separar _generate_beep() y _generate_burst() — modular y testeable
+- **Lo que costó:** Calibrar duraciones para que burst + gap + TTS no excedan 1s total
+- **Lo que haría diferente:** Grabar muestras y probar con bone conduction real antes de fijar timings
+- **Patrón reutilizable:** BRR config como dict por nivel — fácil de ajustar sin cambiar código
+
+---
+
 ## Plantilla por Feature
 
 Copia esto para cada feature nueva:
