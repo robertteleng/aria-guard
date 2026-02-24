@@ -22,7 +22,7 @@ from flask import Flask, Response, render_template
 # NO CUDA imports here - main process must be CUDA-free for Aria SDK compatibility
 from src.core import Dashboard, DetectorProcess
 from src.core import MockObserver, AriaDemoObserver, AriaDatasetObserver, RealSenseObserver
-from src.core.alert_engine import AlertDecisionEngine
+from src.core.alert_engine import AlertArbiter
 from src.core.tracker import SimpleTracker
 
 # AudioFeedback is safe - TTS runs in separate process
@@ -172,7 +172,7 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
     # Non-CUDA components in main process
     dashboard = Dashboard()
     audio = AudioFeedback(enabled=enable_audio, use_nemo=enable_audio)
-    alert_engine = AlertDecisionEngine()
+    alert_engine = AlertArbiter()
     tracker = SimpleTracker()
     print("[SERVER] ✓ Componentes inicializados")
     print("[SERVER] Iniciando procesamiento...")
@@ -239,44 +239,35 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
                 det.threat_level = t.threat_level
                 det.collision_risk = t.collision_risk
 
-        # Audio feedback via decision engine
+        # Audio feedback via 2-channel arbiter (H19)
         if tracked:
-            vehicle_alert, other_alert, tl_alert, sign_alert = alert_engine.decide(tracker)
+            channel_a, channel_b = alert_engine.decide(tracker)
 
-            # Traffic light alert (independent channel)
-            if tl_alert and tl_alert.should_alert:
-                obj = tl_alert.object
-                audio.alert_traffic_light(
-                    state=obj.traffic_light_state,
-                    zone=obj.zone,
-                )
-
-            # Sign alert (independent channel)
-            if sign_alert and sign_alert.should_alert:
-                obj = sign_alert.object
-                audio.alert_sign(
-                    sign_name=obj.name,
-                    zone=obj.zone,
-                    distance=obj.distance,
-                )
-
-            if vehicle_alert and vehicle_alert.should_alert:
-                obj = vehicle_alert.object
+            # Channel A: threat alert (DANGER/WARNING/ATTENTION)
+            if channel_a and channel_a.should_alert:
+                obj = channel_a.object
                 audio.alert_danger(
                     object_name=obj.name,
                     zone=obj.zone,
                     distance=obj.distance,
                     user_looking=obj.is_gazed,
-                    force_tts=True
+                    force_tts=channel_a.use_tts,
                 )
-            elif other_alert and other_alert.should_alert:
-                obj = other_alert.object
-                audio.alert_danger(
-                    object_name=obj.name,
-                    zone=obj.zone,
-                    distance=obj.distance,
-                    user_looking=obj.is_gazed
-                )
+
+            # Channel B: context (traffic light / sign)
+            if channel_b and channel_b.should_alert:
+                obj = channel_b.object
+                if obj.name == "traffic light" and obj.traffic_light_state:
+                    audio.alert_traffic_light(
+                        state=obj.traffic_light_state,
+                        zone=obj.zone,
+                    )
+                elif obj.name == "stop sign":
+                    audio.alert_sign(
+                        sign_name=obj.name,
+                        zone=obj.zone,
+                        distance=obj.distance,
+                    )
 
         # Render dashboard - ALWAYS update frame even without detections
         rgb_out, depth_out, _, _ = dashboard.render(

@@ -1,14 +1,36 @@
 """
-Alert Decision Engine for ARIA demo.
+Alert Arbiter for ARIA (H19).
 
-Centralizes all alert logic: what to alert, when, and why.
-Separates decision-making from audio playback.
+2-channel architecture based on collision_risk (H18):
+- Channel A (threat): top-1 object by collision_risk, adaptive cooldowns
+- Channel B (context): traffic lights, signs — only when A is silent
+
+Replaces AlertDecisionEngine (v1/v2) which used object-type heuristics.
 """
+from collections import deque
 from dataclasses import dataclass
-from typing import Optional, List, Tuple
+from typing import Optional, Tuple
 import time
 
-from src.core.tracker import TrackedObject, SimpleTracker
+from src.core.tracker import TrackedObject, SimpleTracker, THREAT_THRESHOLDS
+
+
+# Context classes — handled by Channel B
+CONTEXT_CLASSES = {"traffic light", "stop sign"}
+
+# Cooldowns per threat level (seconds)
+THREAT_COOLDOWNS = {
+    "DANGER": 1.5,
+    "WARNING": 3.0,
+    "ATTENTION": 5.0,
+}
+
+# Rate limiting
+MAX_ALERTS_WINDOW = 30.0   # seconds
+MAX_ALERTS_COUNT = 6       # max alerts in window (~12/min peak)
+SATURATION_WINDOW = 20.0   # seconds
+SATURATION_THRESHOLD = 4   # alerts in window to trigger anti-saturation
+CHANNEL_B_SILENCE = 3.0    # Channel A must be silent this long before B speaks
 
 
 @dataclass
@@ -16,229 +38,200 @@ class AlertDecision:
     """Result of alert decision process."""
     should_alert: bool
     object: Optional[TrackedObject] = None
-    reason: str = ""  # "close", "approaching", etc.
+    reason: str = ""
+    threat_level: str = "NONE"
+    use_tts: bool = False  # Whether TTS should speak (vs beep only)
 
 
-class AlertDecisionEngine:
+class AlertArbiter:
+    """2-channel alert arbiter based on collision_risk scoring.
+
+    Channel A — Threat (max 1 at a time):
+        Selects top-1 object by collision_risk. Cooldown adapts by threat level.
+        DANGER is never suppressed. Rate limit: max 6/30s.
+        Gaze modulates urgency (TTS vs beep-only), NOT the risk score.
+
+    Channel B — Context (informational):
+        Traffic lights and signs. Only speaks when Channel A is silent >3s.
+        Long cooldowns (5-8s). State changes bypass cooldown.
     """
-    Decides which objects deserve alerts based on:
-    - Object type (vehicles > people > obstacles)
-    - Distance (very_close, close trigger alerts)
-    - Approach speed (approaching objects at medium distance)
-    - User gaze (not looking = more urgent)
-    """
 
-    # Vehicles always get priority - they're more dangerous
-    VEHICLES = {"car", "truck", "bus", "motorcycle", "bicycle"}
+    def __init__(self):
+        # Channel A state
+        self._last_a_alert_time = 0.0
+        self._last_a_id: Optional[int] = None
+        self._last_a_level: str = "NONE"
 
-    # Signs that get their own independent alert channel
-    SIGN_CLASSES = {"stop sign"}
-
-    def __init__(
-        self,
-        vehicle_cooldown: float = 1.5,
-        other_cooldown: float = 2.0,
-        same_object_cooldown: float = 3.0,
-        traffic_light_cooldown: float = 4.0,
-        sign_cooldown: float = 5.0
-    ):
-        """
-        Args:
-            vehicle_cooldown: Min seconds between vehicle alerts
-            other_cooldown: Min seconds between non-vehicle alerts
-            same_object_cooldown: Min seconds before re-alerting same object
-            traffic_light_cooldown: Min seconds between traffic light state alerts
-            sign_cooldown: Min seconds between sign alerts
-        """
-        self.vehicle_cooldown = vehicle_cooldown
-        self.other_cooldown = other_cooldown
-        self.same_object_cooldown = same_object_cooldown
-        self.traffic_light_cooldown = traffic_light_cooldown
-        self.sign_cooldown = sign_cooldown
-
-        self._last_vehicle_alert = 0.0
-        self._last_other_alert = 0.0
-        self._last_traffic_light_alert = 0.0
-        self._last_tl_state: Optional[str] = None  # last announced state
-        self._last_sign_alert = 0.0
+        # Channel B state
+        self._last_tl_alert_time = 0.0
+        self._last_tl_state: Optional[str] = None
+        self._last_sign_alert_time = 0.0
         self._last_sign_id: Optional[int] = None
-        self._last_alerted_id: Optional[int] = None
-        self._last_alerted_time = 0.0
 
-    def decide(self, tracker: SimpleTracker) -> Tuple[Optional[AlertDecision], Optional[AlertDecision], Optional[AlertDecision], Optional[AlertDecision]]:
-        """
-        Decide what to alert based on current tracked objects.
+        # Rate limiting: ring buffer of recent alert timestamps
+        self._alert_times: deque = deque(maxlen=MAX_ALERTS_COUNT * 2)
+
+    def decide(self, tracker: SimpleTracker) -> Tuple[Optional[AlertDecision], Optional[AlertDecision]]:
+        """Decide what to alert based on current tracked objects.
 
         Returns:
-            (vehicle_alert, other_alert, traffic_light_alert, sign_alert) - any can be None
+            (channel_a, channel_b) — either can be None.
+            channel_a: threat alert (DANGER/WARNING/ATTENTION)
+            channel_b: context alert (traffic light / sign)
         """
         now = time.time()
 
-        vehicle_decision = None
-        other_decision = None
-        tl_decision = None
-        sign_decision = None
+        channel_a = self._decide_channel_a(tracker, now)
+        channel_b = self._decide_channel_b(tracker, now)
 
-        # Get top candidates
-        top_vehicle = tracker.get_top_vehicle()
-        top_other = tracker.get_top_non_vehicle()
-        top_tl = self._get_top_traffic_light(tracker)
-        top_sign = self._get_top_sign(tracker)
+        return channel_a, channel_b
 
-        # Traffic light alert (independent channel — crossing info is always useful)
-        if top_tl and self._should_alert_traffic_light(top_tl, now):
-            tl_decision = AlertDecision(
-                should_alert=True,
-                object=top_tl,
-                reason=f"traffic_light_{top_tl.traffic_light_state}"
-            )
-            self._last_traffic_light_alert = now
-            self._last_tl_state = top_tl.traffic_light_state
+    # --- Channel A: Threat ---
 
-        # Sign alert (independent channel — crossing context)
-        if top_sign and self._should_alert_sign(top_sign, now):
-            sign_decision = AlertDecision(
-                should_alert=True,
-                object=top_sign,
-                reason=f"sign_{top_sign.name}"
-            )
-            self._last_sign_alert = now
-            self._last_sign_id = top_sign.id
+    def _decide_channel_a(self, tracker: SimpleTracker, now: float) -> Optional[AlertDecision]:
+        """Select top threat by collision_risk, apply cooldowns and rate limit."""
+        # Get all non-context tracks with threat level > NONE
+        candidates = [
+            t for t in tracker.tracks.values()
+            if t.name not in CONTEXT_CLASSES and t.threat_level != "NONE"
+        ]
+        if not candidates:
+            return None
 
-        # Vehicle alert check
-        if top_vehicle and self._should_alert_vehicle(top_vehicle, now):
-            vehicle_decision = AlertDecision(
-                should_alert=True,
-                object=top_vehicle,
-                reason=self._get_alert_reason(top_vehicle)
-            )
-            self._last_vehicle_alert = now
-            self._record_alert(top_vehicle.id, now)
+        # Select top-1 by collision_risk
+        top = max(candidates, key=lambda t: t.collision_risk)
 
-        # Non-vehicle alert check (only if no vehicle alert)
-        if not vehicle_decision and top_other and self._should_alert_other(top_other, now):
-            other_decision = AlertDecision(
-                should_alert=True,
-                object=top_other,
-                reason=self._get_alert_reason(top_other)
-            )
-            self._last_other_alert = now
-            self._record_alert(top_other.id, now)
+        # DANGER is never suppressed by cooldown or rate limit
+        is_danger = top.threat_level == "DANGER"
 
-        return vehicle_decision, other_decision, tl_decision, sign_decision
+        if not is_danger:
+            # Cooldown check (adaptive by last alert level)
+            cooldown = self._get_cooldown(now)
+            if now - self._last_a_alert_time < cooldown:
+                return None
 
-    def _get_top_traffic_light(self, tracker: SimpleTracker) -> Optional[TrackedObject]:
-        """Get highest-priority traffic light with a classified state."""
+            # Rate limit check
+            if self._is_rate_limited(now):
+                return None
+
+            # Same object cooldown (don't nag about same object)
+            if self._last_a_id == top.id:
+                same_obj_cooldown = THREAT_COOLDOWNS.get(top.threat_level, 3.0) * 1.5
+                if now - self._last_a_alert_time < same_obj_cooldown:
+                    return None
+
+        # Gaze modulates urgency: gazed = beep only, not gazed = beep + TTS
+        # Exception: DANGER always gets full TTS
+        use_tts = is_danger or not top.is_gazed
+
+        # Record alert
+        self._last_a_alert_time = now
+        self._last_a_id = top.id
+        self._last_a_level = top.threat_level
+        self._alert_times.append(now)
+
+        return AlertDecision(
+            should_alert=True,
+            object=top,
+            reason=top.threat_level.lower(),
+            threat_level=top.threat_level,
+            use_tts=use_tts,
+        )
+
+    def _get_cooldown(self, now: float) -> float:
+        """Get current cooldown, doubled if in saturation."""
+        base = THREAT_COOLDOWNS.get(self._last_a_level, 3.0)
+
+        # Anti-saturation: if 4+ alerts in 20s, double cooldowns
+        recent = sum(1 for t in self._alert_times if now - t < SATURATION_WINDOW)
+        if recent >= SATURATION_THRESHOLD:
+            base *= 2.0
+
+        return base
+
+    def _is_rate_limited(self, now: float) -> bool:
+        """Check if global rate limit is exceeded (max 6/30s)."""
+        recent = sum(1 for t in self._alert_times if now - t < MAX_ALERTS_WINDOW)
+        return recent >= MAX_ALERTS_COUNT
+
+    # --- Channel B: Context ---
+
+    def _decide_channel_b(self, tracker: SimpleTracker, now: float) -> Optional[AlertDecision]:
+        """Handle traffic lights and signs — only when Channel A is silent."""
+        # Channel B only speaks when A has been silent for >3s
+        if now - self._last_a_alert_time < CHANNEL_B_SILENCE:
+            return None
+
+        # Try traffic light first (higher priority context)
+        tl = self._check_traffic_light(tracker, now)
+        if tl:
+            return tl
+
+        # Then signs
+        sign = self._check_sign(tracker, now)
+        if sign:
+            return sign
+
+        return None
+
+    def _check_traffic_light(self, tracker: SimpleTracker, now: float) -> Optional[AlertDecision]:
+        """Check for traffic light state to announce."""
         tl_tracks = [
             t for t in tracker.tracks.values()
-            if t.name == "traffic light" and t.traffic_light_state is not None
+            if t.name == "traffic light"
+            and t.traffic_light_state is not None
+            and t.distance in ("very_close", "close", "medium")
         ]
         if not tl_tracks:
             return None
-        return max(tl_tracks, key=lambda t: t.priority)
 
-    def _should_alert_traffic_light(self, obj: TrackedObject, now: float) -> bool:
-        """Alert on traffic light if state changed or cooldown expired."""
-        if now - self._last_traffic_light_alert < self.traffic_light_cooldown:
-            # Still alert if state changed (e.g. red → green)
-            if obj.traffic_light_state == self._last_tl_state:
-                return False
-        # Alert for any visible, classified traffic light within reasonable range
-        return obj.distance in ("very_close", "close", "medium")
+        top_tl = max(tl_tracks, key=lambda t: t.collision_risk)
 
-    def _get_top_sign(self, tracker: SimpleTracker) -> Optional[TrackedObject]:
-        """Get highest-priority sign (stop sign, etc)."""
+        # Cooldown: 5s, but state change bypasses
+        state_changed = top_tl.traffic_light_state != self._last_tl_state
+        if not state_changed and now - self._last_tl_alert_time < 5.0:
+            return None
+
+        self._last_tl_alert_time = now
+        self._last_tl_state = top_tl.traffic_light_state
+
+        return AlertDecision(
+            should_alert=True,
+            object=top_tl,
+            reason=f"traffic_light_{top_tl.traffic_light_state}",
+            threat_level="CONTEXT",
+            use_tts=True,
+        )
+
+    def _check_sign(self, tracker: SimpleTracker, now: float) -> Optional[AlertDecision]:
+        """Check for sign to announce."""
         sign_tracks = [
             t for t in tracker.tracks.values()
-            if t.name in self.SIGN_CLASSES
+            if t.name == "stop sign"
+            and t.distance in ("very_close", "close", "medium")
         ]
         if not sign_tracks:
             return None
-        return max(sign_tracks, key=lambda t: t.priority)
 
-    def _should_alert_sign(self, obj: TrackedObject, now: float) -> bool:
-        """Alert on sign if cooldown expired and not the same sign."""
-        if now - self._last_sign_alert < self.sign_cooldown:
-            # Still alert if it's a different sign instance
-            if self._last_sign_id == obj.id:
-                return False
-        return obj.distance in ("very_close", "close", "medium")
+        top_sign = max(sign_tracks, key=lambda t: t.collision_risk)
 
-    def _should_alert_vehicle(self, obj: TrackedObject, now: float) -> bool:
-        """Check if vehicle should trigger alert (v2).
+        # Cooldown: 8s, different sign bypasses
+        different_sign = self._last_sign_id != top_sign.id
+        if not different_sign and now - self._last_sign_alert_time < 8.0:
+            return None
 
-        v1: alert if close OR approaching+medium.
-        v2: also alert at far distance if approach speed is high (fast vehicle).
-        """
-        # Cooldown check
-        if now - self._last_vehicle_alert < self.vehicle_cooldown:
-            return False
+        self._last_sign_alert_time = now
+        self._last_sign_id = top_sign.id
 
-        # Same object cooldown
-        if self._is_same_object_too_recent(obj.id, now):
-            return False
+        return AlertDecision(
+            should_alert=True,
+            object=top_sign,
+            reason=f"sign_{top_sign.name}",
+            threat_level="CONTEXT",
+            use_tts=True,
+        )
 
-        # Always alert for close vehicles
-        if obj.distance in ("very_close", "close"):
-            return True
-
-        # Approaching at medium distance
-        if obj.is_approaching and obj.distance == "medium":
-            return True
-
-        # v2: fast approach at any distance (high approach_speed = urgent)
-        if obj.approach_speed > 0.03 and obj.distance == "far":
-            return True
-
-        return False
-
-    def _should_alert_other(self, obj: TrackedObject, now: float) -> bool:
-        """Check if non-vehicle should trigger alert (v2).
-
-        v1: alert if close + not gazed.
-        v2: also alert approaching objects at medium distance in center zone.
-        """
-        # Cooldown check
-        if now - self._last_other_alert < self.other_cooldown:
-            return False
-
-        # Same object cooldown
-        if self._is_same_object_too_recent(obj.id, now):
-            return False
-
-        # Close distance: alert if user not looking
-        if obj.distance in ("very_close", "close"):
-            return not obj.is_gazed
-
-        # v2: approaching in center zone at medium distance
-        if obj.is_approaching and obj.distance == "medium" and obj.zone == "center":
-            return not obj.is_gazed
-
-        return False
-
-    def _is_same_object_too_recent(self, obj_id: int, now: float) -> bool:
-        """Check if we recently alerted about this same object."""
-        if self._last_alerted_id == obj_id:
-            return now - self._last_alerted_time < self.same_object_cooldown
-        return False
-
-    def _record_alert(self, obj_id: int, now: float):
-        """Record that we alerted about this object."""
-        self._last_alerted_id = obj_id
-        self._last_alerted_time = now
-
-    def _get_alert_reason(self, obj: TrackedObject) -> str:
-        """Get human-readable reason for alert."""
-        if obj.distance == "very_close":
-            return "very_close"
-        elif obj.distance == "close":
-            return "close"
-        elif obj.approach_speed > 0.03:
-            return "approaching_fast"
-        elif obj.is_approaching:
-            return "approaching"
-        return "unknown"
-
-    def get_zone_word(self, zone: str) -> str:
+    @staticmethod
+    def get_zone_word(zone: str) -> str:
         """Convert zone to spoken word."""
         return {"left": "left", "right": "right", "center": "straight"}.get(zone, "")
