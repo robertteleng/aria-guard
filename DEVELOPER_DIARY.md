@@ -1613,67 +1613,79 @@ flowchart TD
 Copia esto para cada feature nueva:
 
 ```markdown
-## Feature: [nombre]
-**Fecha:** YYYY-MM-DD
-**Branch:** `feature/...`
-**Estado:** Completada / En progreso
+## Feature: Calibración con Benchmark Real — Tokyo_POV.mp4 (H22)
+**Fecha:** 2026-02-24
+**Branch:** `main`
+**Estado:** Completada
 
 ---
 
 ### P1: Historia del Usuario
-> "Yo [acción en primera persona]..."
+> "Yo corro el benchmark en un video real (7.7 min caminando por Tokio) y el sistema genera 153 alertas/min — imposible de usar. Necesito calibrar umbrales y cooldowns para que sea usable: <12 alertas/min, >80% silencio."
 
 ### P2: Estados y Transiciones
 
-¿Cuándo cambia algo? Dibuja cajas con flechas:
 ```
-[A] ──qué pasa──▶ [B] ──qué pasa──▶ [C]
+[Benchmark v1: 153/min FAIL] ──analizar datos──▶ [Diagnóstico: DANGER sin cooldown + personas = DANGER]
+  ──calibrar──▶ [v2: 14/min] ──subir cooldowns──▶ [v3: 11.8/min ALL PASS]
 ```
 
 **¿Por qué estos estados?**
-- ...
+- v1 reveló que DANGER bypassaba cooldowns → 1168/1170 alertas eran DANGER
+- v2 añadió cooldown mínimo a DANGER + bajó CLASS_RISK persona → 14/min (casi)
+- v3 subió cooldowns (2/4/6s) → 11.8/min ALL PASS
 
 **¿Qué descarté?**
-- ...
+- Bajar DANGER threshold más (0.8) — haría que coches reales tarden en ser DANGER
+- Filtrar personas completamente — en ciertas situaciones una persona sí puede ser peligrosa
 
 ### P3: Veo / Necesito
 
 | Estado | Lo que ve el usuario | Datos que necesito | De dónde vienen |
 |---|---|---|---|
-| ... | ... | ... | ... |
+| Acera Tokio | Personas very_close constantemente | depth_history, approach_speed | DetectorProcess |
+| Auto lejos | Coches aparecen y desaparecen | collision_risk por frame | tracker |
+| Benchmark | 4 métricas pass/fail | alert_timestamps | AlertArbiter mock-time |
 
 ### P4: Inventario
 
 | Necesito | ¿Existe? | Decisión | Por qué |
 |---|---|---|---|
-| ... | ... | Reusar / Extender / Crear | ... |
+| Video real 1080p 30fps | Sí (Tokyo_POV.mp4) | Reusar | 246MB, 7.7 min, escena urbana |
+| Detecciones offline | No | Crear (--save-json) | Permite re-run sin GPU |
+| Benchmark script | Sí (H21) | Reusar | --from-json funciona perfecto |
 
 ### P5: Diagrama de Pegamento
 
 ```
-[Servicio A] ──evento──▶ [pegamento] ──acción──▶ [Servicio B]
+[benchmark_offline.py] ──save-json──▶ [detections.json] ──from-json──▶ [benchmark CPU re-run]
 ```
 
 **¿Por qué esta conexión?**
-- ...
+- Separar detección (GPU, lenta) de evaluación (CPU, instantánea) permite iterar rápido en calibración
 
 ### Implementación
 
-**Archivos creados:**
-- ...
-
 **Archivos modificados:**
-- ...
+- `src/core/tracker.py` — DANGER threshold 0.6→0.7, person CLASS_RISK 0.3→0.15
+- `src/core/alert_engine.py` — DANGER cooldown now enforced (2.0s), WARNING 4.0s, ATTENTION 6.0s
+- `tests/test_alert_arbiter.py` — test_danger_bypasses_cooldown → test_danger_respects_min_cooldown + test_danger_bypasses_rate_limit
 
 **Decisiones clave:**
-- ...
+- DANGER respeta cooldown mínimo pero bypassa rate limit y same-object nag
+- Persona bajó CLASS_RISK porque en acera es lo normal — no debería disparar DANGER
+- Cooldowns subidos uniformemente (×1.33) para bajar tasa global
 
-**Diagrama de arquitectura final:**
-(cómo quedaron conectados los componentes)
+**Benchmark final:**
+| Métrica | v1 (antes) | v3 (calibrado) | Target |
+|---------|-----------|----------------|--------|
+| alerts/min | 153.0 | 11.8 | <12 |
+| silent ratio | 24.0% | 80.3% | >80% |
+| min gap | 0.10s | 4.00s | >1.0s |
+| max concurrent | 1 | 1 | ≤1 |
 
 ### Reflexión
-- **Lo que funcionó:** ...
-- **Lo que costó:** ...
-- **Lo que haría diferente:** ...
-- **Patrón reutilizable:** ...
-```
+- **Lo que funcionó:** Guardar detecciones a JSON fue clave — permitió iterar 3 calibraciones en minutos sin tocar GPU
+- **Lo que costó:** El diagnóstico inicial — entender que el caminante "se mueve hacia" las personas, no al revés
+- **Lo que haría diferente:** Incluir ego-motion compensation (IMU) para distinguir "yo me acerco" de "objeto se acerca"
+- **Patrón reutilizable:** Separar captura (GPU) de evaluación (CPU) para calibración iterativa offline
