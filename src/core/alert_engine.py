@@ -165,7 +165,11 @@ class AlertDecisionEngine:
         return obj.distance in ("very_close", "close", "medium")
 
     def _should_alert_vehicle(self, obj: TrackedObject, now: float) -> bool:
-        """Check if vehicle should trigger alert."""
+        """Check if vehicle should trigger alert (v2).
+
+        v1: alert if close OR approaching+medium.
+        v2: also alert at far distance if approach speed is high (fast vehicle).
+        """
         # Cooldown check
         if now - self._last_vehicle_alert < self.vehicle_cooldown:
             return False
@@ -174,19 +178,26 @@ class AlertDecisionEngine:
         if self._is_same_object_too_recent(obj.id, now):
             return False
 
-        # Alert conditions for vehicles:
-        # Vehicles are dangerous - alert if close OR approaching
-        # Gaze = direction user will walk, so looking at vehicle = collision risk
+        # Always alert for close vehicles
         if obj.distance in ("very_close", "close"):
-            return True  # Always alert for close vehicles
+            return True
 
+        # Approaching at medium distance
         if obj.is_approaching and obj.distance == "medium":
-            return True  # Alert for approaching vehicles
+            return True
+
+        # v2: fast approach at any distance (high approach_speed = urgent)
+        if obj.approach_speed > 0.03 and obj.distance == "far":
+            return True
 
         return False
 
     def _should_alert_other(self, obj: TrackedObject, now: float) -> bool:
-        """Check if non-vehicle should trigger alert."""
+        """Check if non-vehicle should trigger alert (v2).
+
+        v1: alert if close + not gazed.
+        v2: also alert approaching objects at medium distance in center zone.
+        """
         # Cooldown check
         if now - self._last_other_alert < self.other_cooldown:
             return False
@@ -195,9 +206,12 @@ class AlertDecisionEngine:
         if self._is_same_object_too_recent(obj.id, now):
             return False
 
-        # Alert conditions for non-vehicles:
-        # Only close distance (they're less dangerous)
+        # Close distance: alert if user not looking
         if obj.distance in ("very_close", "close"):
+            return not obj.is_gazed
+
+        # v2: approaching in center zone at medium distance
+        if obj.is_approaching and obj.distance == "medium" and obj.zone == "center":
             return not obj.is_gazed
 
         return False
@@ -219,6 +233,8 @@ class AlertDecisionEngine:
             return "very_close"
         elif obj.distance == "close":
             return "close"
+        elif obj.approach_speed > 0.03:
+            return "approaching_fast"
         elif obj.is_approaching:
             return "approaching"
         return "unknown"

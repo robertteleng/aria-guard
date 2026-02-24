@@ -825,7 +825,7 @@ pie title VRAM (~2.5GB total)
 | H13 | YOLO Fine-tune Navigation | ✅ Done | Clases custom: doors, stairs, curbs, traffic_light, signs |
 | H14 | Traffic Light Classification | ✅ Done | HSV sobre crop YOLO: red/yellow/green, canal alerta independiente |
 | H15 | Key Sign Detection | ✅ Done | Stop sign: alerta independiente con TTS. Yield/crosswalk requieren re-entrenamiento YOLO |
-| H16 | Risk Prioritization v2 | 🟡 Active | Riesgo refinado: tipo objeto + zona + distancia + velocidad approach |
+| H16 | Risk Prioritization v2 | ✅ Done | Approach continuo (1–3x), zone factor (center 1.5x), fast vehicle alert at far (speed>0.03) |
 | H17 | ~~Haptic Feedback Prototype~~ | ⚪ Nice to have | Vibración via BLE/serial — requiere hardware custom, bajo ROI vs audio |
 
 > **Nota:** Una vez completada Phase 2 en Python, todo se porta a aria-core (C++) como parte de H22 (Obstacle Avoidance).
@@ -854,7 +854,7 @@ gantt
     H13 YOLO Fine-tune Navigation     :done, h13, 2026-02-18, 21d
     H14 Traffic Light Classification  :done, h14, after h13, 14d
     H15 Key Sign Detection            :done, h15, after h14, 7d
-    H16 Risk Prioritization v2        :active, h16, after h15, 14d
+    H16 Risk Prioritization v2        :done, h16, after h15, 7d
     H17 Haptic Feedback (nice to have) :h17, after h16, 14d
 ```
 

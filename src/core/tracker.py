@@ -85,6 +85,13 @@ DISTANCE_PRIORITY = {
     "unknown": 1.0,
 }
 
+# Zone priority multiplier (center = user walks into it)
+ZONE_PRIORITY = {
+    "center": 1.5,
+    "left": 1.0,
+    "right": 1.0,
+}
+
 
 def _iou(box1: Tuple[int, int, int, int], box2: Tuple[int, int, int, int]) -> float:
     """Calculate Intersection over Union between two boxes (x, y, w, h)."""
@@ -290,15 +297,26 @@ class SimpleTracker:
         track.enters_path = moving_toward_center and close_enough
 
     def _update_priority(self, track: TrackedObject):
-        """Calculate priority score for the track."""
+        """Calculate priority score for the track (v2).
+
+        v1 used binary approach (2x on/off). v2 uses continuous approach speed
+        and adds zone factor so center objects rank higher.
+        """
         # Base priority from object type
         type_priority = OBJECT_PRIORITY.get(track.name, 1)
 
         # Distance multiplier
         dist_mult = DISTANCE_PRIORITY.get(track.distance, 1.0)
 
-        # Approach bonus (2x if approaching)
-        approach_mult = 2.0 if track.is_approaching else 1.0
+        # Approach speed: continuous 1.0–3.0 (v2: replaces binary 2x)
+        # approach_speed is depth slope/frame; 0.01 = barely moving, 0.05+ = fast
+        if track.approach_speed > 0.01:
+            approach_mult = min(3.0, 1.0 + track.approach_speed * 40.0)
+        else:
+            approach_mult = 1.0
+
+        # Zone: center = higher risk (user walks straight into it)
+        zone_mult = ZONE_PRIORITY.get(track.zone, 1.0)
 
         # Lateral intercept bonus (2.5x if entering user's path)
         path_mult = 2.5 if track.enters_path else 1.0
@@ -307,7 +325,7 @@ class SimpleTracker:
         gaze_mult = 1.5 if not track.is_gazed else 1.0
 
         # Combine
-        track.priority = type_priority * dist_mult * approach_mult * path_mult * gaze_mult
+        track.priority = type_priority * dist_mult * approach_mult * zone_mult * path_mult * gaze_mult
 
     def _cleanup(self):
         """Remove tracks that have been missing too long."""

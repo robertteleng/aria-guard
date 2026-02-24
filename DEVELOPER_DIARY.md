@@ -1131,6 +1131,161 @@ Sync: [frame_ready_event] ←→ [result_ready_event] (mp.Event)
 
 ---
 
+## Feature: Risk Prioritization v2 — Approach Continuo + Zone + Fast Vehicle Alert
+**Fecha:** 2026-02-24
+**Branch:** `main`
+**Estado:** Completada
+
+---
+
+### P1: Historia del Usuario
+> "Yo camino por la calle y hay un coche acercándose rápido desde lejos. El sistema v1 solo alerta si está 'close' o 'approaching+medium'. Pero un coche a 60km/h desde 'far' puede ser más peligroso que una persona estática a 'close'. Necesito que el sistema considere la velocidad de acercamiento como factor continuo, no como on/off."
+
+### P2: Estados y Transiciones
+
+```
+v1: priority = type × distance × approach(2x on/off) × path(2.5x) × gaze(1.5x)
+v2: priority = type × distance × approach(1.0–3.0 continuo) × zone(1.5x center) × path(2.5x) × gaze(1.5x)
+```
+
+**Cambios en decisión de alerta:**
+```
+v1 vehicle: close/very_close → alert
+             approaching + medium → alert
+             far → NUNCA
+
+v2 vehicle: close/very_close → alert
+             approaching + medium → alert
+             approach_speed > 0.03 + far → alert (NUEVO)
+
+v1 other: close/very_close + not gazed → alert
+
+v2 other: close/very_close + not gazed → alert
+           approaching + medium + center + not gazed → alert (NUEVO)
+```
+
+### Algoritmo de Priorización v2 — Diagrama Detallado
+
+```mermaid
+flowchart TD
+    subgraph TRACKER["SimpleTracker._update_priority()"]
+        A[TrackedObject] --> B{Obtener factores}
+
+        B --> T["type_priority<br/>OBJECT_PRIORITY[name]<br/>car=10, person=6, chair=3..."]
+        B --> D["dist_mult<br/>DISTANCE_PRIORITY[distance]<br/>very_close=4x, close=2x,<br/>medium=1x, far=0.5x"]
+        B --> AP{approach_speed > 0.01?}
+        AP -->|Sí| AP_Y["approach_mult =<br/>min(3.0, 1.0 + speed × 40)<br/><i>Ejemplo: speed=0.02 → 1.8x</i><br/><i>speed=0.05 → 3.0x (cap)</i>"]
+        AP -->|No| AP_N["approach_mult = 1.0"]
+        B --> Z["zone_mult<br/>ZONE_PRIORITY[zone]<br/>center=1.5x, left/right=1.0x"]
+        B --> P{enters_path?}
+        P -->|Sí| P_Y["path_mult = 2.5x"]
+        P -->|No| P_N["path_mult = 1.0x"]
+        B --> G{is_gazed?}
+        G -->|Sí| G_Y["gaze_mult = 1.0x"]
+        G -->|No| G_N["gaze_mult = 1.5x"]
+
+        T & D & AP_Y & AP_N & Z & P_Y & P_N & G_Y & G_N --> CALC["priority = type × dist × approach<br/>× zone × path × gaze"]
+    end
+
+    subgraph ENGINE["AlertDecisionEngine.decide()"]
+        direction TB
+        TOP["tracker.get_top_vehicle()<br/>tracker.get_top_non_vehicle()<br/>tracker.get_top_traffic_light()<br/>tracker.get_top_sign()"]
+
+        TOP --> VEH_CHECK{Vehicle alert?}
+        VEH_CHECK --> V_CD{cooldown 1.5s?}
+        V_CD -->|En cooldown| V_NO[No alert]
+        V_CD -->|Expirado| V_DIST{distance?}
+        V_DIST -->|very_close/close| V_YES["✅ Alert vehicle"]
+        V_DIST -->|medium| V_APP{is_approaching?}
+        V_APP -->|Sí| V_YES
+        V_APP -->|No| V_NO
+        V_DIST -->|far| V_FAST{approach_speed > 0.03?}
+        V_FAST -->|Sí| V_YES
+        V_FAST -->|No| V_NO
+
+        TOP --> OTH_CHECK{Other alert?}
+        OTH_CHECK --> O_VEH{vehicle_alert exists?}
+        O_VEH -->|Sí| O_SKIP["Skip (vehicle has priority)"]
+        O_VEH -->|No| O_CD{cooldown 2.0s?}
+        O_CD -->|En cooldown| O_NO[No alert]
+        O_CD -->|Expirado| O_DIST{distance?}
+        O_DIST -->|very_close/close| O_GAZE1{is_gazed?}
+        O_GAZE1 -->|No| O_YES["✅ Alert other"]
+        O_GAZE1 -->|Sí| O_NO
+        O_DIST -->|medium| O_CTR{approaching + center?}
+        O_CTR -->|Sí| O_GAZE2{is_gazed?}
+        O_GAZE2 -->|No| O_YES
+        O_GAZE2 -->|Sí| O_NO
+        O_CTR -->|No| O_NO
+        O_DIST -->|far| O_NO
+
+        TOP --> TL_CHECK["Traffic light alert<br/>(independent channel, 4s cooldown)<br/>state change → bypass cooldown"]
+        TOP --> SIGN_CHECK["Sign alert<br/>(independent channel, 5s cooldown)<br/>new instance → bypass cooldown"]
+    end
+
+    subgraph EXAMPLES["Ejemplos de Prioridad v2"]
+        EX1["🚗 Car, center, close, approaching(0.03), not gazed<br/>= 10 × 2.0 × 2.2 × 1.5 × 1.0 × 1.5 = <b>99.0</b>"]
+        EX2["🚗 Car, left, far, approaching(0.05), not gazed<br/>= 10 × 0.5 × 3.0 × 1.0 × 1.0 × 1.5 = <b>22.5</b>"]
+        EX3["🧑 Person, center, close, static, not gazed<br/>= 6 × 2.0 × 1.0 × 1.5 × 1.0 × 1.5 = <b>27.0</b>"]
+        EX4["🧑 Person, left, medium, static, gazed<br/>= 6 × 1.0 × 1.0 × 1.0 × 1.0 × 1.0 = <b>6.0</b>"]
+        EX5["🚗 Car, center, medium, enters_path, not gazed<br/>= 10 × 1.0 × 2.0 × 1.5 × 2.5 × 1.5 = <b>112.5</b>"]
+    end
+```
+
+### P3: Veo / Necesito
+
+| Estado | Lo que ve el usuario | Datos que necesito | De dónde vienen |
+|---|---|---|---|
+| Coche rápido lejos | Alerta temprana "car left" | approach_speed > 0.03 + far | tracker depth_history slope |
+| Persona centro medium | Alerta si approaching + not gazed | zone + approach + gaze | tracker._update_lateral/approach |
+| Prioridad más precisa | El objeto correcto se alerta | Factores continuos | _update_priority() v2 |
+
+### P4: Inventario
+
+| Necesito | ¿Existe? | Decisión | Por qué |
+|---|---|---|---|
+| approach_speed continuo | Sí (calculado en _update_approach) | Usar en priority como 1.0–3.0 | v1 lo desperdiciaba: solo usaba is_approaching bool |
+| Zone factor | No | Añadir ZONE_PRIORITY dict | Centro = dirección de marcha, más peligroso |
+| Fast vehicle alert at far | No | Añadir threshold 0.03 en _should_alert_vehicle | TTC bajo aunque distancia alta |
+| Approaching other at medium center | No | Añadir condición en _should_alert_other | Persona caminando hacia ti por el centro es peligro |
+
+### P5: Diagrama de Pegamento
+
+```
+[TrackedObject.depth_history]
+    └──polyfit slope──▶ [approach_speed] ──continuo──▶ [_update_priority()]
+                                                            │
+                                                    min(3.0, 1.0 + speed×40)
+                                                            │
+                        ┌───────────────────────────────────┤
+                        ▼                                   ▼
+              [priority score]                    [AlertDecisionEngine]
+              (type × dist × approach             _should_alert_vehicle:
+               × zone × path × gaze)               far + speed>0.03 → alert
+                                                  _should_alert_other:
+                                                    medium + center + approaching → alert
+```
+
+### Implementación
+
+**Archivos modificados:**
+- `src/core/tracker.py` — ZONE_PRIORITY dict, `_update_priority()` v2 con approach continuo + zone
+- `src/core/alert_engine.py` — `_should_alert_vehicle()` v2 (fast at far), `_should_alert_other()` v2 (approaching center medium), `_get_alert_reason()` con "approaching_fast"
+
+**Decisiones clave:**
+- approach_mult = min(3.0, 1.0 + speed × 40) — linear scaling con cap. Speed 0.01=1.4x, 0.025=2.0x, 0.05=3.0x
+- ZONE_PRIORITY center=1.5x — no demasiado agresivo, un coche lateral acercándose rápido sigue siendo peligroso
+- Threshold 0.03 para "fast at far" — empíricamente un coche acelerando genera ~0.03+/frame de depth slope
+- Other alert at medium+center+approaching — personas/obstáculos que se mueven hacia ti son peligro si no los miras
+
+### Reflexión
+- **Lo que funcionó:** Reusar approach_speed que ya se calculaba pero se usaba binario
+- **Lo que costó:** Calibrar los multiplicadores sin datos reales — los thresholds (0.03, 40x scaling) son estimaciones
+- **Lo que haría diferente:** Grabar sesiones reales y calibrar thresholds con datos de campo
+- **Patrón reutilizable:** Factor continuo en priority scoring — aplicable a cualquier señal temporal (lateral_speed, etc.)
+
+---
+
 ## Plantilla por Feature
 
 Copia esto para cada feature nueva:
