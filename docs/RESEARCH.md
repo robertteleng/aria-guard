@@ -514,16 +514,28 @@ Ejemplo: ATTENTION, right, medium
   Duración total: 100ms
 ```
 
-#### Bone conduction (nota para hardware)
+#### Bone conduction — hardware de referencia
 
 ```
-Los papers recomiendan bone conduction headphones porque:
-- No tapan los oídos → el usuario sigue oyendo tráfico
-- Localización del sonido igual de buena que auriculares normales
-- Shokz OpenRun (~$130) o AfterShokz son los más usados en estudios
+Hardware de referencia: Shokz OpenRun (Bluetooth, bone conduction, IP67)
 
-Nuestro audio funciona con cualquier salida — bone conduction es una
-recomendación de hardware, no requiere cambio de código.
+Por qué bone conduction:
+- No tapa oídos → usuario sigue oyendo tráfico, semáforos acústicos, gente
+- Localización L/R tan buena como auriculares normales (MDPI 2021)
+- Frecuencias 400–1100Hz se transmiten bien (pierde resolución <200Hz y >4kHz)
+- Es el tipo más usado en estudios con personas ciegas
+
+HRTF descartada:
+- Bone conduction transmite por hueso temporal, no canal auditivo
+- Las diferencias de pabellón auricular que HRTF modela son irrelevantes
+- Pan L/R simple funciona igual de bien para 3 zonas (izq/centro/der)
+- Complejidad y latencia extra sin beneficio real
+
+Implicación para código:
+- Pan L/R se mantiene (ya funciona con bone conduction)
+- BRR ráfagas: OK (vibraciones óseas discretas se perciben bien)
+- Pitch 400–1100Hz: OK (zona óptima de bone conduction)
+- No necesitamos librerías HRTF (pyopenal, pysofaconventions, etc.)
 ```
 
 ### Escenarios de validación con Tokyo_POV.mp4
