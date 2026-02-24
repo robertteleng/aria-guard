@@ -28,6 +28,9 @@ data/*.mov
 data/*.mkv
 data/*.webm
 data/aria_sample/
+data/benchmark_detections.json
+data/benchmark_metrics.json
+data/benchmark_metrics_v2.json
 
 # IDE
 .vscode/
