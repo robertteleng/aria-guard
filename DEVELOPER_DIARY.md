@@ -1372,6 +1372,99 @@ flowchart TD
 
 ---
 
+## Feature: Alert Arbiter — 2 Canales con Rate Limiting (H19)
+**Fecha:** 2026-02-24
+**Branch:** `main`
+**Estado:** Completada
+
+---
+
+### P1: Historia del Usuario
+> "El motor de alertas actual decide por tipo de objeto (coche vs persona) con 4 canales independientes. Necesito un arbiter de 2 canales basado en collision_risk: Canal A para la amenaza top-1, Canal B para contexto (semáforo/señal). Con rate limiting global, cooldowns adaptativos por nivel, y anti-saturación automática."
+
+### P2: Estados y Transiciones
+
+```
+[TrackedObjects con collision_risk y threat_level]
+    ──Canal A──▶ top-1 por collision_risk (excluye context classes)
+        │ DANGER: cooldown 1.5s, nunca suprimido, siempre TTS
+        │ WARNING: cooldown 3.0s, rate limit 6/30s
+        │ ATTENTION: cooldown 5.0s, rate limit 6/30s
+        │ Gaze: modula TTS (gazed=beep only), NO el risk
+        │ Anti-sat: 4+ alertas en 20s → cooldowns ×2
+        ▼
+    ──Canal B──▶ traffic light / stop sign
+        │ Solo si Canal A en silencio >3s
+        │ Cooldown: 5s (TL), 8s (sign)
+        │ State change bypasses cooldown
+        ▼
+    ──Audio──▶ beep + TTS condicionado
+```
+
+### P3: Qué Veo / Qué Necesito
+
+| Veo | Necesito |
+|---|---|
+| AlertDecisionEngine con 4 canales por tipo | AlertArbiter con 2 canales por riesgo |
+| Lógica vehicle vs other vs TL vs sign | Top-1 por collision_risk vs context classes |
+| Cooldowns fijos por tipo | Cooldowns adaptativos por threat level |
+| Sin rate limiting global | Max 6/30s con anti-saturación |
+| Sin modulación por gaze | Gaze modula urgencia (TTS vs beep-only) |
+
+### P4: Inventario
+
+| Necesito | ¿Existe? | Decisión | Por qué |
+|---|---|---|---|
+| Selector top-1 por risk | get_top_vehicle/non_vehicle existía | Crear: filtrar por threat_level + max collision_risk | Ya no importa si es coche o persona — importa el risk |
+| Rate limiting | No | Crear: deque de timestamps + conteo en ventana | Papers dicen 3-4/min normal, 12/min pico |
+| Anti-saturación | No | Crear: si 4+ en 20s, doblar cooldowns | Previene cascada de alertas en escenas densas |
+| Gaze→urgency | is_gazed existía pero modulaba priority | Cambiar: gaze modula use_tts, no risk | Research: "el objeto sigue siendo peligroso si lo miras" |
+| Channel B silence check | No | Crear: B solo habla si A lleva >3s en silencio | Evita que semáforo pise alerta de coche |
+
+### P5: Diagrama de Pegamento
+
+```
+[SimpleTracker.tracks] ──collision_risk──▶ [AlertArbiter.decide()]
+                                                │
+                                    ┌───────────┴───────────┐
+                                    ▼                       ▼
+                              [Channel A]             [Channel B]
+                              threat top-1            context
+                                    │                       │
+                                    ▼                       ▼
+                           [audio.alert_danger()]   [audio.alert_traffic_light()]
+                                                    [audio.alert_sign()]
+```
+
+**¿Por qué esta conexión?**
+- AlertArbiter consume collision_risk de H18 directamente — es el único input para decidir
+- main.py pasa de desempaquetar 4-tuple a 2-tuple — más limpio
+- AlertDecisionEngine eliminado completamente — no hay backwards compat
+
+### Implementación
+
+**Archivos creados:**
+- `tests/test_alert_arbiter.py` — 10 tests: ambos canales, cooldowns, rate limiting, gaze
+
+**Archivos modificados:**
+- `src/core/alert_engine.py` — Reescrito: AlertDecisionEngine → AlertArbiter. 2 canales, rate limiting, anti-saturación
+- `src/web/main.py` — Import AlertArbiter, 2-tuple unpacking, dispatch por channel
+
+**Decisiones clave:**
+- DANGER nunca suprimido — la seguridad real no se negocia por comodidad
+- Gaze NO reduce risk, solo modula urgencia — un coche es peligroso lo mires o no
+- Canal B solo cuando A está callado >3s — el semáforo no pisa la alerta del coche
+- Anti-saturación dobla cooldowns de WARNING/ATTENTION si 4+ alertas en 20s
+- AlertDecisionEngine eliminada sin mantener backwards compat — corte limpio
+
+### Reflexión
+- **Lo que funcionó:** collision_risk de H18 hizo trivial el selector de top-1 — solo `max(candidates, key=collision_risk)`
+- **Lo que costó:** Decidir si Canal B necesita su propio rate limit o basta con el silence check de Canal A
+- **Lo que haría diferente:** Nada — el diseño en RESEARCH.md se tradujo 1:1
+- **Patrón reutilizable:** 2-channel arbiter con priority preemption — aplicable a cualquier sistema multi-modal (haptic + audio, etc.)
+
+---
+
 ## Plantilla por Feature
 
 Copia esto para cada feature nueva:

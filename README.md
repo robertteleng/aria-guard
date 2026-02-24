@@ -836,8 +836,8 @@ Rediseño del sistema de alertas basado en evidencia académica (ver [docs/RESEA
 
 | # | Milestone | Prioridad | Descripción |
 |---|-----------|-----------|-------------|
-| H18 | Collision Risk Score | 🔴 Alta | `collision_risk()` 0.0–1.0: TTC (50%) + CBDR bearing (25%) + zone (15%) + class (10%). Reemplaza priority multiplicativo |
-| H19 | Alert Arbiter (2 canales) | 🔴 Alta | Canal A: 1 amenaza a la vez (DANGER/WARNING/ATTENTION). Canal B: contexto (semáforo/señal) solo si A en silencio. Rate limit 6/30s |
+| H18 | Collision Risk Score | ✅ | `collision_risk()` 0.0–1.0: TTC (50%) + CBDR bearing (25%) + zone (15%) + class (10%). 4 factores ADAS |
+| H19 | Alert Arbiter (2 canales) | ✅ | Canal A: top-1 por risk (DANGER/WARNING/ATTENTION). Canal B: contexto. Rate limit 6/30s, anti-saturación |
 | H20 | Audio BRR + Pitch | 🟡 Media | Beeps por ráfaga (3=danger, 2=warning, 1=attention). Pitch 400–1100Hz por distancia. TTS "danger left" en vez de "car left" |
 | H21 | Benchmark Offline | 🔴 Alta | Script que procesa Tokyo_POV.mp4 sin audio: mide alerts/min, silent ratio, false alerts. Target: >80% silencio, 0 alertas simultáneas |
 
@@ -871,8 +871,8 @@ gantt
     H17 Haptic Feedback (nice to have) :h17, after h16, 14d
 
     section Phase 3 — Threat Model & Audio ⏳
-    H18 Collision Risk Score          :active, h18, 2026-02-25, 7d
-    H19 Alert Arbiter (2 canales)     :h19, after h18, 7d
+    H18 Collision Risk Score          :done, h18, 2026-02-25, 7d
+    H19 Alert Arbiter (2 canales)     :done, h19, after h18, 7d
     H20 Audio BRR + Pitch             :h20, after h19, 7d
     H21 Benchmark Offline             :h21, after h18, 14d
 ```
