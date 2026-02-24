@@ -830,6 +830,19 @@ pie title VRAM (~2.5GB total)
 
 > **Nota:** Una vez completada Phase 2 en Python, todo se porta a aria-core (C++) como parte de H22 (Obstacle Avoidance).
 
+### Phase 3 — Threat Model & Audio (basado en papers) ⏳
+
+Rediseño del sistema de alertas basado en evidencia académica (ver [docs/RESEARCH.md](docs/RESEARCH.md)).
+
+| # | Milestone | Prioridad | Descripción |
+|---|-----------|-----------|-------------|
+| H18 | Collision Risk Score | 🔴 Alta | `collision_risk()` 0.0–1.0: TTC (50%) + CBDR bearing (25%) + zone (15%) + class (10%). Reemplaza priority multiplicativo |
+| H19 | Alert Arbiter (2 canales) | 🔴 Alta | Canal A: 1 amenaza a la vez (DANGER/WARNING/ATTENTION). Canal B: contexto (semáforo/señal) solo si A en silencio. Rate limit 6/30s |
+| H20 | Audio BRR + Pitch | 🟡 Media | Beeps por ráfaga (3=danger, 2=warning, 1=attention). Pitch 400–1100Hz por distancia. TTS "danger left" en vez de "car left" |
+| H21 | Benchmark Offline | 🔴 Alta | Script que procesa Tokyo_POV.mp4 sin audio: mide alerts/min, silent ratio, false alerts. Target: >80% silencio, 0 alertas simultáneas |
+
+> **Principio (Gao 2025, Nature):** Al usuario no le importa si es coche o bus. Le importa cuánto peligro hay y de dónde viene.
+
 ```mermaid
 gantt
     title aria-guard Milestones
@@ -850,12 +863,18 @@ gantt
     H11 NVDEC Video Decode            :done, h11, after h10, 7d
     H12 Benchmarks Paper              :done, h12, after h11, 7d
 
-    section Phase 2 — Advanced Detection ⏳
+    section Phase 2 — Advanced Detection ✅
     H13 YOLO Fine-tune Navigation     :done, h13, 2026-02-18, 21d
     H14 Traffic Light Classification  :done, h14, after h13, 14d
     H15 Key Sign Detection            :done, h15, after h14, 7d
     H16 Risk Prioritization v2        :done, h16, after h15, 7d
     H17 Haptic Feedback (nice to have) :h17, after h16, 14d
+
+    section Phase 3 — Threat Model & Audio ⏳
+    H18 Collision Risk Score          :active, h18, 2026-02-25, 7d
+    H19 Alert Arbiter (2 canales)     :h19, after h18, 7d
+    H20 Audio BRR + Pitch             :h20, after h19, 7d
+    H21 Benchmark Offline             :h21, after h18, 14d
 ```
 
 ## Créditos
