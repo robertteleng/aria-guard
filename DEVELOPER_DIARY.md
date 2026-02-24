@@ -1286,6 +1286,92 @@ flowchart TD
 
 ---
 
+## Feature: Collision Risk Score — Modelo de 4 Factores (H18)
+**Fecha:** 2026-02-24
+**Branch:** `main`
+**Estado:** Completada
+
+---
+
+### P1: Historia del Usuario
+> "Necesito un score de riesgo 0.0–1.0 por objeto, basado en evidencia ADAS (TTC, CBDR, zona, clase), para decidir nivel de amenaza: DANGER/WARNING/ATTENTION/NONE. El priority multiplicativo de v2 no escala bien — necesito un modelo ponderado con pesos claros y umbrales calibrados de la literatura."
+
+### P2: Estados y Transiciones
+
+```
+[TrackedObject con approach_speed, lateral_speed, zone, distance]
+    ──TTC proxy (50%)──▶ ttc_factor (0–1)
+    ──CBDR (25%)──▶ cbdr_factor (0–1) — bearing estable + acercamiento
+    ──Zone (15%)──▶ zone_risk (center=1.0, sides=0.4)
+    ──Class (10%)──▶ class_risk (car=1.0, person=0.3, backpack=0.05)
+    ──weighted sum──▶ collision_risk (0.0–1.0)
+    ──thresholds──▶ threat_level (DANGER≥0.6, WARNING≥0.35, ATTENTION≥0.15)
+```
+
+**¿Por qué estos estados?**
+- TTC domina (50%) porque es el predictor #1 de colisión en ADAS comercial (Euro NCAP, Mobileye)
+- CBDR captura objetos laterales con rumbo de colisión (bici/moto que mantiene bearing constante)
+- Zone y class son factores secundarios que desempatan objetos con TTC similar
+
+### P3: Qué Veo / Qué Necesito
+
+| Veo | Necesito |
+|---|---|
+| approach_speed (depth slope/frame) | TTC proxy = depth / approach_speed |
+| lateral_speed (bearing slope/frame) | CBDR = bearing estable + approaching |
+| zone (left/center/right) | Zone risk weight |
+| name (car, person, etc.) | Class risk weight |
+| distance (very_close..far) | Static proximity proxy para TTC de estáticos |
+
+### P4: Inventario
+
+| Necesito | ¿Existe? | Decisión | Por qué |
+|---|---|---|---|
+| TTC en frames | No (era binario) | Crear `ttc_frames = depth / approach_speed` | Fórmula estándar ADAS, normalizo a 150 frames (~5s@30fps) |
+| CBDR factor | No | Crear `bearing_stability × approach_intensity` | Principio de navegación marítima: bearing constante + range decreasing = colisión |
+| Pesos por clase | OBJECT_PRIORITY existía | Crear CLASS_RISK (0–1) separado | OBJECT_PRIORITY es para ranking general, CLASS_RISK es para riesgo de colisión específicamente |
+| Umbrales threat | No | Crear THREAT_THRESHOLDS | Calibrados de Euro NCAP AEB (1.5s), Mobileye FCW (3.0s), literatura TTC (5.0s) |
+| Static proximity | DISTANCE_PRIORITY existía | Crear STATIC_PROXIMITY (0–1) | Objetos estáticos no tienen TTC; uso proximidad como proxy |
+
+### P5: Diagrama de Pegamento
+
+```
+[_update_approach()] ──approach_speed──▶ [_update_collision_risk()] ──risk, level──▶ [TrackedObject]
+[_update_lateral()]  ──lateral_speed──▶          │
+                                                  ▼
+                              [Dashboard] ──muestra──▶ "car [DANGER 97%]"
+                              [/status API] ──JSON──▶ {threat_level, collision_risk}
+```
+
+**¿Por qué esta conexión?**
+- collision_risk se calcula DESPUÉS de approach+lateral (depende de sus outputs)
+- Es aditivo: priority (v2) sigue existiendo para backwards compat, collision_risk es nuevo campo
+- Dashboard y API consumen el nuevo campo sin romper nada
+
+### Implementación
+
+**Archivos creados:**
+- `tests/test_collision_risk.py` — 9 tests unitarios para escenarios canónicos
+
+**Archivos modificados:**
+- `src/core/tracker.py` — TrackedObject: campos collision_risk + threat_level. SimpleTracker: _update_collision_risk() con 4 factores. Constantes: CLASS_RISK, ZONE_RISK, STATIC_PROXIMITY, THREAT_THRESHOLDS
+- `src/core/dashboard.py` — _THREAT_COLORS, bbox color por threat level, label "car [DANGER 97%]"
+- `src/web/main.py` — Enrich detections con tracker info post-update, /status incluye threat_level + collision_risk
+
+**Decisiones clave:**
+- Pesos 50/25/15/10 basados en literatura ADAS — TTC es rey, CBDR captura laterales
+- Umbrales 0.6/0.35/0.15 calibrados de Euro NCAP (AEB 1.5s), Mobileye (FCW 3.0s)
+- Static objects usan proximity como proxy de TTC — un poste a 30cm es peligro aunque no se mueva
+- collision_risk es aditivo, no reemplaza priority todavía — migración gradual
+
+### Reflexión
+- **Lo que funcionó:** Diseñar en RESEARCH.md primero y luego implementar — el pseudocódigo se tradujo casi 1:1
+- **Lo que costó:** Decidir si CBDR merece 25% — en escenas urbanas los objetos laterales rara vez mantienen bearing, pero cuando lo hacen es letal
+- **Lo que haría diferente:** Calibrar con datos reales del Tokyo POV antes de fijar umbrales
+- **Patrón reutilizable:** Modelo de riesgo ponderado con factores normalizados 0–1 y pesos que suman 1.0 — extensible a nuevos factores
+
+---
+
 ## Plantilla por Feature
 
 Copia esto para cada feature nueva:
