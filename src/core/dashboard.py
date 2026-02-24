@@ -96,9 +96,11 @@ class Dashboard:
             x, y, w, h = det.bbox
             tl_state = getattr(det, 'traffic_light_state', None)
 
-            # Traffic lights use their state color; others use distance color
+            # Traffic lights use their state color; stop signs always red; others use distance color
             if det.name == "traffic light" and tl_state:
                 color = self._TL_COLORS.get(tl_state, self._colors.get(det.distance, (128, 128, 128)))
+            elif det.name == "stop sign":
+                color = (0, 0, 255)  # Red (BGR)
             else:
                 color = self._colors.get(det.distance, (128, 128, 128))
 
@@ -116,6 +118,8 @@ class Dashboard:
             # Label con fondo
             if det.name == "traffic light" and tl_state:
                 label = f"{tl_state.upper()} light ({det.distance})"
+            elif det.name == "stop sign":
+                label = f"STOP ({det.distance})"
             else:
                 label = f"{det.name} ({det.distance})"
             if getattr(det, 'is_gazed', False):

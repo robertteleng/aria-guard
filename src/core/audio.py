@@ -230,6 +230,16 @@ class AudioFeedback:
         # TTS: "red light", "green light", "yellow light"
         self.speak(f"{state} light", force=True)
 
+    def alert_sign(self, sign_name: str, zone: str, distance: str) -> None:
+        """Alert user about a road sign (stop sign, etc)."""
+        is_close = distance in ("very_close", "close")
+        self.play_spatial_beep(
+            zone=zone,
+            distance=distance,
+            is_critical=is_close,
+        )
+        self.speak(f"{sign_name} ahead", force=True)
+
     def shutdown(self):
         """Clean shutdown of TTS process."""
         if self._tts_process:

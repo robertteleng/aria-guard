@@ -31,12 +31,16 @@ class AlertDecisionEngine:
     # Vehicles always get priority - they're more dangerous
     VEHICLES = {"car", "truck", "bus", "motorcycle", "bicycle"}
 
+    # Signs that get their own independent alert channel
+    SIGN_CLASSES = {"stop sign"}
+
     def __init__(
         self,
         vehicle_cooldown: float = 1.5,
         other_cooldown: float = 2.0,
         same_object_cooldown: float = 3.0,
-        traffic_light_cooldown: float = 4.0
+        traffic_light_cooldown: float = 4.0,
+        sign_cooldown: float = 5.0
     ):
         """
         Args:
@@ -44,36 +48,42 @@ class AlertDecisionEngine:
             other_cooldown: Min seconds between non-vehicle alerts
             same_object_cooldown: Min seconds before re-alerting same object
             traffic_light_cooldown: Min seconds between traffic light state alerts
+            sign_cooldown: Min seconds between sign alerts
         """
         self.vehicle_cooldown = vehicle_cooldown
         self.other_cooldown = other_cooldown
         self.same_object_cooldown = same_object_cooldown
         self.traffic_light_cooldown = traffic_light_cooldown
+        self.sign_cooldown = sign_cooldown
 
         self._last_vehicle_alert = 0.0
         self._last_other_alert = 0.0
         self._last_traffic_light_alert = 0.0
         self._last_tl_state: Optional[str] = None  # last announced state
+        self._last_sign_alert = 0.0
+        self._last_sign_id: Optional[int] = None
         self._last_alerted_id: Optional[int] = None
         self._last_alerted_time = 0.0
 
-    def decide(self, tracker: SimpleTracker) -> Tuple[Optional[AlertDecision], Optional[AlertDecision], Optional[AlertDecision]]:
+    def decide(self, tracker: SimpleTracker) -> Tuple[Optional[AlertDecision], Optional[AlertDecision], Optional[AlertDecision], Optional[AlertDecision]]:
         """
         Decide what to alert based on current tracked objects.
 
         Returns:
-            (vehicle_alert, other_alert, traffic_light_alert) - any can be None
+            (vehicle_alert, other_alert, traffic_light_alert, sign_alert) - any can be None
         """
         now = time.time()
 
         vehicle_decision = None
         other_decision = None
         tl_decision = None
+        sign_decision = None
 
         # Get top candidates
         top_vehicle = tracker.get_top_vehicle()
         top_other = tracker.get_top_non_vehicle()
         top_tl = self._get_top_traffic_light(tracker)
+        top_sign = self._get_top_sign(tracker)
 
         # Traffic light alert (independent channel — crossing info is always useful)
         if top_tl and self._should_alert_traffic_light(top_tl, now):
@@ -84,6 +94,16 @@ class AlertDecisionEngine:
             )
             self._last_traffic_light_alert = now
             self._last_tl_state = top_tl.traffic_light_state
+
+        # Sign alert (independent channel — crossing context)
+        if top_sign and self._should_alert_sign(top_sign, now):
+            sign_decision = AlertDecision(
+                should_alert=True,
+                object=top_sign,
+                reason=f"sign_{top_sign.name}"
+            )
+            self._last_sign_alert = now
+            self._last_sign_id = top_sign.id
 
         # Vehicle alert check
         if top_vehicle and self._should_alert_vehicle(top_vehicle, now):
@@ -105,7 +125,7 @@ class AlertDecisionEngine:
             self._last_other_alert = now
             self._record_alert(top_other.id, now)
 
-        return vehicle_decision, other_decision, tl_decision
+        return vehicle_decision, other_decision, tl_decision, sign_decision
 
     def _get_top_traffic_light(self, tracker: SimpleTracker) -> Optional[TrackedObject]:
         """Get highest-priority traffic light with a classified state."""
@@ -124,6 +144,24 @@ class AlertDecisionEngine:
             if obj.traffic_light_state == self._last_tl_state:
                 return False
         # Alert for any visible, classified traffic light within reasonable range
+        return obj.distance in ("very_close", "close", "medium")
+
+    def _get_top_sign(self, tracker: SimpleTracker) -> Optional[TrackedObject]:
+        """Get highest-priority sign (stop sign, etc)."""
+        sign_tracks = [
+            t for t in tracker.tracks.values()
+            if t.name in self.SIGN_CLASSES
+        ]
+        if not sign_tracks:
+            return None
+        return max(sign_tracks, key=lambda t: t.priority)
+
+    def _should_alert_sign(self, obj: TrackedObject, now: float) -> bool:
+        """Alert on sign if cooldown expired and not the same sign."""
+        if now - self._last_sign_alert < self.sign_cooldown:
+            # Still alert if it's a different sign instance
+            if self._last_sign_id == obj.id:
+                return False
         return obj.distance in ("very_close", "close", "medium")
 
     def _should_alert_vehicle(self, obj: TrackedObject, now: float) -> bool:

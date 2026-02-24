@@ -1034,6 +1034,103 @@ Sync: [frame_ready_event] ←→ [result_ready_event] (mp.Event)
 
 ---
 
+## Feature: Key Sign Detection — Stop Sign con Alerta Independiente
+**Fecha:** 2026-02-24
+**Branch:** `main`
+**Estado:** Completada (parcial: stop sign integrado, yield/crosswalk requieren re-entrenamiento)
+
+---
+
+### P1: Historia del Usuario
+> "Yo camino por la acera y llego a una intersección con señal de stop. El sistema ya detecta 'stop sign' por YOLO COCO, pero no me avisa. Necesito que me diga 'stop sign ahead' para saber que hay un cruce y debo tener cuidado."
+
+### P2: Estados y Transiciones
+
+```
+[YOLO detecta "stop sign"] ──tracker──▶ [TrackedObject name="stop sign"]
+    ──AlertDecisionEngine──▶ [¿cooldown expired? ¿diferente instancia?]
+    ──sí──▶ [audio.alert_sign("stop sign", zone, distance)]
+    ──TTS──▶ "stop sign ahead"
+
+[Exclusión del canal "other"] ──▶ [stop sign no compite con personas/obstáculos]
+```
+
+**¿Por qué estos estados?**
+- Stop sign ya se detecta bien por COCO — no necesita clasificador extra
+- Canal independiente para señales (como traffic lights) — info de cruce no debe competir con alertas de obstáculos
+- Cooldown de 5s entre alertas de señales, pero re-alerta si es una instancia diferente
+
+**¿Qué descarté?**
+- Clasificador de forma para yield/crosswalk — frágil con variación por país, ángulo, oclusión
+- Re-entrenamiento inmediato del modelo nav — requiere dataset de señales específicas, mejor hacerlo en vision-fine-tuning cuando haya datos
+
+### P3: Veo / Necesito
+
+| Estado | Lo que ve el usuario | Datos que necesito | De dónde vienen |
+|---|---|---|---|
+| Stop sign detectado | "stop sign ahead" + beep espacial | Detección YOLO + tracker | YOLO COCO clase "stop sign" |
+| Visual en dashboard | Bbox rojo + label "STOP (close)" | Detection.name == "stop sign" | Dashboard._draw_detections() |
+| Dev monitoreando | Canal independiente en /status | sign_alert en decide() | AlertDecisionEngine |
+
+### P4: Inventario
+
+| Necesito | ¿Existe? | Decisión | Por qué |
+|---|---|---|---|
+| Detección de "stop sign" | Sí (YOLO COCO clase 8 + nav clase 8) | Reusar | Ya detectado con buena precisión |
+| Canal de alerta independiente | Patrón existe (traffic lights) | Replicar para signs | Señales no deben competir por cooldown con vehículos/personas |
+| TTS para stop sign | No | Añadir "stop sign ahead" a PRECACHE_PHRASES | Una frase pre-cacheada |
+| Visual distintivo | No | Bbox siempre rojo + label "STOP" | Coherente con color real de la señal |
+| Yield/crosswalk detection | No (ni COCO ni nav custom) | Posponer — requiere re-entrenamiento | Clasificador geométrico sería frágil |
+
+### P5: Diagrama de Pegamento
+
+```
+[YOLO] ──"stop sign" bbox──▶ [TrackedObject]
+                                    │
+                         [AlertDecisionEngine]
+                          _get_top_sign()
+                          _should_alert_sign()
+                                    │
+                         ¿cooldown 5s expired?
+                         ¿diferente instancia?
+                                    │
+                    ┌───────────────┼───────────────┐
+                    ▼               ▼               ▼
+            [audio.alert_sign()]  [Dashboard]  [/status API]
+            beep + TTS           bbox rojo     sign_alert
+            "stop sign ahead"    label "STOP"
+```
+
+**¿Por qué esta conexión?**
+- Reutiliza el patrón de traffic lights: canal independiente, cooldown propio, exclusión de "other"
+- get_top_non_vehicle() ahora excluye traffic lights Y signs — evita doble alerta
+- decide() retorna 4 valores: (vehicle, other, traffic_light, sign)
+
+### Implementación
+
+**Archivos modificados:**
+- `src/core/alert_engine.py` — SIGN_CLASSES, sign_cooldown, `_get_top_sign()`, `_should_alert_sign()`, decide() retorna 4 valores
+- `src/core/tracker.py` — `get_top_non_vehicle()` excluye "stop sign" y "traffic light"
+- `src/core/audio.py` — `alert_sign(sign_name, zone, distance)` method
+- `src/core/tts_process.py` — "stop sign ahead" en PRECACHE_PHRASES
+- `src/core/dashboard.py` — Bbox siempre rojo para stop sign, label "STOP (distance)"
+- `src/web/main.py` — Manejo del 4to canal de alerta (sign_alert)
+
+**Decisiones clave:**
+- Canal independiente de señales (patrón de TL) — señales informan sobre cruces, info que no debe perderse
+- Cooldown de 5s (mayor que TL=4s) — las señales son estáticas, no cambian como un semáforo
+- Re-alerta si es instancia diferente (nuevo stop sign) — el usuario puede estar en otra intersección
+- Bbox siempre rojo para stop sign — consistente con el color real, no depende de distancia
+- Yield/crosswalk pospuestos — necesitan datos de entrenamiento, no hack geométrico
+
+### Reflexión
+- **Lo que funcionó:** Reusar el patrón de traffic lights — canal independiente, cooldown, exclusión del "other"
+- **Lo que costó:** Nada — el patrón ya estaba establecido
+- **Lo que haría diferente:** En el futuro, añadir yield/crosswalk como clases al fine-tune de YOLO en vision-fine-tuning
+- **Patrón reutilizable:** SIGN_CLASSES extensible — cuando haya yield/crosswalk, solo añadir a ese set
+
+---
+
 ## Plantilla por Feature
 
 Copia esto para cada feature nueva:

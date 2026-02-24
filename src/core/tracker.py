@@ -344,9 +344,10 @@ class SimpleTracker:
         return max(vehicle_tracks, key=lambda t: t.priority)
 
     def get_top_non_vehicle(self) -> Optional[TrackedObject]:
-        """Get highest priority non-vehicle (person, obstacle, etc)."""
-        vehicles = {"car", "truck", "bus", "motorcycle", "bicycle"}
-        other_tracks = [t for t in self.tracks.values() if t.name not in vehicles]
+        """Get highest priority non-vehicle (person, obstacle, etc).
+        Excludes traffic lights and signs — they have independent alert channels."""
+        exclude = {"car", "truck", "bus", "motorcycle", "bicycle", "traffic light", "stop sign"}
+        other_tracks = [t for t in self.tracks.values() if t.name not in exclude]
         if not other_tracks:
             return None
         return max(other_tracks, key=lambda t: t.priority)

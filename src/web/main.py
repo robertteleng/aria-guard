@@ -232,7 +232,7 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
 
         # Audio feedback via decision engine
         if tracked:
-            vehicle_alert, other_alert, tl_alert = alert_engine.decide(tracker)
+            vehicle_alert, other_alert, tl_alert, sign_alert = alert_engine.decide(tracker)
 
             # Traffic light alert (independent channel)
             if tl_alert and tl_alert.should_alert:
@@ -240,6 +240,15 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
                 audio.alert_traffic_light(
                     state=obj.traffic_light_state,
                     zone=obj.zone,
+                )
+
+            # Sign alert (independent channel)
+            if sign_alert and sign_alert.should_alert:
+                obj = sign_alert.object
+                audio.alert_sign(
+                    sign_name=obj.name,
+                    zone=obj.zone,
+                    distance=obj.distance,
                 )
 
             if vehicle_alert and vehicle_alert.should_alert:
