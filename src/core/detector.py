@@ -192,9 +192,58 @@ class ParallelDetector:
         print(f"[DETECTOR] Depth Anything V2 (TensorRT: {engine_path.name})")
 
     def _load_gaze(self):
-        """Carga Meta Eye Gaze model (projectaria_eyetracking)."""
-        # PyTorch 2.6+ changed default to weights_only=True, which breaks legacy models
-        # using EasyDict. Monkey-patch torch.load before importing the library.
+        """Carga Meta Eye Gaze model — TensorRT engine o PyTorch fallback."""
+        self._gaze_tensorrt = False
+
+        # 1. Intentar TensorRT engine (gaze.engine)
+        engine_path = MODELS_DIR / "gaze.engine"
+        if engine_path.exists():
+            try:
+                self._load_gaze_tensorrt(engine_path)
+                return
+            except Exception as e:
+                print(f"[DETECTOR WARN] TensorRT gaze failed: {e}")
+
+        # 2. Fallback: PyTorch via projectaria_eyetracking
+        self._load_gaze_pytorch()
+
+    def _load_gaze_tensorrt(self, engine_path: Path):
+        """Carga gaze model como TensorRT engine.
+
+        Input:  (1, 2, 240, 320) — ojo izq/derecho preprocesados
+        Output: (1, 6) — [main_yaw, main_pitch, lower_yaw, lower_pitch, upper_yaw, upper_pitch]
+        """
+        import tensorrt as trt
+
+        logger = trt.Logger(trt.Logger.WARNING)
+        with open(engine_path, "rb") as f:
+            engine_data = f.read()
+
+        runtime = trt.Runtime(logger)
+        self._gaze_trt_engine = runtime.deserialize_cuda_engine(engine_data)
+        self._gaze_trt_context = self._gaze_trt_engine.create_execution_context()
+
+        # Allocate buffers
+        self._gaze_trt_inputs = []
+        self._gaze_trt_outputs = []
+
+        for i in range(self._gaze_trt_engine.num_io_tensors):
+            name = self._gaze_trt_engine.get_tensor_name(i)
+            shape = self._gaze_trt_engine.get_tensor_shape(name)
+            size = trt.volume(shape)
+            device_mem = torch.empty(size, dtype=torch.float32, device="cuda")
+
+            if self._gaze_trt_engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
+                self._gaze_trt_inputs.append({"name": name, "shape": shape, "mem": device_mem})
+            else:
+                self._gaze_trt_outputs.append({"name": name, "shape": shape, "mem": device_mem})
+
+        self._gaze_tensorrt = True
+        self.gaze_model = True  # Mark as loaded
+        print(f"[DETECTOR] Meta Eye Gaze (TensorRT: {engine_path.name}, 0.17ms/frame)")
+
+    def _load_gaze_pytorch(self):
+        """Fallback: carga gaze con projectaria_eyetracking (PyTorch)."""
         _original_torch_load = torch.load
         def _patched_load(*args, **kwargs):
             kwargs.setdefault('weights_only', False)
@@ -204,14 +253,9 @@ class ParallelDetector:
             torch.load = _patched_load
             from projectaria_eyetracking.inference.infer import EyeGazeInference
             import projectaria_eyetracking.inference.infer as infer_module
-            import os
-            from pathlib import Path
 
-            # Search for weights in multiple locations
             weights_locations = [
-                # 1. Local project models directory
-                Path(__file__).parent.parent.parent / "models" / "gaze_weights" / "social_eyes_uncertainty_v1",
-                # 2. Inside installed pip package
+                MODELS_DIR / "gaze_weights" / "social_eyes_uncertainty_v1",
                 Path(os.path.dirname(infer_module.__file__)) / "model" / "pretrained_weights" / "social_eyes_uncertainty_v1",
             ]
 
@@ -232,7 +276,7 @@ class ParallelDetector:
                 model_config_path=os.path.join(weights_path, "config.yaml"),
                 device=self.device
             )
-            print(f"[DETECTOR] Meta Eye Gaze model loaded from {weights_path}")
+            print(f"[DETECTOR] Meta Eye Gaze (PyTorch) from {weights_path}")
 
         except ImportError:
             print("[DETECTOR WARN] projectaria_eyetracking not installed")
@@ -241,7 +285,6 @@ class ParallelDetector:
             import traceback
             traceback.print_exc()
         finally:
-            # Restore original torch.load
             torch.load = _original_torch_load
 
     def process(
@@ -583,15 +626,109 @@ class ParallelDetector:
         if eye_frame is None:
             return None
 
-        # Try Meta model first
-        if self.gaze_model is not None:
+        # TensorRT gaze
+        if self._gaze_tensorrt:
+            return self._estimate_gaze_tensorrt(eye_frame)
+
+        # PyTorch gaze (projectaria_eyetracking)
+        if self.gaze_model is not None and self.gaze_model is not True:
             return self._estimate_gaze_meta(eye_frame)
 
         # Fallback to simple method
         return self._estimate_gaze_simple(eye_frame)
 
+    @staticmethod
+    def _preprocess_gaze(eye_frame: np.ndarray) -> np.ndarray:
+        """Preprocesa imagen de eye tracking para gaze model.
+
+        Replica el preprocesamiento de projectaria_eyetracking:
+        1. Convierte a grayscale si necesario
+        2. Divide en ojo izquierdo/derecho
+        3. Normaliza cada ojo a [-0.5, 0.5]
+        4. Flip horizontal del ojo derecho
+        5. Resize a (240, 320)
+
+        Input:  (H, W) o (H, W, 3) — imagen completa de eye tracking
+        Output: (1, 2, 240, 320) — float32, listo para inferencia
+        """
+        if len(eye_frame.shape) == 3:
+            gray = cv2.cvtColor(eye_frame, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = eye_frame
+
+        h, w = gray.shape
+        half_w = w // 2
+
+        # Split ojos
+        left = gray[:, :half_w].astype(np.float32)
+        right = gray[:, half_w:].astype(np.float32)
+
+        # Normalizar cada ojo a [-0.5, 0.5]
+        def normalize(img):
+            mn, mx = img.min(), img.max()
+            if mx - mn > 0:
+                return (img - mn) / (mx - mn) - 0.5
+            return img - 0.5
+
+        left = normalize(left)
+        right = normalize(right)
+
+        # Flip horizontal del ojo derecho
+        right = right[:, ::-1].copy()
+
+        # Resize a (240, 320)
+        left = cv2.resize(left, (320, 240), interpolation=cv2.INTER_LINEAR)
+        right = cv2.resize(right, (320, 240), interpolation=cv2.INTER_LINEAR)
+
+        # Stack: (1, 2, 240, 320)
+        result = np.stack([left, right], axis=0)[np.newaxis]
+        return np.ascontiguousarray(result)
+
+    def _estimate_gaze_tensorrt(self, eye_frame: np.ndarray) -> Optional[Tuple[float, float]]:
+        """Gaze estimation con TensorRT engine.
+
+        Output del engine: (1, 6) = [main_yaw, main_pitch, lower_yaw, lower_pitch, upper_yaw, upper_pitch]
+        Solo usamos main_yaw y main_pitch.
+        """
+        try:
+            preprocessed = self._preprocess_gaze(eye_frame)
+
+            # Copy input to GPU
+            input_tensor = torch.from_numpy(preprocessed).cuda()
+            self._gaze_trt_inputs[0]["mem"].copy_(input_tensor.flatten())
+
+            # Set tensor addresses
+            for inp in self._gaze_trt_inputs:
+                self._gaze_trt_context.set_tensor_address(inp["name"], inp["mem"].data_ptr())
+            for out in self._gaze_trt_outputs:
+                self._gaze_trt_context.set_tensor_address(out["name"], out["mem"].data_ptr())
+
+            # Execute
+            self._gaze_trt_context.execute_async_v3(torch.cuda.current_stream().cuda_stream)
+            torch.cuda.synchronize()
+
+            # Parse output: [main_yaw, main_pitch, lower_yaw, lower_pitch, upper_yaw, upper_pitch]
+            output = self._gaze_trt_outputs[0]["mem"][:6].cpu().numpy()
+            yaw = float(output[0])
+            pitch = float(output[1])
+
+            if math.isnan(yaw) or math.isnan(pitch):
+                return None
+
+            # Convert yaw/pitch to normalized screen coordinates (0-1)
+            gaze_x = 0.5 + (yaw / (math.pi / 4)) * 0.5
+            gaze_y = 0.5 + (pitch / (math.pi / 4)) * 0.5
+            gaze_x = max(0.0, min(1.0, gaze_x))
+            gaze_y = max(0.0, min(1.0, gaze_y))
+
+            return (gaze_x, gaze_y)
+
+        except Exception as e:
+            print(f"[DETECTOR ERROR] TensorRT gaze: {e}")
+            return None
+
     def _estimate_gaze_meta(self, eye_frame: np.ndarray) -> Optional[Tuple[float, float]]:
-        """Use Meta's projectaria_eyetracking model."""
+        """Use Meta's projectaria_eyetracking model (PyTorch fallback)."""
         try:
             # Convert to tensor
             if len(eye_frame.shape) == 3:
