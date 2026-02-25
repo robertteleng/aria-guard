@@ -45,3 +45,6 @@ Thumbs.db
 
 # Temp
 *.tmp
+
+# Docker build artifacts
+docker/Video_Codec_SDK_*.zip
