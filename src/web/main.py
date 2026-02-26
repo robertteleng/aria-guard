@@ -22,6 +22,13 @@ from flask import Flask, Response, render_template
 # NO CUDA imports here - main process must be CUDA-free for Aria SDK compatibility
 from src.core import Dashboard, DetectorProcess
 from src.core import MockObserver, AriaDemoObserver, AriaDatasetObserver, RealSenseObserver
+
+# AriaBridgeObserver for Jetson ARM64 (frames via ZMQ from FEX-Emu receiver)
+try:
+    sys.path.insert(0, str(Path.home() / "Projects" / "aria-arm64-bridge" / "src" / "bridge"))
+    from aria_bridge_observer import AriaBridgeObserver
+except ImportError:
+    AriaBridgeObserver = None
 from src.core.alert_engine import AlertArbiter
 from src.core.tracker import SimpleTracker
 
@@ -118,6 +125,15 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
         print(f"[SERVER] Cargando Aria Dataset: {vrs_path}")
         observer = AriaDatasetObserver(vrs_path, gaze_csv, target_fps=10.0)
         use_precomputed_gaze = gaze_csv is not None
+    elif source.startswith("aria:bridge"):
+        # Jetson ARM64: receive frames via ZMQ from FEX-Emu aria_receiver.py
+        parts = source.split(":")
+        endpoint = parts[2] if len(parts) > 2 else "tcp://127.0.0.1:5555"
+        if AriaBridgeObserver is None:
+            print("[SERVER] ✗ AriaBridgeObserver not available. Install aria-arm64-bridge.")
+            return
+        print(f"[SERVER] Conectando con Aria Bridge ({endpoint})...")
+        observer = AriaBridgeObserver(zmq_endpoint=endpoint)
     elif source == "aria" or source == "aria:usb":
         print("[SERVER] Conectando con Aria (USB)...")
         observer = AriaDemoObserver(interface="usb", auto_subscribe=False)
@@ -145,7 +161,8 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
     # Start CUDA in separate process (after observer so we know about hardware depth)
     # For Aria, use known frame shape (no DDS subscription yet, can't get frames)
     # For other sources, get actual frame shape from observer
-    if isinstance(observer, AriaDemoObserver):
+    is_aria = isinstance(observer, AriaDemoObserver) or (AriaBridgeObserver and isinstance(observer, AriaBridgeObserver))
+    if is_aria:
         frame_shape = (1408, 1408, 3)  # profile28/profile18 always 1408x1408
         print(f"[SERVER] Frame shape (Aria): {frame_shape}")
     else:
@@ -165,6 +182,7 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
         return
 
     # Suscribir a DDS DESPUÉS de que el detector esté listo (evita flood de "sample lost")
+    # Bridge observer doesn't need resume — it's already receiving via ZMQ
     if isinstance(observer, AriaDemoObserver):
         observer.resume_streaming()
         print("[SERVER] ✓ DDS suscrito")

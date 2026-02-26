@@ -72,9 +72,10 @@ if __name__ == '__main__':
         print("    [2] Video file")
         print("    [3] Aria Glasses")
         print("    [4] RealSense D435")
+        print("    [5] Aria Bridge (Jetson ARM64 via ZMQ)")
         print()
         while True:
-            choice = input("  Fuente [1/2/3/4]: ").strip()
+            choice = input("  Fuente [1/2/3/4/5]: ").strip()
             if choice == "1":
                 source = "webcam"
                 break
@@ -103,8 +104,11 @@ if __name__ == '__main__':
             elif choice == "4":
                 source = "realsense"
                 break
+            elif choice == "5":
+                source = "aria:bridge"
+                break
             else:
-                print("  Opción no válida. Introduce 1, 2, 3 o 4.")
+                print("  Opción no válida. Introduce 1, 2, 3, 4 o 5.")
 
     # Check for dataset source (VRS files)
     if source == "dataset":
