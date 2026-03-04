@@ -23,6 +23,21 @@ dependencies = [
     # Audio
     "sounddevice>=0.4.6",
     "pyttsx3>=2.90",
+
+    # Aria glasses
+    "projectaria-client-sdk>=2.2.0",
+
+    # TTS
+    "nemo_toolkit[tts]>=2.2.0",
+
+    # TensorRT inference
+    "tensorrt>=10.0.0",
+
+    # pyarrow compatible con NeMo
+    "pyarrow==17.0.0",
+
+    # ffmpeg para NeMo/pydub
+    "imageio-ffmpeg>=0.4.9",
 ]
 
 [project.optional-dependencies]

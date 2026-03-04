@@ -181,18 +181,25 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
         print("[SERVER] ✗ Failed to start DetectorProcess")
         return
 
-    # Suscribir a DDS DESPUÉS de que el detector esté listo (evita flood de "sample lost")
+    # Non-CUDA components en main process — ANTES de resume_streaming
+    # AudioFeedback bloquea ~90s esperando NeMo; si DDS ya está activo
+    # los callbacks de Aria disparan durante el spawn del proceso TTS → heap corruption
+    print("[SERVER] Iniciando Dashboard...")
+    dashboard = Dashboard()
+    print("[SERVER] Iniciando AudioFeedback...")
+    audio = AudioFeedback(enabled=enable_audio, use_nemo=enable_audio)
+    print("[SERVER] Iniciando AlertArbiter...")
+    alert_engine = AlertArbiter()
+    print("[SERVER] Iniciando Tracker...")
+    tracker = SimpleTracker()
+    print("[SERVER] ✓ Componentes inicializados")
+
+    # Suscribir a DDS DESPUÉS de que TODOS los componentes estén listos
     # Bridge observer doesn't need resume — it's already receiving via ZMQ
     if isinstance(observer, AriaDemoObserver):
         observer.resume_streaming()
         print("[SERVER] ✓ DDS suscrito")
 
-    # Non-CUDA components in main process
-    dashboard = Dashboard()
-    audio = AudioFeedback(enabled=enable_audio, use_nemo=enable_audio)
-    alert_engine = AlertArbiter()
-    tracker = SimpleTracker()
-    print("[SERVER] ✓ Componentes inicializados")
     print("[SERVER] Iniciando procesamiento...")
 
     frame_count = 0

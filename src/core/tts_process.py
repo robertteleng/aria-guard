@@ -55,14 +55,18 @@ def _tts_worker(queue, sample_rate_out):
 
         use_amp = False
         if torch.cuda.is_available():
-            spec_gen = spec_gen.cuda().eval()
-            vocoder = vocoder.cuda().eval()
-
-            # Use AMP for FP16 (NeMo doesn't support .half() directly)
-            if torch.cuda.get_device_capability()[0] >= 7:  # Volta+
+            # Use AMP FP16 only on Ampere+ (compute 8.0+)
+            # RTX 2060 (Turing, 7.5) has cuBLAS FP16 issues with FastPitch
+            major, _ = torch.cuda.get_device_capability()
+            if major >= 8:
                 use_amp = True
+                spec_gen = spec_gen.cuda().eval()
+                vocoder = vocoder.cuda().eval()
                 print("[TTS PROCESS] NeMo loaded on CUDA (AMP FP16)")
             else:
+                # Force FP32 — NeMo loads weights in FP16 by default, convert explicitly
+                spec_gen = spec_gen.float().cuda().eval()
+                vocoder = vocoder.float().cuda().eval()
                 print("[TTS PROCESS] NeMo loaded on CUDA (FP32)")
 
             # Warm up CUDA
