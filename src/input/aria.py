@@ -23,7 +23,7 @@ class AriaDemoObserver(BaseObserver):
 
     # Streaming profiles
     PROFILE_USB = "profile28"   # 30 FPS USB
-    PROFILE_WIFI = "profile18"  # 30 FPS WiFi
+    PROFILE_WIFI = "profile15"  # 30 FPS WiFi
 
     def __init__(
         self,

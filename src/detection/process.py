@@ -49,7 +49,8 @@ def _detector_worker(
     result_ready_event = None,
     shm_hw_depth_name: str = None,
     has_hardware_depth: bool = False,
-    eye_shape: tuple = None
+    eye_shape: tuple = None,
+    status_queue = None
 ):
     """
     Worker process that runs CUDA models.
@@ -117,9 +118,13 @@ def _detector_worker(
         print(f"[DETECTOR PROCESS] Failed to load models: {e}", flush=True)
         import traceback
         traceback.print_exc()
+        if status_queue:
+            status_queue.put({"ok": False, "error": str(e)})
         ready_event.set()
         return
 
+    if status_queue:
+        status_queue.put({"ok": True})
     ready_event.set()
     print("[DETECTOR PROCESS] ✓ Ready", flush=True)
 
@@ -140,12 +145,10 @@ def _detector_worker(
                     # Read from shared memory (zero-copy)
                     rgb = np.ndarray(frame_shape, dtype=np.uint8, buffer=shm_frame.buf)
                     rgb = rgb.copy()  # Make a copy to release the buffer
-                    # Read eye frame if available
+                    # Read eye frame if available (flag byte at offset 0)
                     if shm_eye and eye_shape:
-                        eye_nbytes = int(np.prod(eye_shape))
-                        eye_data = np.ndarray(eye_shape, dtype=np.uint8, buffer=shm_eye.buf)
-                        if eye_data.any():  # Only copy if non-zero (frame was written)
-                            eye = eye_data.copy()
+                        if shm_eye.buf[0] == 1:  # Valid flag
+                            eye = np.ndarray(eye_shape, dtype=np.uint8, buffer=shm_eye.buf[1:]).copy()
                     # Read hardware depth if available (RealSense D435)
                     if has_hardware_depth and shm_hw_depth:
                         hw_depth_shape = (frame_shape[0], frame_shape[1])
@@ -174,15 +177,14 @@ def _detector_worker(
             # Process frame
             detections, depth_colored, gaze_info = detector.process(rgb, eye, hardware_depth)
 
-            # Send results (skip shm depth write when using hardware depth - main process has it)
-            if use_shared_memory and shm_depth and depth_colored is not None and result_ready_event and not has_hardware_depth:
-                # Write depth to shared memory
+            # Write depth to shared memory (avoids pickling ~2MB per frame through queue)
+            if use_shared_memory and shm_depth and depth_colored is not None and not has_hardware_depth:
                 depth_flat = depth_colored.flatten()
                 shm_depth.buf[:len(depth_flat)] = depth_flat.tobytes()
 
             result = {
                 "detections": detections,
-                "depth": depth_colored,  # Always send depth via queue (small overhead)
+                "depth_shape": depth_colored.shape if depth_colored is not None else None,
                 "gaze": gaze_info,
                 "timestamp": time.time(),
                 "detector_fps": detector_fps
@@ -190,8 +192,6 @@ def _detector_worker(
 
             try:
                 output_queue.put_nowait(result)
-                if result_ready_event:
-                    result_ready_event.set()
             except:
                 pass
 
@@ -268,7 +268,6 @@ class DetectorProcess:
         self._frame_shape = None
         self._eye_shape = None
         self._frame_ready_event = None
-        self._result_ready_event = None
 
     def start(self, timeout: float = 60.0, frame_shape: tuple = (1080, 1920, 3)) -> bool:
         """
@@ -289,6 +288,7 @@ class DetectorProcess:
         self._input_queue = _ctx.Queue(maxsize=2)
         self._output_queue = _ctx.Queue(maxsize=2)
         self._ready_event = _ctx.Event()
+        status_queue = _ctx.Queue(maxsize=1)
 
         # Initialize shared memory if enabled
         shm_frame_name = None
@@ -311,8 +311,9 @@ class DetectorProcess:
                 shm_frame_name = self._shm_frame.name
 
                 # Create shared memory for eye frame (gaze tracking)
+                # Layout: [1 byte flag (0=no data, 1=valid)] + [eye pixels]
                 if not self._has_hardware_depth:  # Eye tracking only when no hardware depth
-                    eye_size = int(np.prod(self._eye_shape))
+                    eye_size = 1 + int(np.prod(self._eye_shape))  # +1 for validity flag
                     self._shm_eye = shared_memory.SharedMemory(
                         create=True,
                         size=eye_size,
@@ -340,14 +341,21 @@ class DetectorProcess:
                     )
                     shm_hw_depth_name = self._shm_hw_depth.name
 
-                # Events for synchronization
+                # Event for frame synchronization
                 self._frame_ready_event = _ctx.Event()
-                self._result_ready_event = _ctx.Event()
 
                 total_size = frame_size + depth_size + (int(np.prod(self._eye_shape)) if self._shm_eye else 0)
                 print(f"[DetectorProcess] ✓ Shared memory allocated ({total_size} bytes)", flush=True)
             except Exception as e:
                 print(f"[DetectorProcess] Shared memory failed: {e}, using queues", flush=True)
+                # Clean up any partially allocated SHM blocks
+                for shm in (self._shm_frame, self._shm_eye, self._shm_depth, self._shm_hw_depth):
+                    if shm is not None:
+                        try:
+                            shm.close()
+                            shm.unlink()
+                        except Exception:
+                            pass
                 self._use_shared_memory = False
                 self._shm_frame = None
                 self._shm_eye = None
@@ -368,18 +376,33 @@ class DetectorProcess:
                 shm_depth_name,
                 frame_shape,
                 self._frame_ready_event,
-                self._result_ready_event,
+                None,  # result_ready_event (unused, kept for arg compat)
                 shm_hw_depth_name,
                 self._has_hardware_depth,
-                self._eye_shape if self._shm_eye else None
+                self._eye_shape if self._shm_eye else None,
+                status_queue
             ),
             daemon=True
         )
         self._process.start()
 
-        # Wait for models to load
+        # Wait for models to load and validate status
         print("[DetectorProcess] Waiting for models to load...", flush=True)
         if self._ready_event.wait(timeout=timeout):
+            # Check if worker actually loaded successfully
+            try:
+                status = status_queue.get(timeout=1.0)
+                if not status.get("ok", False):
+                    print(f"[DetectorProcess] ✗ Worker failed: {status.get('error', 'unknown')}", flush=True)
+                    self.stop()
+                    return False
+            except Exception:
+                # No status received — check if process is alive
+                if not self._process.is_alive():
+                    print("[DetectorProcess] ✗ Worker died during init", flush=True)
+                    self.stop()
+                    return False
+
             self._started = True
             mode_str = "shared memory" if self._use_shared_memory else "queues"
             print(f"[DetectorProcess] ✓ Ready ({mode_str})", flush=True)
@@ -421,16 +444,16 @@ class DetectorProcess:
                 # Write to shared memory (direct copy)
                 np.ndarray(self._frame_shape, dtype=np.uint8, buffer=self._shm_frame.buf)[:] = rgb
 
-                # Write eye frame if available
+                # Write eye frame if available (flag byte at offset 0, pixels at offset 1)
                 if eye is not None and self._shm_eye and self._eye_shape:
                     import cv2
                     eye_gray = cv2.cvtColor(eye, cv2.COLOR_BGR2GRAY) if len(eye.shape) == 3 else eye
                     if eye_gray.shape != self._eye_shape:
                         eye_gray = cv2.resize(eye_gray, (self._eye_shape[1], self._eye_shape[0]))
-                    np.ndarray(self._eye_shape, dtype=np.uint8, buffer=self._shm_eye.buf)[:] = eye_gray
-                elif self._shm_eye and self._eye_shape:
-                    # Clear eye buffer when no eye frame
-                    np.ndarray(self._eye_shape, dtype=np.uint8, buffer=self._shm_eye.buf)[:] = 0
+                    self._shm_eye.buf[0] = 1  # Valid flag
+                    np.ndarray(self._eye_shape, dtype=np.uint8, buffer=self._shm_eye.buf[1:])[:] = eye_gray
+                elif self._shm_eye:
+                    self._shm_eye.buf[0] = 0  # No eye data
 
                 # Write hardware depth if available (RealSense D435)
                 if hardware_depth is not None and self._shm_hw_depth:
@@ -473,6 +496,8 @@ class DetectorProcess:
         """
         Get latest detection result (non-blocking).
 
+        Reads depth from shared memory to avoid queue serialization overhead.
+
         Returns:
             Dict with detections, depth, gaze, or None
         """
@@ -488,6 +513,17 @@ class DetectorProcess:
             pass
 
         if latest:
+            # Read depth from shared memory (zero-copy, avoids pickle overhead)
+            depth_shape = latest.get("depth_shape")
+            if depth_shape is not None and self._shm_depth:
+                try:
+                    depth_size = int(np.prod(depth_shape))
+                    depth = np.ndarray(depth_shape, dtype=np.uint8, buffer=self._shm_depth.buf)
+                    latest["depth"] = depth.copy()
+                except Exception:
+                    latest["depth"] = None
+            else:
+                latest["depth"] = None
             self._latest_result = latest
 
         return self._latest_result if self._latest_result else None

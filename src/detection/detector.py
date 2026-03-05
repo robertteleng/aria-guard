@@ -30,7 +30,7 @@ MODELS_DIR = _PROJECT_ROOT / "models"
 class ParallelDetector:
     """YOLO + Depth en paralelo con CUDA streams."""
 
-    def __init__(self, enable_depth: bool = True, device: str = "cuda", depth_interval: int = 3, mode: str = "all", fov_h: float = 1.15):
+    def __init__(self, enable_depth: bool = True, device: str = "cuda", depth_interval: int = 5, mode: str = "all", fov_h: float = 1.15):
         """
         Args:
             enable_depth: Activar estimación de profundidad
@@ -41,6 +41,7 @@ class ParallelDetector:
         """
         self._fov_h = fov_h
         self.filter_classes = CLASS_FILTERS.get(mode, None)
+        self._yolo_class_ids = None  # Set after YOLO loads (for direct filtering)
         if self.filter_classes:
             print(f"[DETECTOR] Modo {mode}: filtrando a {len(self.filter_classes)} clases")
         # Detectar dispositivo
@@ -53,6 +54,7 @@ class ParallelDetector:
         self.depth_interval = depth_interval
         self._frame_idx = 0
         self._cached_depth = None
+        self._cached_gaze = None
 
         # CUDA streams (solo si hay GPU)
         if device == "cuda":
@@ -67,6 +69,16 @@ class ParallelDetector:
 
         # Cargar YOLO
         self._load_yolo()
+
+        # Resolve class filter to YOLO class IDs (for direct filtering, avoids Python post-filter)
+        if self.filter_classes and self.yolo is not None:
+            try:
+                names = self.yolo.names if hasattr(self.yolo, 'names') else {}
+                self._yolo_class_ids = [cid for cid, name in names.items() if name in self.filter_classes]
+                if self._yolo_class_ids:
+                    print(f"[DETECTOR] YOLO class filter: {len(self._yolo_class_ids)} IDs")
+            except Exception:
+                pass
 
         # Cargar Depth (opcional)
         self.depth_model = None
@@ -333,10 +345,11 @@ class ParallelDetector:
                 with torch.cuda.stream(self.depth_stream):
                     self._cached_depth = self._run_depth(frame)
 
-            # Stream 3: Gaze (si hay eye frame)
-            if eye_frame is not None and self.gaze_stream:
+            # Stream 3: Gaze every 2 frames (15 Hz is enough for alerting)
+            if eye_frame is not None and self.gaze_stream and self._frame_idx % 2 == 0:
                 with torch.cuda.stream(self.gaze_stream):
-                    gaze_point = self.estimate_gaze(eye_frame)
+                    self._cached_gaze = self.estimate_gaze(eye_frame)
+            gaze_point = self._cached_gaze
 
             # Sincronizar todos los streams
             torch.cuda.synchronize()
@@ -345,8 +358,9 @@ class ParallelDetector:
             yolo_results = self._run_yolo(frame)
             if should_compute_depth:
                 self._cached_depth = self._run_depth(frame)
-            if eye_frame is not None:
-                gaze_point = self.estimate_gaze(eye_frame)
+            if eye_frame is not None and self._frame_idx % 2 == 0:
+                self._cached_gaze = self.estimate_gaze(eye_frame)
+            gaze_point = self._cached_gaze
 
         # Usar depth cacheado
         depth_map = self._cached_depth
@@ -367,7 +381,10 @@ class ParallelDetector:
         if self.yolo is None:
             return None
         try:
-            results = self.yolo(frame, verbose=False, half=(self.device == "cuda"), conf=0.4)
+            kwargs = {"verbose": False, "half": (self.device == "cuda"), "conf": 0.4, "max_det": 20}
+            if self._yolo_class_ids:
+                kwargs["classes"] = self._yolo_class_ids
+            results = self.yolo(frame, **kwargs)
             return results[0] if results else None
         except Exception as e:
             print(f"[DETECTOR ERROR] YOLO: {e}")
@@ -440,11 +457,10 @@ class ParallelDetector:
         for out in self._depth_trt_outputs:
             self._depth_trt_context.set_tensor_address(out["name"], out["mem"].data_ptr())
 
-        # Execute
+        # Execute (no sync here — process() syncs all streams at the end)
         self._depth_trt_context.execute_async_v3(torch.cuda.current_stream().cuda_stream)
-        torch.cuda.synchronize()
 
-        # Get output
+        # Get output (stream-ordered, safe after global sync in process())
         output_shape = self._depth_trt_outputs[0]["shape"]
         depth = self._depth_trt_outputs[0]["mem"][:np.prod(output_shape)].cpu().numpy()
         depth = depth.reshape(output_shape).squeeze()
@@ -541,11 +557,13 @@ class ParallelDetector:
             depth_value = 0.5
             if depth_map is not None:
                 if hardware_depth:
-                    # RealSense: depth en mm (uint16), convertir a metros
+                    # RealSense: depth en mm (uint16), convertir a proximidad
                     depth_mm = self._get_depth_in_bbox_raw(
                         depth_map, int(x1), int(y1), int(x2), int(y2), h, w
                     )
-                    depth_value = depth_mm / 1000.0  # a metros
+                    # Normalize to proximity (0=far, 1=close) — same convention as AI depth
+                    # Max range 10m; clip to [0, 1]
+                    depth_value = max(0.0, 1.0 - min(depth_mm / 10000.0, 1.0))
                     distance = self._depth_mm_to_distance(depth_mm)
                 else:
                     # AI depth: valores relativos normalizados
@@ -753,11 +771,10 @@ class ParallelDetector:
             for out in self._gaze_trt_outputs:
                 self._gaze_trt_context.set_tensor_address(out["name"], out["mem"].data_ptr())
 
-            # Execute
+            # Execute (no sync here — process() syncs all streams at the end)
             self._gaze_trt_context.execute_async_v3(torch.cuda.current_stream().cuda_stream)
-            torch.cuda.synchronize()
 
-            # Parse output: [main_yaw, main_pitch, lower_yaw, lower_pitch, upper_yaw, upper_pitch]
+            # Parse output (stream-ordered, safe after global sync in process())
             output = self._gaze_trt_outputs[0]["mem"][:6].cpu().numpy()
             yaw = float(output[0])
             pitch = float(output[1])

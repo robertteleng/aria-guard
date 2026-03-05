@@ -261,7 +261,7 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True, stat
 
             print(f"[PIPELINE] Frame {frame_count}, detector {fps:.1f} FPS")
 
-        time.sleep(0.033)
+        time.sleep(0.001)
 
     except Exception as e:
         import traceback
