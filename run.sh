@@ -14,4 +14,4 @@ elif [ -f "$JEMALLOC_ARM" ]; then
     export LD_PRELOAD="$JEMALLOC_ARM"
 fi
 
-exec uv run python run.py "$@"
+exec uv run python -m src.main "$@"

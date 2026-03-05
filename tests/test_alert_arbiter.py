@@ -6,8 +6,8 @@ cooldowns, rate limiting, and anti-saturation.
 import time
 import pytest
 from unittest.mock import patch
-from src.core.alert_engine import AlertArbiter, CHANNEL_B_SILENCE, MAX_ALERTS_COUNT
-from src.core.tracker import SimpleTracker, TrackedObject
+from src.domain.alert_engine import AlertArbiter, CHANNEL_B_SILENCE, MAX_ALERTS_COUNT
+from src.domain.tracker import SimpleTracker, TrackedObject
 
 
 class FakeDet:

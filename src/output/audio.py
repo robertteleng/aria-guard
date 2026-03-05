@@ -86,7 +86,7 @@ class AudioFeedback:
 
         if use_nemo:
             try:
-                from src.core.tts_process import TTSProcess
+                from src.output.tts import TTSProcess
                 self._tts_process = TTSProcess()
                 self._tts_process.start()
                 if self._tts_process.ready:

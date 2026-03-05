@@ -22,9 +22,23 @@ class Detection:
     traffic_light_state: Optional[str] = None  # "red", "green", "yellow", None
 
 
+# YOLO26s Nav model classes (24):
+# 0:person 1:bicycle 2:car 3:motorcycle 4:bus 5:truck 6:traffic light
+# 7:fire hydrant 8:stop sign 9:bench 10:chair 11:dog 12:cat
+# 13:backpack 14:umbrella 15:handbag 16:suitcase 17:potted plant
+# 18:Door 19:Stairs 20:Street light 21:Traffic sign 22:Tree 23:Wheelchair
+
 # Filtros de clases por modo
 CLASS_FILTERS = {
-    "indoor": {"person", "chair", "couch", "bed", "dining table", "toilet", "tv", "laptop", "door", "refrigerator", "oven", "sink", "backpack", "handbag", "suitcase"},
-    "outdoor": {"person", "bicycle", "car", "motorcycle", "bus", "truck", "traffic light", "stop sign", "dog", "cat", "backpack", "handbag", "suitcase"},
-    "all": None  # Sin filtro
+    "indoor": {
+        "person", "chair", "backpack", "handbag", "suitcase", "umbrella",
+        "potted plant", "Door", "Stairs", "Wheelchair", "bench",
+    },
+    "outdoor": {
+        "person", "bicycle", "car", "motorcycle", "bus", "truck",
+        "traffic light", "stop sign", "fire hydrant", "dog", "cat",
+        "backpack", "handbag", "suitcase", "umbrella",
+        "Door", "Stairs", "Street light", "Traffic sign", "Tree", "Wheelchair",
+    },
+    "all": None  # Sin filtro — las 24 clases
 }

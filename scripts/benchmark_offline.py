@@ -31,8 +31,8 @@ from typing import List, Optional
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.core.tracker import SimpleTracker
-from src.core.alert_engine import AlertArbiter
+from src.domain.tracker import SimpleTracker
+from src.domain.alert_engine import AlertArbiter
 
 
 @dataclass
@@ -86,7 +86,7 @@ class FakeDet:
 def process_video(video_path: str, mode: str = "all", skip_frames: int = 1) -> List[FrameResult]:
     """Process video with real detector. Requires CUDA."""
     import cv2
-    from src.core import DetectorProcess
+    from src.detection import DetectorProcess
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -269,7 +269,7 @@ def _decide_with_time(arbiter: AlertArbiter, tracker: SimpleTracker, timestamp: 
     work relative to video time, not real time.
     """
     import unittest.mock
-    with unittest.mock.patch("src.core.alert_engine.time") as mock_time:
+    with unittest.mock.patch("src.domain.alert_engine.time") as mock_time:
         mock_time.time.return_value = timestamp
         return arbiter.decide(tracker)
 

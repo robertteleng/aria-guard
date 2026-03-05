@@ -354,7 +354,7 @@ def benchmark_gaze(n_frames=200, n_warmup=10):
 
 def benchmark_full_pipeline(frames, n_warmup=10):
     """Benchmark full detection pipeline (YOLO + Depth + Gaze combined)."""
-    from src.core.detector import ParallelDetector
+    from src.detection.detector import ParallelDetector
 
     detector = ParallelDetector(enable_depth=True, device="cuda", depth_interval=3, mode="indoor")
 
@@ -399,7 +399,7 @@ def benchmark_full_pipeline(frames, n_warmup=10):
 
 def benchmark_full_no_depth(frames, n_warmup=10):
     """Benchmark pipeline without depth (YOLO + Gaze only)."""
-    from src.core.detector import ParallelDetector
+    from src.detection.detector import ParallelDetector
 
     detector = ParallelDetector(enable_depth=False, device="cuda", mode="indoor")
 

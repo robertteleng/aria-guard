@@ -4,7 +4,6 @@ Entry point for ARIA Guard.
 
 CRITICAL: This wrapper sets multiprocessing spawn method BEFORE importing
 any torch/CUDA modules. This prevents CUDA context conflicts with Aria SDK.
-Pattern borrowed from aria-nav.
 
 The order is critical:
 1. Set mp.set_start_method('spawn') FIRST
@@ -40,24 +39,23 @@ os.environ["TMP"] = str(_tmp_dir)
 tempfile.tempdir = str(_tmp_dir)
 
 # Ensure project root is in path
-PROJECT_ROOT = Path(__file__).parent
+PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
 if __name__ == '__main__':
     # CRITICAL: Set spawn method BEFORE any torch/CUDA imports
-    # Use standard multiprocessing (NOT torch.multiprocessing) to avoid loading torch in main process
     import multiprocessing as mp
     try:
         mp.set_start_method('spawn', force=True)
     except RuntimeError:
-        pass  # Already set
+        pass
 
-    # Match aria-nav pattern for Qt
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
     # NOW safe to import modules that load torch/CUDA
-    from src.web.main import app, process_loop
+    from src.web.server import app, state
+    from src.web.pipeline import process_loop
     import threading
 
     # Parsear source desde argumentos
@@ -65,10 +63,10 @@ if __name__ == '__main__':
         source = sys.argv[1]
     else:
         print()
-        print("╔══════════════════════════════════════╗")
-        print("║          ARIA GUARD v1.0             ║")
-        print("║   Visual Assistance System           ║")
-        print("╚══════════════════════════════════════╝")
+        print("====================================")
+        print("       ARIA GUARD v1.0")
+        print("   Visual Assistance System")
+        print("====================================")
         print()
         print("  Selecciona la fuente de entrada:")
         print()
@@ -93,7 +91,7 @@ if __name__ == '__main__':
                 print("    [b] WiFi")
                 print()
                 while True:
-                    aria_choice = input("  Conexión [a/b]: ").strip().lower()
+                    aria_choice = input("  Conexion [a/b]: ").strip().lower()
                     if aria_choice == "a":
                         source = "aria:usb"
                         break
@@ -103,7 +101,7 @@ if __name__ == '__main__':
                         source = f"aria:wifi:{ip}"
                         break
                     else:
-                        print("  Opción no válida. Introduce a o b.")
+                        print("  Opcion no valida. Introduce a o b.")
                 break
             elif choice == "4":
                 source = "realsense"
@@ -112,33 +110,28 @@ if __name__ == '__main__':
                 source = "aria:bridge"
                 break
             else:
-                print("  Opción no válida. Introduce 1, 2, 3, 4 o 5.")
+                print("  Opcion no valida. Introduce 1, 2, 3, 4 o 5.")
 
     # Check for dataset source (VRS files)
     if source == "dataset":
-        # Use default sample dataset
         vrs_path = PROJECT_ROOT / "data" / "aria_sample" / "sample.vrs"
         gaze_csv = PROJECT_ROOT / "data" / "aria_sample" / "eye_gaze" / "general_eye_gaze.csv"
         if not vrs_path.exists():
             print(f"[ERROR] Dataset no encontrado: {vrs_path}")
-            print("        Descarga con: curl -L -o data/aria_sample/sample.vrs ...")
             sys.exit(1)
         source = f"dataset:{vrs_path}:{gaze_csv}"
     elif source.endswith(".vrs"):
-        # Direct VRS path
         vrs_path = Path(source)
         if not vrs_path.is_absolute():
             data_path = PROJECT_ROOT / "data" / source
             if data_path.exists():
                 vrs_path = data_path
-        # Look for matching gaze CSV
         gaze_csv = vrs_path.parent / "eye_gaze" / "general_eye_gaze.csv"
         if gaze_csv.exists():
             source = f"dataset:{vrs_path}:{gaze_csv}"
         else:
             source = f"dataset:{vrs_path}:"
-    elif source not in ("webcam", "aria", "aria:usb", "realsense") and not source.startswith("aria:wifi"):
-        # Regular video file
+    elif source not in ("webcam", "aria", "aria:usb", "realsense") and not source.startswith("aria:wifi") and not source.startswith("aria:bridge"):
         video_path = Path(source)
         if not video_path.is_absolute():
             data_path = PROJECT_ROOT / "data" / source
@@ -146,17 +139,17 @@ if __name__ == '__main__':
                 source = str(data_path)
             elif not video_path.exists():
                 print(f"[ERROR] Video no encontrado: {source}")
-                print(f"        Busqué en: {video_path.absolute()}")
+                print(f"        Busque en: {video_path.absolute()}")
                 print(f"        Y en: {data_path}")
                 sys.exit(1)
 
-    # Banner si se pasó source por argumento (el menú interactivo ya lo muestra)
+    # Banner
     if len(sys.argv) > 1:
         print()
-        print("╔══════════════════════════════════════╗")
-        print("║          ARIA GUARD v1.0              ║")
-        print("║   Visual Assistance System           ║")
-        print("╚══════════════════════════════════════╝")
+        print("====================================")
+        print("       ARIA GUARD v1.0")
+        print("   Visual Assistance System")
+        print("====================================")
         print()
 
     if source.startswith("dataset:"):
@@ -167,14 +160,16 @@ if __name__ == '__main__':
         print(f"  Fuente: Aria Glasses (WiFi)")
     elif source == "realsense":
         print(f"  Fuente: Intel RealSense D435 (RGB + Depth)")
+    elif source.startswith("aria:bridge"):
+        print(f"  Fuente: Aria Bridge (Jetson ARM64)")
     else:
         print(f"  Fuente: {source}")
     print()
-    print("  Selecciona el modo de detección:")
+    print("  Selecciona el modo de deteccion:")
     print()
-    print("    [1] Indoor  - persona, silla, sofá, mesa, tv, puerta...")
-    print("    [2] Outdoor - persona, coche, bici, moto, bus, semáforo...")
-    print("    [3] All     - todas las clases (80 objetos)")
+    print("    [1] Indoor  - persona, silla, sofa, mesa, tv, puerta...")
+    print("    [2] Outdoor - persona, coche, bici, moto, bus, semaforo...")
+    print("    [3] All     - todas las clases (24 objetos nav)")
     print()
 
     # Check for --no-tts flag
@@ -203,14 +198,14 @@ if __name__ == '__main__':
                 mode = "all"
                 break
             else:
-                print("  Opción no válida. Introduce 1, 2 o 3.")
+                print("  Opcion no valida. Introduce 1, 2 o 3.")
 
     print()
-    print(f"  → Modo seleccionado: {mode.upper()}")
+    print(f"  -> Modo seleccionado: {mode.upper()}")
     print()
 
     # Iniciar procesamiento en background
-    thread = threading.Thread(target=process_loop, args=(source, mode, enable_audio), daemon=True)
+    thread = threading.Thread(target=process_loop, args=(source, mode, enable_audio, state), daemon=True)
     thread.start()
 
     print("Servidor en http://0.0.0.0:5000")

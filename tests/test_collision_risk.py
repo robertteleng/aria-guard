@@ -4,7 +4,7 @@ Validates that the 4-factor model produces correct threat levels
 for known scenarios.
 """
 import pytest
-from src.core.tracker import SimpleTracker, TrackedObject, THREAT_THRESHOLDS
+from src.domain.tracker import SimpleTracker, TrackedObject, THREAT_THRESHOLDS
 
 
 class FakeDet:

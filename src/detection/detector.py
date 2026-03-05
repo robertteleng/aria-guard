@@ -14,8 +14,8 @@ import cv2
 import numpy as np
 import torch
 
-from src.core.tracker import SimpleTracker, TrackedObject
-from src.core.types import Detection, CLASS_FILTERS
+from src.domain.tracker import SimpleTracker, TrackedObject
+from src.domain.types import Detection, CLASS_FILTERS
 
 # Optimizar convs para tamaños fijos
 torch.backends.cudnn.benchmark = True

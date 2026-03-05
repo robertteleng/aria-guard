@@ -9,7 +9,7 @@ from typing import List, Optional, Tuple
 import cv2
 import numpy as np
 
-from .types import Detection
+from src.domain.types import Detection
 
 
 class Dashboard:

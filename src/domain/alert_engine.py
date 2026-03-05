@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 import time
 
-from src.core.tracker import TrackedObject, SimpleTracker, THREAT_THRESHOLDS
+from src.domain.tracker import TrackedObject, SimpleTracker, THREAT_THRESHOLDS
 
 
 # Context classes — handled by Channel B

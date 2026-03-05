@@ -100,7 +100,7 @@ def _detector_worker(
         else:
             print("[DETECTOR PROCESS] WARNING: CUDA not available, using CPU (will be slower)", flush=True)
 
-        from src.core.detector import ParallelDetector
+        from src.detection.detector import ParallelDetector
 
         print(f"[DETECTOR PROCESS] Loading models (mode={mode}, depth={enable_depth})...", flush=True)
         detector = ParallelDetector(enable_depth=enable_depth, mode=mode)

@@ -47,11 +47,11 @@ uv sync --extra dev                   # + pytest
 uv sync --extra cuda                  # + NeMo TTS
 uv sync --extra aria                  # + Aria SDK
 
-uv run python run.py webcam outdoor         # Webcam
-uv run python run.py realsense indoor       # RealSense D435
-uv run python run.py data/video.mp4 all     # Video file
-uv run python run.py aria                   # Aria glasses (x86_64)
-uv run python run.py aria:wifi:<ARIA_IP>  # Aria WiFi
+./run.sh webcam outdoor                      # Webcam
+./run.sh realsense indoor                    # RealSense D435
+./run.sh data/video.mp4 all                  # Video file
+./run.sh aria:usb                            # Aria glasses USB
+./run.sh aria:wifi:<ARIA_IP>             # Aria WiFi
 ```
 
 ### Docker
@@ -65,11 +65,11 @@ See [docs/deploy/DOCKER.md](docs/deploy/DOCKER.md) for full Docker documentation
 ### Options
 
 ```bash
-uv run python run.py <source> <mode> [--no-tts]
+./run.sh <source> <mode> [--no-tts]
 ```
 
-- **Sources:** `webcam`, `realsense`, video file path, `aria`, `aria:wifi:IP`
-- **Modes:** `indoor`, `outdoor`, `all` (80 COCO classes)
+- **Sources:** `webcam`, `realsense`, video file path, `aria:usb`, `aria:wifi:IP`, `aria:bridge`
+- **Modes:** `indoor`, `outdoor`, `all` (24 nav classes)
 - **Flags:** `--no-tts` for development without TTS
 
 Open http://localhost:5000 for the MJPEG dashboard.
@@ -96,32 +96,34 @@ VRAM: ~2.5 GB total. Tested on RTX 2060 (6 GB) and RTX 5060 Ti.
 
 ```
 aria-guard/
-├── run.py                    # Entry point
-├── pyproject.toml            # UV dependencies and config
+├── run.sh                       # Launch wrapper (jemalloc + cleanup)
+├── pyproject.toml               # UV dependencies and config
 ├── src/
-│   ├── core/
-│   │   ├── observer.py       # Frame capture (Aria/Webcam/RealSense)
-│   │   ├── detector.py       # YOLO + Depth + Gaze (CUDA)
-│   │   ├── detector_process.py  # CUDA in separate process
-│   │   ├── tracker.py        # SimpleTracker + collision_risk
-│   │   ├── alert_engine.py   # AlertArbiter (2 channels)
-│   │   ├── audio.py          # BRR + spatial beeps
-│   │   ├── tts_process.py    # NeMo in separate process
-│   │   ├── dashboard.py      # Visual rendering
-│   │   └── aria_process.py   # Aria SDK isolation
-│   └── web/main.py           # Flask + MJPEG streaming
-├── scripts/                  # Export, benchmark, utilities
-├── models/                   # TensorRT engines, weights
-├── data/                     # Videos, datasets
-├── tests/                    # 27 tests (collision risk, arbiter, benchmark)
-├── docker/                   # Dockerfiles (x86_64, Jetson, base+app)
-└── docs/                     # Documentation
-    ├── project/              # Plans, research, guides
-    ├── teamwork/             # Collaboration protocol
-    └── deploy/
-        ├── DOCKER.md         # Docker setup
-        ├── JETSON.md         # Jetson deployment
-        └── REALSENSE.md      # RealSense integration
+│   ├── main.py                  # Entry point (spawn, CUDA hide, CLI)
+│   ├── domain/                  # Pure business logic (no I/O, no CUDA)
+│   │   ├── types.py             # Detection dataclass, CLASS_FILTERS
+│   │   ├── tracker.py           # SimpleTracker + collision_risk
+│   │   └── alert_engine.py      # AlertArbiter (2 channels)
+│   ├── input/                   # Frame sources (sensors)
+│   │   ├── observer.py          # BaseObserver + MockObserver
+│   │   ├── aria.py              # AriaDemoObserver + AriaDatasetObserver
+│   │   └── realsense.py         # RealSenseObserver
+│   ├── detection/               # ML inference (CUDA workers)
+│   │   ├── detector.py          # ParallelDetector (YOLO+Depth+Gaze)
+│   │   └── process.py           # DetectorProcess (spawn wrapper)
+│   ├── output/                  # Audio + visual
+│   │   ├── audio.py             # BRR + spatial beeps
+│   │   ├── tts.py               # TTSProcess (NeMo spawn)
+│   │   └── dashboard.py         # Rendering overlays
+│   └── web/                     # HTTP server
+│       ├── server.py            # Flask app + routes
+│       └── pipeline.py          # process_loop (orchestration)
+├── scripts/                     # Export, benchmark, utilities
+├── models/                      # TensorRT engines, weights
+├── data/                        # Videos, datasets
+├── tests/                       # Tests
+├── docker/                      # Dockerfiles
+└── docs/                        # Documentation
 ```
 
 ## Documentation
