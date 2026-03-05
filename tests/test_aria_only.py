@@ -2,13 +2,22 @@
 """
 Minimal test: Aria SDK only, no CUDA, no multiprocessing.
 If this crashes, the problem is Aria SDK alone.
+
+NOT a pytest test — run manually with hardware connected:
+    python tests/test_aria_only.py
 """
 import os
+import sys
+
+# Skip when collected by pytest (no hardware in CI/dev)
+if "pytest" in sys.modules:
+    import pytest
+    pytest.skip("Hardware test — run manually", allow_module_level=True)
+
 # Disable ALL GPU stuff
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 os.environ["NUMBA_DISABLE_CUDA"] = "1"
 
-import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 

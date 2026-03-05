@@ -92,6 +92,8 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True, stat
     detector = DetectorProcess(mode=mode, enable_depth=True, has_hardware_depth=has_hardware_depth)
     if not detector.start(timeout=60, frame_shape=frame_shape):
         print("[PIPELINE] Failed to start DetectorProcess")
+        if hasattr(observer, 'stop'):
+            observer.stop()
         return
 
     # Non-CUDA components en main process — ANTES de resume_streaming

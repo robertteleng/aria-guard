@@ -3,9 +3,10 @@
 JEMALLOC_X86="/usr/lib/x86_64-linux-gnu/libjemalloc.so.2"
 JEMALLOC_ARM="/usr/lib/aarch64-linux-gnu/libjemalloc.so.2"
 
-# Cleanup: matar procesos huerfanos de sesiones anteriores (puerto + GPU)
+# Cleanup: matar procesos huerfanos de sesiones anteriores (solo del proyecto)
 lsof -i :5000 -t 2>/dev/null | xargs -r kill -9 2>/dev/null
-nvidia-smi --query-compute-apps=pid --format=csv,noheader 2>/dev/null | xargs -r kill -9 2>/dev/null
+# Kill only our own DetectorProcess orphans (not all GPU processes)
+pgrep -f "src\.main|src\.detection" 2>/dev/null | xargs -r kill -9 2>/dev/null
 sleep 0.5
 
 if [ -f "$JEMALLOC_X86" ]; then

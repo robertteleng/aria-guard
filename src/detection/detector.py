@@ -14,7 +14,6 @@ import cv2
 import numpy as np
 import torch
 
-from src.domain.tracker import SimpleTracker, TrackedObject
 from src.domain.types import Detection, CLASS_FILTERS
 
 # Optimizar convs para tamaños fijos
@@ -78,9 +77,6 @@ class ParallelDetector:
         # Cargar Eye Gaze model (Meta)
         self.gaze_model = None
         self._load_gaze()
-
-        # Tracker para seguimiento temporal
-        self.tracker = SimpleTracker()
 
         print(f"[DETECTOR] Inicializado (device={device}, depth={enable_depth}, depth_interval={depth_interval})")
 
@@ -292,9 +288,9 @@ class ParallelDetector:
         frame: np.ndarray,
         eye_frame: Optional[np.ndarray] = None,
         hardware_depth: Optional[np.ndarray] = None
-    ) -> Tuple[List[Detection], Optional[np.ndarray], Optional[Tuple[float, float]], List[TrackedObject]]:
+    ) -> Tuple[List[Detection], Optional[np.ndarray], Optional[Tuple[float, float]]]:
         """
-        Procesa frame: detecta objetos + estima profundidad + gaze + tracking.
+        Procesa frame: detecta objetos + estima profundidad + gaze.
 
         Args:
             frame: Imagen BGR
@@ -303,7 +299,7 @@ class ParallelDetector:
                            Si se proporciona, no se ejecuta el modelo de depth.
 
         Returns:
-            (detecciones, depth_map, gaze_point, tracked_objects)
+            (detecciones, depth_map, gaze_point)
         """
         if frame is None:
             return [], None, None
@@ -364,10 +360,7 @@ class ParallelDetector:
             for det in detections:
                 det.is_gazed = self.check_gaze_on_detection(gaze_point, det, frame.shape)
 
-        # Update tracker and get tracked objects with priority
-        tracked_objects = self.tracker.update(detections, frame_width=frame.shape[1], fov_h=self._fov_h)
-
-        return detections, depth_map, gaze_point, tracked_objects
+        return detections, depth_map, gaze_point
 
     def _run_yolo(self, frame: np.ndarray):
         """Ejecuta YOLO con FP16."""

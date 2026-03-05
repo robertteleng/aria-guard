@@ -240,7 +240,7 @@ def run_benchmark(frame_results: List[FrameResult], video_fps: float = 30.0) -> 
     max_concurrent = max(concurrent_counts) if concurrent_counts else 0
 
     metrics = BenchmarkMetrics(
-        video_path=str(frame_results[0].frame_idx) if frame_results else "",
+        video_path="",
         total_frames=total_frames,
         total_seconds=round(total_seconds, 1),
         fps=round(total_frames / total_seconds, 1) if total_seconds > 0 else 0,

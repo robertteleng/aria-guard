@@ -172,7 +172,7 @@ def _detector_worker(
                 continue
 
             # Process frame
-            detections, depth_colored, gaze_info, _ = detector.process(rgb, eye, hardware_depth)
+            detections, depth_colored, gaze_info = detector.process(rgb, eye, hardware_depth)
 
             # Send results (skip shm depth write when using hardware depth - main process has it)
             if use_shared_memory and shm_depth and depth_colored is not None and result_ready_event and not has_hardware_depth:
