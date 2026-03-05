@@ -89,9 +89,11 @@ def generate_frames(feed_type="rgb"):
                 time.sleep(0.01)
                 continue
 
-        # CPU resize if frame is large
-        if frame.shape[0] > 720:
-            frame = cv2.resize(frame, (1280, 720))
+        # CPU resize preserving aspect ratio (max 720p height)
+        h, w = frame.shape[:2]
+        if h > 720:
+            scale = 720 / h
+            frame = cv2.resize(frame, (int(w * scale), 720))
 
         # Encode JPEG (use TurboJPEG if available, ~2x faster)
         if _TURBOJPEG:
@@ -314,6 +316,8 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
             fps = result["detector_fps"]
 
         if frame_count % 30 == 0:
+            if frame_count == 30:
+                print(f"[SERVER] Frame shape: {rgb.shape}")
             elapsed = time.time() - start_time
 
             # Calculate latency from result timestamp
