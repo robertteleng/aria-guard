@@ -426,12 +426,30 @@ class AriaDemoObserver(BaseObserver):
 
         # === REGISTRAR OBSERVER ===
         self._streaming_client = self._streaming_manager.streaming_client
+
+        # Configure subscription to only receive needed streams
+        # CRITICAL: subscribing to SLAM/Audio causes DDS buffer overflow → native segfault
+        config = aria.StreamingSubscriptionConfig()
+        if enable_slam:
+            config.subscriber_data_type = (
+                aria.StreamingDataType.Rgb | aria.StreamingDataType.EyeTrack |
+                aria.StreamingDataType.Slam | aria.StreamingDataType.Imu
+            )
+        else:
+            config.subscriber_data_type = (
+                aria.StreamingDataType.Rgb | aria.StreamingDataType.EyeTrack |
+                aria.StreamingDataType.Imu
+            )
+        config.security_options.use_ephemeral_certs = True
+        self._streaming_client.subscription_config = config
+
         self._streaming_client.set_streaming_client_observer(self)
         if auto_subscribe:
             self._streaming_client.subscribe()
 
-        print("[OBSERVER] ✓ AriaDemoObserver listo")
-        print(f"[OBSERVER] Cámaras: RGB + Eye" + (" + SLAM1 + SLAM2" if enable_slam else ""))
+        streams = "RGB + Eye + IMU" + (" + SLAM" if enable_slam else "")
+        print(f"[OBSERVER] ✓ AriaDemoObserver listo")
+        print(f"[OBSERVER] Suscrito a: {streams}")
 
     def pause_streaming(self):
         """Pausa la suscripción DDS (deja de recibir frames)."""
@@ -451,27 +469,36 @@ class AriaDemoObserver(BaseObserver):
         """Callback del SDK para nuevas imágenes."""
         camera_id = record.camera_id
 
+        # Filter camera_id BEFORE copying — avoid unnecessary work in DDS callback
         if camera_id == self._aria.CameraId.Rgb:
-            processed = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
-            processed = cv2.cvtColor(processed, cv2.COLOR_RGB2BGR)  # Aria gives RGB, OpenCV needs BGR
             key = "rgb"
         elif camera_id == self._aria.CameraId.EyeTrack:
-            processed = np.rot90(image, 2)  # 180 grados
-            if len(processed.shape) == 2:
-                processed = cv2.cvtColor(processed, cv2.COLOR_GRAY2BGR)
             key = "eye"
         elif camera_id == self._aria.CameraId.Slam1 and self._enable_slam:
-            processed = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
-            if len(processed.shape) == 2:
-                processed = cv2.cvtColor(processed, cv2.COLOR_GRAY2BGR)
             key = "slam1"
         elif camera_id == self._aria.CameraId.Slam2 and self._enable_slam:
-            processed = cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
-            if len(processed.shape) == 2:
-                processed = cv2.cvtColor(processed, cv2.COLOR_GRAY2BGR)
             key = "slam2"
         else:
             return
+
+        # Copy DDS buffer AFTER filtering — DDS can free it at any time
+        try:
+            image = image.copy()
+        except Exception:
+            return
+
+        # Minimal transform — no cv2 heavy ops in DDS callback
+        if key == "rgb":
+            processed = np.rot90(image, -1).copy()  # 90° CW, contiguous
+            processed = cv2.cvtColor(processed, cv2.COLOR_RGB2BGR)
+        elif key == "eye":
+            processed = np.rot90(image, 2).copy()
+            if len(processed.shape) == 2:
+                processed = cv2.cvtColor(processed, cv2.COLOR_GRAY2BGR)
+        else:  # slam1, slam2
+            processed = np.rot90(image, -1).copy()
+            if len(processed.shape) == 2:
+                processed = cv2.cvtColor(processed, cv2.COLOR_GRAY2BGR)
 
         with self._lock:
             self._frames[key] = processed

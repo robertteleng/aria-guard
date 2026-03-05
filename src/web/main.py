@@ -65,8 +65,7 @@ system_stats = {
 }
 
 
-# Check for OpenCV CUDA and turbojpeg availability
-_OPENCV_CUDA = hasattr(cv2, 'cuda') and cv2.cuda.getCudaEnabledDeviceCount() > 0
+# CRITICAL: NO cv2.cuda en main process — CUDA_VISIBLE_DEVICES="" para Aria SDK/FastDDS
 _TURBOJPEG = None
 try:
     from turbojpeg import TurboJPEG
@@ -80,9 +79,6 @@ def generate_frames(feed_type="rgb"):
     """Generator para MJPEG streaming con encoding optimizado."""
     global current_frame, current_depth
 
-    # GPU frame resize buffer (reuse to avoid allocations)
-    gpu_frame = cv2.cuda_GpuMat() if _OPENCV_CUDA else None
-
     while True:
         with frame_lock:
             if feed_type == "rgb" and current_frame is not None:
@@ -93,11 +89,9 @@ def generate_frames(feed_type="rgb"):
                 time.sleep(0.01)
                 continue
 
-        # Resize on GPU if frame is large (reduces CPU JPEG encoding load)
-        if _OPENCV_CUDA and frame.shape[0] > 720:
-            gpu_frame.upload(frame)
-            gpu_small = cv2.cuda.resize(gpu_frame, (1280, 720))
-            frame = gpu_small.download()
+        # CPU resize if frame is large
+        if frame.shape[0] > 720:
+            frame = cv2.resize(frame, (1280, 720))
 
         # Encode JPEG (use TurboJPEG if available, ~2x faster)
         if _TURBOJPEG:
@@ -136,12 +130,12 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
         observer = AriaBridgeObserver(zmq_endpoint=endpoint)
     elif source == "aria" or source == "aria:usb":
         print("[SERVER] Conectando con Aria (USB)...")
-        observer = AriaDemoObserver(interface="usb", auto_subscribe=False)
+        observer = AriaDemoObserver(interface="usb", auto_subscribe=False, enable_slam=False)
     elif source.startswith("aria:wifi"):
         parts = source.split(":")
         ip = parts[2] if len(parts) > 2 else None
         print(f"[SERVER] Conectando con Aria (WiFi{': ' + ip if ip else ''})...")
-        observer = AriaDemoObserver(interface="wifi", ip_address=ip, auto_subscribe=False)
+        observer = AriaDemoObserver(interface="wifi", ip_address=ip, auto_subscribe=False, enable_slam=False)
     elif source == "webcam":
         observer = MockObserver(source="webcam")
     elif source == "realsense":
@@ -205,7 +199,8 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
     frame_count = 0
     start_time = time.time()
 
-    while True:
+    try:
+     while True:
         # Get frame from observer
         rgb = observer.get_frame("rgb")
         if rgb is None:
@@ -217,6 +212,11 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
 
         # Get hardware depth if available (RealSense D435)
         hardware_depth = observer.get_depth() if has_hardware_depth else None
+
+        # Check detector process health
+        if hasattr(detector, '_process') and detector._process and not detector._process.is_alive():
+            print(f"\n[SERVER] *** DetectorProcess MURIO en frame {frame_count} (exitcode={detector._process.exitcode}) ***")
+            break
 
         # Send frame to DetectorProcess
         detector.send_frame(rgb, eye_frame, hardware_depth)
@@ -355,6 +355,28 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
 
         # Throttle server loop to ~30 FPS (sufficient for visual assistance, saves CPU)
         time.sleep(0.033)
+
+    except Exception as e:
+        import traceback
+        print(f"\n[SERVER] *** CRASH en process_loop en frame {frame_count} ***")
+        print(f"[SERVER] Excepcion: {type(e).__name__}: {e}")
+        traceback.print_exc()
+    finally:
+        print("[SERVER] Cleanup: deteniendo componentes...")
+        try:
+            detector.stop()
+        except Exception:
+            pass
+        try:
+            audio.shutdown()
+        except Exception:
+            pass
+        if hasattr(observer, 'stop'):
+            try:
+                observer.stop()
+            except Exception:
+                pass
+        print("[SERVER] Cleanup completo")
 
 
 @app.route('/')

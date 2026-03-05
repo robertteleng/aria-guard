@@ -11,10 +11,14 @@ The order is critical:
 2. Only then import modules that load torch/CUDA
 3. Then run the application
 """
+import faulthandler
 import os
 import sys
 import tempfile
 from pathlib import Path
+
+# Capturar segfaults (FastDDS/CUDA crashes) con backtrace completo
+faulthandler.enable()
 
 # CRITICAL: Disable ALL CUDA in main process BEFORE any imports
 # cv2.cuda and numba.cuda conflict with Aria SDK's FastDDS
