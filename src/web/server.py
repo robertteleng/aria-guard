@@ -64,11 +64,11 @@ def generate_frames(feed_type="rgb"):
                 time.sleep(0.01)
                 continue
 
-        # CPU resize preserving aspect ratio (max 720p height)
+        # CPU resize preserving aspect ratio (max 936p height, ~30% more than 720p)
         h, w = frame.shape[:2]
-        if h > 720:
-            scale = 720 / h
-            frame = cv2.resize(frame, (int(w * scale), 720))
+        if h > 936:
+            scale = 936 / h
+            frame = cv2.resize(frame, (int(w * scale), 936))
 
         if _TURBOJPEG:
             buffer = _TURBOJPEG.encode(frame, quality=75)
