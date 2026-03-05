@@ -489,6 +489,12 @@
     </div>
 
     <div class="gaze-bar">
+        <div class="eye-feed-container">
+            <img id="eye-img" src="/eye_feed" style="
+                height: 56px; border-radius: 6px; border: 1px solid #1f1f2a;
+                object-fit: contain; background: #000;
+            " onerror="this.style.display='none'" onload="this.style.display='block'" />
+        </div>
         <div class="gaze-indicator">
             <div class="gaze-dot" id="gaze-dot"></div>
             <div class="gaze-info">

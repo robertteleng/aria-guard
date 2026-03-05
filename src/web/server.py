@@ -23,6 +23,7 @@ state = {
     "stats_lock": threading.Lock(),
     "current_frame": None,
     "current_depth": None,
+    "current_eye": None,
     "current_detections": [],
     "current_gaze": None,
     "system_stats": {
@@ -57,6 +58,8 @@ def generate_frames(feed_type="rgb"):
                 frame = state["current_frame"].copy()
             elif feed_type == "depth" and state["current_depth"] is not None:
                 frame = state["current_depth"].copy()
+            elif feed_type == "eye" and state["current_eye"] is not None:
+                frame = state["current_eye"].copy()
             else:
                 time.sleep(0.01)
                 continue
@@ -91,6 +94,12 @@ def video_feed():
 @app.route('/depth_feed')
 def depth_feed():
     return Response(generate_frames("depth"),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/eye_feed')
+def eye_feed():
+    return Response(generate_frames("eye"),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
 

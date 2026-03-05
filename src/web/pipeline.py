@@ -207,6 +207,7 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True, stat
             with state["frame_lock"]:
                 state["current_frame"] = rgb_out
                 state["current_depth"] = depth_out if depth_out is not None else rgb_out
+                state["current_eye"] = eye_frame
                 state["current_detections"] = detections
                 state["current_gaze"] = gaze_point
 
