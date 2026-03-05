@@ -1689,3 +1689,67 @@ Copia esto para cada feature nueva:
 - **Lo que costó:** El diagnóstico inicial — entender que el caminante "se mueve hacia" las personas, no al revés
 - **Lo que haría diferente:** Incluir ego-motion compensation (IMU) para distinguir "yo me acerco" de "objeto se acerca"
 - **Patrón reutilizable:** Separar captura (GPU) de evaluación (CPU) para calibración iterativa offline
+
+---
+
+## Feature: Fix DDS Segfault — Estabilización del streaming Aria
+**Fecha:** 2026-03-05
+**Branch:** `main`
+**Estado:** Completada
+
+---
+
+### P1: Historia del Usuario
+> "El pipeline arranca y muestra video con detecciones, pero crashea a los 15-20 segundos con un segfault. A veces se congela la imagen sin error visible. Necesito que el streaming sea estable."
+
+### P2: Estados y Transiciones
+
+```
+[Inicio] ──start.sh──▶ [Flask + DDS + Detector]
+    ──DDS satura──▶ [sample lost warnings] ──buffer corrupto──▶ [SEGFAULT]
+    ──Fix: filtrar suscripcion──▶ [Solo RGB+Eye+IMU] ──estable──▶ [1500+ frames OK]
+```
+
+**¿Por qué estos estados?**
+- DDS entrega buffers para TODOS los streams suscritos (RGB, Eye, SLAM1, SLAM2, Audio, IMU, Baro...)
+- Cuando el consumer no drena suficientemente rapido, DDS pierde samples y corrompe buffers
+- El callback de Python procesa un buffer ya liberado por DDS → segfault nativo (no capturado por try/except)
+
+### P3: Lo Mínimo
+
+**Investigacion:**
+- `faulthandler.enable()` mostro que el crash era en `on_image_received` → `cv2.rotate(image)` con buffer corrupto
+- Los warnings DDS `sample lost!! topic Slam1ImageDataMsgTopic` confirmaron la saturacion
+- SLAM y Audio no se usan en el pipeline pero DDS los entregaba igualmente
+
+**Solucion minima (3 cambios):**
+1. `StreamingSubscriptionConfig.subscriber_data_type = Rgb | EyeTrack | Imu` — filtrar en DDS
+2. `image.copy()` en callback antes de procesar — copia defensiva del buffer DDS
+3. Eliminar `cv2.cuda` del main process — conflicto con `CUDA_VISIBLE_DEVICES=""`
+
+**Soluciones descartadas:**
+- `FASTDDS_BUILTIN_TRANSPORTS=UDPv4` — workaround que no arreglaba la raiz (throughput menor)
+- AriaProcess aislado — correcto pero demasiado cambio para este bug
+
+### P4: Invariantes
+
+| Invariante | Validacion |
+|------------|-----------|
+| Main process nunca toca CUDA | `CUDA_VISIBLE_DEVICES=""` + sin cv2.cuda |
+| DDS solo entrega lo necesario | `subscriber_data_type = Rgb\|EyeTrack\|Imu` |
+| Buffers DDS se copian antes de usar | `image.copy()` como primera linea del callback |
+| Procesos huerfanos no bloquean restart | start.sh mata puerto 5000 + GPU PIDs |
+| Crash del loop no deja recursos colgados | finally block con detector/audio/observer cleanup |
+
+### P5: Prueba
+
+- 1500+ frames sin crash con Aria USB
+- `faulthandler` activo y no se disparo
+- Sin warnings de `sample lost` tras filtrar suscripcion
+- Restart limpio gracias a auto-cleanup en start.sh
+
+### Reflexion
+- **Lo que funciono:** `faulthandler.enable()` fue clave — sin el, el segfault era invisible
+- **Lo que costo:** 3 sesiones de diagnostico — la hipotesis inicial (FastDDS SHM) era incorrecta
+- **Lo que haria diferente:** Filtrar suscripcion DDS desde el principio (solo suscribirse a lo que usas)
+- **Patron reutilizable:** En cualquier sistema pub/sub, suscribirse SOLO a los topics necesarios. El overhead de topics no usados no es gratis — puede causar backpressure y corrupcion
