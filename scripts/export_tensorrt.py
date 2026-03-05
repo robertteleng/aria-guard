@@ -30,15 +30,15 @@ MODELS_DIR.mkdir(exist_ok=True)
 
 
 def export_yolo():
-    """Exporta YOLO26s a TensorRT usando Ultralytics."""
+    """Exporta YOLO26s Nav (24 clases custom) a TensorRT usando Ultralytics."""
     from ultralytics import YOLO
 
     print("=" * 60)
-    print("Exportando YOLO26s a TensorRT")
+    print("Exportando YOLO26s Nav a TensorRT")
     print("=" * 60)
 
-    pt_path = MODELS_DIR / "yolo26s.pt"
-    engine_path = MODELS_DIR / "yolo26s.engine"
+    pt_path = MODELS_DIR / "yolo26s_nav.pt"
+    engine_path = MODELS_DIR / "yolo26s_nav.engine"
 
     if engine_path.exists():
         print(f"Engine ya existe: {engine_path}")
@@ -206,6 +206,17 @@ def _gaze_to_onnx(wrapper):
         output_names=["output"],
         do_constant_folding=True,
     )
+
+    # PyTorch 2.10+ may export with external data (.onnx.data file).
+    # Merge weights back into the ONNX file for TensorRT compatibility.
+    external_data = onnx_path.parent / (onnx_path.name + ".data")
+    if external_data.exists():
+        import onnx
+        model = onnx.load(str(onnx_path), load_external_data=True)
+        onnx.save(model, str(onnx_path))  # saves with weights inline
+        external_data.unlink(missing_ok=True)
+        print(f"    Merged external weights into ONNX")
+
     print(f"    ONNX guardado: {onnx_path} ({onnx_path.stat().st_size / 1e6:.1f} MB)")
     return onnx_path
 
