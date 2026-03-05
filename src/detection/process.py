@@ -25,9 +25,11 @@ _ctx = mp.get_context('spawn')
 
 # Shared memory configuration
 SHM_FRAME_NAME = "aria_frame"
+SHM_EYE_NAME = "aria_eye"
 SHM_DEPTH_NAME = "aria_depth"
 SHM_HW_DEPTH_NAME = "aria_hw_depth"
 MAX_FRAME_SIZE = 1920 * 1080 * 3  # Max 1080p BGR
+MAX_EYE_SIZE = 240 * 640          # Max eye frame (grayscale)
 MAX_DEPTH_SIZE = 1920 * 1080      # Max 1080p grayscale
 MAX_HW_DEPTH_SIZE = 1920 * 1080 * 2  # Max 1080p uint16 (RealSense, mm)
 
@@ -40,12 +42,14 @@ def _detector_worker(
     enable_depth: bool = True,
     use_shared_memory: bool = False,
     shm_frame_name: str = None,
+    shm_eye_name: str = None,
     shm_depth_name: str = None,
     frame_shape: tuple = None,
     frame_ready_event = None,
     result_ready_event = None,
     shm_hw_depth_name: str = None,
-    has_hardware_depth: bool = False
+    has_hardware_depth: bool = False,
+    eye_shape: tuple = None
 ):
     """
     Worker process that runs CUDA models.
@@ -78,11 +82,14 @@ def _detector_worker(
 
     # Shared memory setup
     shm_frame = None
+    shm_eye = None
     shm_depth = None
     shm_hw_depth = None
     if use_shared_memory and shm_frame_name and frame_shape:
         try:
             shm_frame = shared_memory.SharedMemory(name=shm_frame_name)
+            if shm_eye_name:
+                shm_eye = shared_memory.SharedMemory(name=shm_eye_name)
             if shm_depth_name:
                 shm_depth = shared_memory.SharedMemory(name=shm_depth_name)
             if shm_hw_depth_name:
@@ -133,6 +140,12 @@ def _detector_worker(
                     # Read from shared memory (zero-copy)
                     rgb = np.ndarray(frame_shape, dtype=np.uint8, buffer=shm_frame.buf)
                     rgb = rgb.copy()  # Make a copy to release the buffer
+                    # Read eye frame if available
+                    if shm_eye and eye_shape:
+                        eye_nbytes = int(np.prod(eye_shape))
+                        eye_data = np.ndarray(eye_shape, dtype=np.uint8, buffer=shm_eye.buf)
+                        if eye_data.any():  # Only copy if non-zero (frame was written)
+                            eye = eye_data.copy()
                     # Read hardware depth if available (RealSense D435)
                     if has_hardware_depth and shm_hw_depth:
                         hw_depth_shape = (frame_shape[0], frame_shape[1])
@@ -198,6 +211,8 @@ def _detector_worker(
     # Cleanup shared memory
     if shm_frame:
         shm_frame.close()
+    if shm_eye:
+        shm_eye.close()
     if shm_depth:
         shm_depth.close()
 
@@ -247,9 +262,11 @@ class DetectorProcess:
 
         # Shared memory
         self._shm_frame = None
+        self._shm_eye = None
         self._shm_depth = None
         self._shm_hw_depth = None
         self._frame_shape = None
+        self._eye_shape = None
         self._frame_ready_event = None
         self._result_ready_event = None
 
@@ -275,9 +292,12 @@ class DetectorProcess:
 
         # Initialize shared memory if enabled
         shm_frame_name = None
+        shm_eye_name = None
         shm_depth_name = None
         shm_hw_depth_name = None
         self._frame_shape = frame_shape
+        # Eye frame shape: Aria eye tracking is typically 240x640 grayscale
+        self._eye_shape = (240, 640)
 
         if self._use_shared_memory:
             try:
@@ -289,6 +309,16 @@ class DetectorProcess:
                     name=f"{SHM_FRAME_NAME}_{id(self)}"
                 )
                 shm_frame_name = self._shm_frame.name
+
+                # Create shared memory for eye frame (gaze tracking)
+                if not self._has_hardware_depth:  # Eye tracking only when no hardware depth
+                    eye_size = int(np.prod(self._eye_shape))
+                    self._shm_eye = shared_memory.SharedMemory(
+                        create=True,
+                        size=eye_size,
+                        name=f"{SHM_EYE_NAME}_{id(self)}"
+                    )
+                    shm_eye_name = self._shm_eye.name
 
                 # Create shared memory for depth output
                 depth_shape = (frame_shape[0], frame_shape[1])
@@ -314,11 +344,13 @@ class DetectorProcess:
                 self._frame_ready_event = _ctx.Event()
                 self._result_ready_event = _ctx.Event()
 
-                print(f"[DetectorProcess] ✓ Shared memory allocated ({frame_size + depth_size} bytes)", flush=True)
+                total_size = frame_size + depth_size + (int(np.prod(self._eye_shape)) if self._shm_eye else 0)
+                print(f"[DetectorProcess] ✓ Shared memory allocated ({total_size} bytes)", flush=True)
             except Exception as e:
                 print(f"[DetectorProcess] Shared memory failed: {e}, using queues", flush=True)
                 self._use_shared_memory = False
                 self._shm_frame = None
+                self._shm_eye = None
                 self._shm_depth = None
                 self._shm_hw_depth = None
 
@@ -332,12 +364,14 @@ class DetectorProcess:
                 self._enable_depth,
                 self._use_shared_memory,
                 shm_frame_name,
+                shm_eye_name,
                 shm_depth_name,
                 frame_shape,
                 self._frame_ready_event,
                 self._result_ready_event,
                 shm_hw_depth_name,
-                self._has_hardware_depth
+                self._has_hardware_depth,
+                self._eye_shape if self._shm_eye else None
             ),
             daemon=True
         )
@@ -386,6 +420,17 @@ class DetectorProcess:
 
                 # Write to shared memory (direct copy)
                 np.ndarray(self._frame_shape, dtype=np.uint8, buffer=self._shm_frame.buf)[:] = rgb
+
+                # Write eye frame if available
+                if eye is not None and self._shm_eye and self._eye_shape:
+                    import cv2
+                    eye_gray = cv2.cvtColor(eye, cv2.COLOR_BGR2GRAY) if len(eye.shape) == 3 else eye
+                    if eye_gray.shape != self._eye_shape:
+                        eye_gray = cv2.resize(eye_gray, (self._eye_shape[1], self._eye_shape[0]))
+                    np.ndarray(self._eye_shape, dtype=np.uint8, buffer=self._shm_eye.buf)[:] = eye_gray
+                elif self._shm_eye and self._eye_shape:
+                    # Clear eye buffer when no eye frame
+                    np.ndarray(self._eye_shape, dtype=np.uint8, buffer=self._shm_eye.buf)[:] = 0
 
                 # Write hardware depth if available (RealSense D435)
                 if hardware_depth is not None and self._shm_hw_depth:
@@ -468,6 +513,14 @@ class DetectorProcess:
             except:
                 pass
             self._shm_frame = None
+
+        if self._shm_eye:
+            try:
+                self._shm_eye.close()
+                self._shm_eye.unlink()
+            except:
+                pass
+            self._shm_eye = None
 
         if self._shm_depth:
             try:

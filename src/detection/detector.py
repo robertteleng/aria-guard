@@ -89,7 +89,7 @@ class ParallelDetector:
         try:
             from ultralytics import YOLO
 
-            model_name = "yolo26s"
+            model_name = "yolo26s_nav"
             engine_path = MODELS_DIR / f"{model_name}.engine"
             pt_path = MODELS_DIR / f"{model_name}.pt"
 
