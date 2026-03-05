@@ -343,7 +343,11 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True):
             obs_fps = 0
             if hasattr(observer, 'get_stats'):
                 obs_stats = observer.get_stats()
-                obs_fps = obs_stats.get('fps', 0)
+                fps_data = obs_stats.get('fps', 0)
+                if isinstance(fps_data, dict):
+                    obs_fps = fps_data.get('rgb', 0)
+                else:
+                    obs_fps = fps_data
 
             # Update global stats
             with stats_lock:
