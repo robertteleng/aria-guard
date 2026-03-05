@@ -46,7 +46,7 @@ try:
     from turbojpeg import TurboJPEG
     _TURBOJPEG = TurboJPEG()
     print("[SERVER] TurboJPEG habilitado (encoding rapido)")
-except ImportError:
+except Exception:
     pass
 
 
