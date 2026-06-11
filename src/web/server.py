@@ -178,12 +178,28 @@ def stats_endpoint():
             parts = result.stdout.strip().split(',')
             vram_used = int(parts[0].strip())
             vram_total = int(parts[1].strip())
-    except:
+    except Exception:
         pass
+
+    if vram_total == 0:
+        # Jetson/Tegra: no nvidia-smi; GPU shares unified memory with the
+        # system — report it from /proc/meminfo (real numbers, not 0/0)
+        try:
+            mem = {}
+            with open('/proc/meminfo') as f:
+                for line in f:
+                    k, v = line.split(':', 1)
+                    mem[k] = int(v.strip().split()[0])  # kB
+            vram_total = mem.get('MemTotal', 0) // 1024
+            vram_used = (mem.get('MemTotal', 0) - mem.get('MemAvailable', 0)) // 1024
+        except Exception:
+            pass
 
     with state["stats_lock"]:
         stats_copy = state["system_stats"].copy()
         stats_copy["vram_used_mb"] = vram_used
         stats_copy["vram_total_mb"] = vram_total
 
+    import os
+    stats_copy["profile"] = os.environ.get("ARIA_PROFILE", "")
     return jsonify(stats_copy)

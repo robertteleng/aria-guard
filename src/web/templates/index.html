@@ -36,12 +36,20 @@
             background: #000;
         }
 
-        .video-main {
+        .video-row {
             flex: 1;
+            display: flex;
+            min-height: 0;
+            gap: 6px;
+            padding: 6px;
+        }
+
+        .video-main {
+            flex: 2;
             display: flex;
             align-items: center;
             justify-content: center;
-            min-height: 0;
+            min-width: 0;
         }
 
         .video-main img {
@@ -50,10 +58,24 @@
             object-fit: contain;
         }
 
+        /* SLAM column: 1/3 right of the RGB, stacked */
+        .slam-col {
+            flex: 1;
+            display: none;          /* shown by JS when bridge sensors detected */
+            flex-direction: column;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .slam-col .sensor-cell {
+            flex: 1;
+            min-height: 0;
+        }
+
         /* Sensor strip: SLAM cams + IMU charts + compass */
         .sensor-strip {
             display: grid;
-            grid-template-columns: 1fr 1fr 1.6fr 1.6fr 0.9fr;
+            grid-template-columns: 0.8fr 1.6fr 1.6fr 0.9fr;
             gap: 6px;
             padding: 6px;
             height: 170px;
@@ -473,17 +495,25 @@
 <body>
     <div class="main-container">
         <div class="video-area">
-            <div class="video-main">
-                <img src="/video_feed" />
+            <div class="video-row">
+                <div class="video-main">
+                    <img src="/video_feed" />
+                </div>
+                <div class="slam-col" id="slam-col">
+                    <div class="sensor-cell">
+                        <div class="cell-title">SLAM 1 <span class="rate" id="slam1-fps"></span></div>
+                        <img src="/slam1_feed" />
+                    </div>
+                    <div class="sensor-cell">
+                        <div class="cell-title">SLAM 2 <span class="rate" id="slam2-fps"></span></div>
+                        <img src="/slam2_feed" />
+                    </div>
+                </div>
             </div>
             <div class="sensor-strip" id="sensor-strip" style="display:none">
                 <div class="sensor-cell">
-                    <div class="cell-title">SLAM 1</div>
-                    <img src="/slam1_feed" />
-                </div>
-                <div class="sensor-cell">
-                    <div class="cell-title">SLAM 2</div>
-                    <img src="/slam2_feed" />
+                    <div class="cell-title">Eye <span class="rate" id="eye-fps"></span></div>
+                    <img src="/eye_feed" />
                 </div>
                 <div class="sensor-cell">
                     <div class="cell-title">Acelerómetro m/s² <span class="rate" id="imu-rate"></span></div>
@@ -551,6 +581,10 @@
 
             <div class="system-stats">
                 <div class="system-stats-title">System Stats</div>
+                <div class="stat-row">
+                    <span class="label">Profile</span>
+                    <span class="value" id="profile">--</span>
+                </div>
                 <div class="stat-row">
                     <span class="label">Server FPS</span>
                     <span class="value" id="server-fps">--</span>
@@ -672,6 +706,7 @@
                 const res = await fetch('/stats');
                 const s = await res.json();
 
+                if (s.profile) document.getElementById('profile').textContent = s.profile;
                 document.getElementById('server-fps').textContent = s.server_fps.toFixed(1);
                 document.getElementById('observer-fps').textContent = s.observer_fps.toFixed(1);
 
@@ -755,6 +790,7 @@
 
                 if (strip.style.display === 'none') {
                     strip.style.display = 'grid';
+                    document.getElementById('slam-col').style.display = 'flex';
                     accelChart = mkSensorChart(document.getElementById('accel-chart'),
                                                ['#4a9eff', '#4aff4a', '#ff4a4a']);
                     gyroChart = mkSensorChart(document.getElementById('gyro-chart'),
@@ -768,6 +804,11 @@
                 if (s.rates) {
                     if (s.rates.imu1) document.getElementById('imu-rate').textContent = s.rates.imu1 + ' Hz';
                     if (s.rates.mag) document.getElementById('mag-rate').textContent = s.rates.mag + ' Hz';
+                }
+                if (s.fps) {
+                    if (s.fps.slam1) document.getElementById('slam1-fps').textContent = s.fps.slam1 + ' fps';
+                    if (s.fps.slam2) document.getElementById('slam2-fps').textContent = s.fps.slam2 + ' fps';
+                    if (s.fps.eye) document.getElementById('eye-fps').textContent = s.fps.eye + ' fps';
                 }
                 if (s.mag) {
                     const heading = (Math.atan2(s.mag[1], s.mag[0]) * 180 / Math.PI + 360) % 360;
