@@ -3,6 +3,8 @@
 
 <head>
     <title>ARIA Demo</title>
+    <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.min.css">
     <style>
         * {
             box-sizing: border-box;
@@ -29,15 +31,82 @@
         .video-area {
             flex: 1;
             display: flex;
-            align-items: center;
-            justify-content: center;
+            flex-direction: column;
+            min-height: 0;
             background: #000;
         }
 
-        .video-area img {
+        .video-main {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 0;
+        }
+
+        .video-main img {
             max-width: 100%;
             max-height: 100%;
             object-fit: contain;
+        }
+
+        /* Sensor strip: SLAM cams + IMU charts + compass */
+        .sensor-strip {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1.6fr 1.6fr 0.9fr;
+            gap: 6px;
+            padding: 6px;
+            height: 170px;
+            background: #0d0d12;
+            border-top: 1px solid #1f1f2a;
+        }
+
+        .sensor-cell {
+            background: #121218;
+            border: 1px solid #1f1f2a;
+            border-radius: 6px;
+            padding: 4px 6px;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        .sensor-cell .cell-title {
+            font-size: 8px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: #5a5a6a;
+            margin-bottom: 2px;
+        }
+
+        .sensor-cell .cell-title .rate {
+            float: right;
+            color: #4fd1c5;
+        }
+
+        .sensor-cell img {
+            flex: 1;
+            min-height: 0;
+            object-fit: contain;
+            border-radius: 4px;
+            background: #000;
+        }
+
+        .sensor-cell .chart {
+            flex: 1;
+            min-height: 0;
+        }
+
+        #compass-cell {
+            align-items: center;
+            justify-content: center;
+        }
+
+        #heading-val {
+            font-size: 15px;
+            color: #4fd1c5;
+            font-weight: 700;
         }
 
         .panel {
@@ -404,7 +473,32 @@
 <body>
     <div class="main-container">
         <div class="video-area">
-            <img src="/video_feed" />
+            <div class="video-main">
+                <img src="/video_feed" />
+            </div>
+            <div class="sensor-strip" id="sensor-strip" style="display:none">
+                <div class="sensor-cell">
+                    <div class="cell-title">SLAM 1</div>
+                    <img src="/slam1_feed" />
+                </div>
+                <div class="sensor-cell">
+                    <div class="cell-title">SLAM 2</div>
+                    <img src="/slam2_feed" />
+                </div>
+                <div class="sensor-cell">
+                    <div class="cell-title">Acelerómetro m/s² <span class="rate" id="imu-rate"></span></div>
+                    <div class="chart" id="accel-chart"></div>
+                </div>
+                <div class="sensor-cell">
+                    <div class="cell-title">Giroscopio rad/s</div>
+                    <div class="chart" id="gyro-chart"></div>
+                </div>
+                <div class="sensor-cell" id="compass-cell">
+                    <div class="cell-title" style="align-self:flex-start">Magnetómetro <span class="rate" id="mag-rate"></span></div>
+                    <canvas id="compass" width="84" height="84"></canvas>
+                    <div id="heading-val">--°</div>
+                </div>
+            </div>
         </div>
         <div class="panel">
             <div class="header">
@@ -607,7 +701,7 @@
 
         // Toggle View Logic
         const toggleBtn = document.getElementById('toggle-view');
-        const videoImg = document.querySelector('.video-area img');
+        const videoImg = document.querySelector('.video-main img');
         let isDepth = false;
 
         toggleBtn.addEventListener('click', () => {
@@ -622,6 +716,68 @@
                 toggleBtn.style.background = '#1f1f2a';
             }
         });
+
+        // --- Sensor strip (aria:bridge only — auto-shows when data arrives) ---
+        const strip = document.getElementById('sensor-strip');
+        let accelChart = null, gyroChart = null;
+
+        function mkSensorChart(el, colors) {
+            const axis = { stroke: '#5a5a6a', grid: { stroke: '#1a1a24' }, ticks: { stroke: '#1f1f2a' },
+                           font: '8px monospace' };
+            return new uPlot({
+                width: el.clientWidth || 240, height: el.clientHeight || 120,
+                series: [{}, ...colors.map(c => ({ stroke: c, width: 1.2 }))],
+                axes: [axis, axis], legend: { show: false }, cursor: { show: false },
+            }, [[], [], [], []], el);
+        }
+
+        function drawCompass(deg) {
+            const cv = document.getElementById('compass');
+            const c = cv.getContext('2d');
+            const R = cv.width / 2;
+            c.clearRect(0, 0, cv.width, cv.height);
+            c.strokeStyle = '#1f1f2a'; c.lineWidth = 2;
+            c.beginPath(); c.arc(R, R, R - 6, 0, 2 * Math.PI); c.stroke();
+            c.fillStyle = '#5a5a6a'; c.font = '8px monospace'; c.textAlign = 'center';
+            c.fillText('N', R, 11);
+            if (deg === null || deg === undefined) return;
+            const a = (deg - 90) * Math.PI / 180;
+            c.strokeStyle = '#4fd1c5'; c.lineWidth = 2.5; c.lineCap = 'round';
+            c.beginPath(); c.moveTo(R, R);
+            c.lineTo(R + (R - 14) * Math.cos(a), R + (R - 14) * Math.sin(a)); c.stroke();
+        }
+
+        setInterval(async () => {
+            try {
+                const res = await fetch('/sensors');
+                const s = await res.json();
+                if (!s.imu1 || !s.imu1.length) return;
+
+                if (strip.style.display === 'none') {
+                    strip.style.display = 'grid';
+                    accelChart = mkSensorChart(document.getElementById('accel-chart'),
+                                               ['#4a9eff', '#4aff4a', '#ff4a4a']);
+                    gyroChart = mkSensorChart(document.getElementById('gyro-chart'),
+                                              ['#b794f4', '#ffa54a', '#4fd1c5']);
+                }
+
+                const t = s.imu1.map(p => p[0]);
+                accelChart.setData([t, s.imu1.map(p=>p[1]), s.imu1.map(p=>p[2]), s.imu1.map(p=>p[3])]);
+                gyroChart.setData([t, s.imu1.map(p=>p[4]), s.imu1.map(p=>p[5]), s.imu1.map(p=>p[6])]);
+
+                if (s.rates) {
+                    if (s.rates.imu1) document.getElementById('imu-rate').textContent = s.rates.imu1 + ' Hz';
+                    if (s.rates.mag) document.getElementById('mag-rate').textContent = s.rates.mag + ' Hz';
+                }
+                if (s.mag) {
+                    const heading = (Math.atan2(s.mag[1], s.mag[0]) * 180 / Math.PI + 360) % 360;
+                    drawCompass(heading);
+                    document.getElementById('heading-val').textContent = heading.toFixed(0) + '°';
+                } else {
+                    drawCompass(null);
+                }
+            } catch (e) { /* sensors endpoint optional */ }
+        }, 300);
     </script>
 </body>
 

@@ -206,12 +206,23 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True, stat
         )
 
         if state is not None:
+            # SLAM frames + sensors only exist with the aria:bridge source
+            has_sensors = hasattr(observer, "get_sensors")
+            slam1 = observer.get_frame("slam1") if has_sensors else None
+            slam2 = observer.get_frame("slam2") if has_sensors else None
             with state["frame_lock"]:
                 state["current_frame"] = rgb_out
                 state["current_depth"] = depth_out if depth_out is not None else rgb_out
                 state["current_eye"] = eye_frame
                 state["current_detections"] = detections
                 state["current_gaze"] = gaze_point
+                if slam1 is not None:
+                    state["current_slam1"] = slam1
+                if slam2 is not None:
+                    state["current_slam2"] = slam2
+            if has_sensors:
+                # plain dict swap — atomic enough for the /sensors endpoint
+                state["sensors"] = observer.get_sensors()
 
         # FPS and stats
         frame_count += 1

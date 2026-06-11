@@ -68,6 +68,8 @@ def generate_frames(feed_type="rgb"):
                 src = state["current_depth"]
             elif feed_type == "eye" and state["current_eye"] is not None:
                 src = state["current_eye"]
+            elif feed_type in ("slam1", "slam2"):
+                src = state.get(f"current_{feed_type}")
             else:
                 src = None
             if src is None or id(src) == last_id:
@@ -122,6 +124,24 @@ def depth_feed():
 def eye_feed():
     return Response(generate_frames("eye"),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/slam1_feed')
+def slam1_feed():
+    return Response(generate_frames("slam1"),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/slam2_feed')
+def slam2_feed():
+    return Response(generate_frames("slam2"),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/sensors')
+def sensors():
+    """IMU/magnetometer/barometer snapshot (aria:bridge source only)."""
+    return jsonify(state.get("sensors") or {})
 
 
 @app.route('/status')
