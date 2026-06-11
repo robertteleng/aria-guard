@@ -51,18 +51,34 @@ except Exception:
 
 
 def generate_frames(feed_type="rgb"):
-    """Generator para MJPEG streaming con encoding optimizado."""
+    """Generator para MJPEG streaming con encoding optimizado.
+
+    Rate-limited a ~12 FPS y solo codifica frames nuevos: sin esto, cada
+    stream del navegador entra en un busy-loop de copy+resize+JPEG que
+    compite por el GIL con process_loop y hunde el pipeline a ~2 FPS.
+    """
+    MIN_INTERVAL = 1.0 / 12  # cap ~12 FPS por stream (la fuente da ~10)
+    last_id = None
     while True:
+        t_iter = time.time()
         with state["frame_lock"]:
             if feed_type == "rgb" and state["current_frame"] is not None:
-                frame = state["current_frame"].copy()
+                src = state["current_frame"]
             elif feed_type == "depth" and state["current_depth"] is not None:
-                frame = state["current_depth"].copy()
+                src = state["current_depth"]
             elif feed_type == "eye" and state["current_eye"] is not None:
-                frame = state["current_eye"].copy()
+                src = state["current_eye"]
             else:
-                time.sleep(0.01)
-                continue
+                src = None
+            if src is None or id(src) == last_id:
+                frame = None  # nada nuevo que codificar
+            else:
+                last_id = id(src)
+                frame = src.copy()
+
+        if frame is None:
+            time.sleep(0.01)
+            continue
 
         # CPU resize preserving aspect ratio (max 936p height, ~30% more than 720p)
         h, w = frame.shape[:2]
@@ -78,6 +94,11 @@ def generate_frames(feed_type="rgb"):
 
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + buffer + b'\r\n')
+
+        # Rate limit: cede el GIL el tiempo restante del intervalo
+        remaining = MIN_INTERVAL - (time.time() - t_iter)
+        if remaining > 0:
+            time.sleep(remaining)
 
 
 @app.route('/')
