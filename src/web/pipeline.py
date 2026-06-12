@@ -114,6 +114,7 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True, stat
     frame_count = 0
     start_time = time.time()
     fps = 0
+    last_inferred_id = None
 
     try:
      while True:
@@ -130,7 +131,14 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True, stat
             print(f"\n[PIPELINE] *** DetectorProcess MURIO en frame {frame_count} (exitcode={detector._process.exitcode}) ***")
             break
 
-        detector.send_frame(rgb, eye_frame, hardware_depth)
+        # El input llega a ~10 FPS pero este bucle gira a 21+ it/s: re-inferir el
+        # mismo frame duplica el trabajo GPU y la contencion del bus de memoria
+        # unificada estrangula la recepcion DDS del receiver (bridge Exp 007).
+        if id(rgb) != last_inferred_id:
+            last_inferred_id = id(rgb)
+            detector.send_frame(rgb, eye_frame, hardware_depth)
+        else:
+            time.sleep(0.005)
         result = detector.get_result()
 
         detections = []
