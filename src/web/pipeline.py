@@ -4,6 +4,7 @@ Pipeline de procesamiento: Observer -> Detector -> Tracker -> Alerts -> Dashboar
 Corre en un thread background, alimenta el servidor MJPEG con frames renderizados.
 """
 import sys
+import os
 import time
 from pathlib import Path
 
@@ -89,7 +90,10 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True, stat
         print(f"[PIPELINE] Frame shape: {frame_shape}")
 
     print("[PIPELINE] Iniciando DetectorProcess (CUDA en proceso separado)...")
-    detector = DetectorProcess(mode=mode, enable_depth=True, has_hardware_depth=has_hardware_depth)
+    # ARIA_DEPTH=0 desactiva Depth Anything — para atribuir contencion del bus
+    # de memoria (bridge Exp 007) entre YOLO y depth sin tocar codigo
+    enable_depth = os.environ.get("ARIA_DEPTH", "1") != "0"
+    detector = DetectorProcess(mode=mode, enable_depth=enable_depth, has_hardware_depth=has_hardware_depth)
     if not detector.start(timeout=60, frame_shape=frame_shape):
         print("[PIPELINE] Failed to start DetectorProcess")
         if hasattr(observer, 'stop'):

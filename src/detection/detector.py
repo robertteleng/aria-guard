@@ -97,7 +97,10 @@ class ParallelDetector:
         try:
             from ultralytics import YOLO
 
-            model_name = "yolo26s"
+            # ARIA_YOLO_MODEL permite A/B (yolo26n vs yolo26s) sin tocar codigo;
+            # en el Orin el tamano del modelo gobierna la contencion del bus de
+            # memoria unificada que estrangula al receiver (bridge Exp 007)
+            model_name = os.environ.get("ARIA_YOLO_MODEL", "yolo26s")
             engine_path = MODELS_DIR / f"{model_name}.engine"
             pt_path = MODELS_DIR / f"{model_name}.pt"
 
