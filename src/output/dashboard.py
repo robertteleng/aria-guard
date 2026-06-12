@@ -78,9 +78,11 @@ class Dashboard:
         y_radar = rgb_out.shape[0] - self._radar_size - 10
         rgb_out = self._overlay_image(rgb_out, radar, x_radar, y_radar)
 
-        # 5. Eye tracking (raw frame, gaze is shown on RGB)
+        # 5. Eye tracking (gaze is shown on RGB). Display-only mirror: the IR
+        # camera faces the wearer, so their left eye lands on the right half
+        # of the raw frame. The gaze model keeps the unflipped frame.
         if eye_frame is not None:
-            eye_out = eye_frame.copy()
+            eye_out = cv2.flip(eye_frame, 1)
         else:
             eye_out = np.full((120, 640, 3), 30, dtype=np.uint8)
             cv2.putText(eye_out, "No Eye Tracking", (220, 65),
