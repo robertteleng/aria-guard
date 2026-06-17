@@ -771,7 +771,9 @@ Sync: [frame_ready_event] ←→ [result_ready_event] (mp.Event)
 - ONNX es portable entre x86 y ARM64, pero engine TRT se genera en el target
 
 **¿Qué descarté?**
-- Aria SDK en Jetson — no existe para ARM64
+- Aria SDK en Jetson — no existe para ARM64 *(nota 2026-06-17: superado — `aria-arm64-bridge`
+  corre el SDK x86 bajo FEX-Emu en el Jetson y publica frames por ZMQ. Las gafas Aria SÍ funcionan
+  en Jetson vía el bridge; usar la fuente `aria:bridge`.)*
 - Compilar PyTorch from source — dustynv ya lo tiene
 - Multiprocessing — innecesario sin Aria SDK (no hay conflicto FastDDS)
 

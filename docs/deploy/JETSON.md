@@ -69,10 +69,30 @@ flowchart LR
 |---------|------------|-------------------|
 | Modelos GPU | 3 (YOLO + Depth + Gaze) | 1 (solo YOLO) |
 | Depth | IA (Depth Anything) | Hardware (IR stereo) |
-| Eye Tracking | Sí (Aria cameras) | No |
+| Eye Tracking | Sí (Aria cameras) | No con RealSense — **Sí vía `aria:bridge`** |
 | Procesos | 3 (main + detector + TTS) | 1 (single process) |
 | CPU overhead | ~185% | ~50% estimado |
 | Portabilidad | Requiere PC | Standalone |
+
+> Desde 2026-06-17 las gafas Aria **también funcionan en el Jetson** vía el bridge (ver abajo),
+> así que la columna "Jetson + RealSense" ya no es la única opción de entrada en Jetson.
+
+## Gafas Aria en Jetson vía bridge (`aria:bridge`)
+
+Las gafas Meta Aria funcionan en el Jetson sin SDK x86 nativo, usando el repo hermano
+[aria-arm64-bridge](https://github.com/robertteleng/aria-arm64-bridge): corre el SDK x86 bajo
+FEX-Emu y publica los frames (RGB + SLAM + sensores) por ZMQ. aria-guard los consume con la
+fuente `aria:bridge` (`AriaBridgeObserver`, ya integrado en `src/web/pipeline.py`).
+
+```bash
+# 1. Arrancar el bridge (en aria-arm64-bridge, gafas conectadas, profile12)
+#    Publica frames ARI2 en tcp://127.0.0.1:5555
+# 2. Arrancar aria-guard con la fuente bridge:
+./run.sh aria:bridge
+```
+
+- RGB + SLAM a 10/10/10 FPS con profile12 (enlace USB-NCM sano; ver el README del bridge si SLAM cae).
+- Con el bridge SÍ hay eye tracking y SLAM en Jetson (a diferencia del setup RealSense puro).
 
 ## Componentes
 

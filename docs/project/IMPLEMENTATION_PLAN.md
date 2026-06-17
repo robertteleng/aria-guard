@@ -60,11 +60,13 @@ Despliegue standalone en Jetson Orin Nano con RealSense.
 | # | Milestone | Descripción | Estado |
 |---|-----------|-------------|--------|
 | H23 | UV nativo | Migrar de Docker a UV (pyproject.toml) | ✅ |
-| H24 | Aria on ARM64 | FEX-Emu bridge para Aria SDK en Jetson | ⏳ |
+| H24 | Aria on ARM64 | FEX-Emu bridge para Aria SDK en Jetson | ✅ |
 | H25 | Single-process mode | DetectorLite sin multiprocessing para Jetson + RealSense | Pending |
 | H26 | Ego-motion compensation | Aria IMU para compensar movimiento del usuario | Pending |
 
-> Ver [aria-arm64-bridge](https://github.com/robertteleng/aria-arm64-bridge) para H24.
+> H24 ✅ (2026-06-17): [aria-arm64-bridge](https://github.com/robertteleng/aria-arm64-bridge) corre el
+> SDK x86 de Aria bajo FEX-Emu en el Jetson y publica frames (RGB+SLAM+sensores) por ZMQ. Pipeline
+> end-to-end validado; RGB+SLAM a 10/10/10 FPS con profile12. aria-guard lo consume vía `aria:bridge`.
 
 ---
 
