@@ -8,6 +8,7 @@ NeMo TTS runs in a separate process to avoid CUDA conflicts with detector.
 
 import threading
 import time
+from collections import deque
 from typing import Optional, Dict, Tuple
 
 import numpy as np
@@ -78,6 +79,15 @@ class AudioFeedback:
         self.beep_sample_rate = 44100
         self.base_volume = 0.6
 
+        # --- Real-time audio test loop: event lifecycle + counters ---
+        # Every beep/utterance records whether it actually reached the user
+        # (played/dropped/failed) + detection->sound latency, for the dashboard.
+        self._stats_lock = threading.Lock()
+        self._events = deque(maxlen=25)
+        self._event_seq = 0
+        self._counters = {"played": 0, "dropped": 0, "failed": 0}
+        self._tts_drain_stop = threading.Event()
+
         # TTS engine selection
         self.tts_engine = None
         self.tts_type = None
@@ -113,8 +123,71 @@ class AudioFeedback:
         self.last_tts_time = 0
         self.tts_cooldown = 2.0
 
+        # NeMo plays in a subprocess — drain its return channel into the event
+        # log so the dashboard knows when speech ACTUALLY reached the user.
+        if self.tts_type == "nemo" and self._tts_process is not None:
+            threading.Thread(target=self._drain_tts_results, daemon=True).start()
+
         if self.enabled:
             print("[AUDIO] BRR + pitch audio feedback initialized (H20)")
+
+    # ------------------------------------------------------------------
+    # Real-time audio test loop: event recording + health snapshot
+    # ------------------------------------------------------------------
+    def _record(self, kind: str, detail: str, status: str, reason: str = "",
+                detected_ts: Optional[float] = None,
+                played_ts: Optional[float] = None) -> None:
+        """Append an audio event to the ring buffer (thread-safe).
+
+        kind: "beep" | "speech"; status: "played" | "dropped" | "failed".
+        latency_ms = detected_ts -> played_ts (None if either missing).
+        """
+        latency_ms = None
+        if detected_ts is not None and played_ts is not None:
+            latency_ms = round((played_ts - detected_ts) * 1000, 1)
+        with self._stats_lock:
+            self._event_seq += 1
+            self._counters[status] = self._counters.get(status, 0) + 1
+            self._events.append({
+                "id": self._event_seq,
+                "kind": kind,
+                "detail": detail,
+                "status": status,
+                "reason": reason,
+                "latency_ms": latency_ms,
+                "ts": played_ts if played_ts is not None else time.time(),
+            })
+
+    def get_stats(self) -> dict:
+        """Snapshot of audio health + recent event lifecycle for the dashboard."""
+        with self._stats_lock:
+            events = list(self._events)
+            counters = dict(self._counters)
+        return {
+            "device_ok": bool(_audio_available),
+            "enabled": bool(self.enabled),
+            "engine": self.tts_type or "none",
+            "counters": counters,
+            "events": events,
+        }
+
+    def _drain_tts_results(self) -> None:
+        """Poll the NeMo worker's return channel and log played/failed speech."""
+        while not self._tts_drain_stop.is_set():
+            try:
+                if self._tts_process is not None:
+                    for r in self._tts_process.poll_results():
+                        self._record(
+                            kind="speech",
+                            detail=r.get("text", ""),
+                            status=r.get("status", "played"),
+                            reason=r.get("reason", ""),
+                            detected_ts=r.get("requested_ts"),
+                            played_ts=r.get("played_ts"),
+                        )
+            except Exception as e:
+                print(f"[AUDIO ERROR] tts drain: {e}")
+            time.sleep(0.05)
 
     def _generate_beep(self, freq: float, duration_s: float, volume: float,
                        pan: Tuple[float, float]) -> np.ndarray:
@@ -163,38 +236,57 @@ class AudioFeedback:
         zone: str,
         distance: str = "medium",
         threat_level: str = "ATTENTION",
+        detected_ts: Optional[float] = None,
     ) -> None:
         """Play a BRR burst based on threat level, distance, and zone."""
+        freq = PITCH_MAP.get(distance, 600)
+        detail = f"{threat_level} {zone} {distance} ({freq}Hz)"
+
         if not self.enabled:
+            self._record("beep", detail, "dropped", reason="no_device",
+                         detected_ts=detected_ts)
             return
 
         now = time.time()
         if now - self.last_beep_time < self.beep_cooldown:
+            self._record("beep", detail, "dropped", reason="cooldown",
+                         detected_ts=detected_ts)
             return
         self.last_beep_time = now
 
         def _play():
             try:
                 burst = self._generate_burst(threat_level, distance, zone)
+                # blocking=False returns at playback start -> played_ts ~ start
                 sd.play(burst, samplerate=self.beep_sample_rate, blocking=False)
+                self._record("beep", detail, "played",
+                             detected_ts=detected_ts, played_ts=time.time())
             except Exception as e:
                 print(f"[AUDIO ERROR] Beep: {e}")
+                self._record("beep", detail, "failed", reason=str(e),
+                             detected_ts=detected_ts)
 
         threading.Thread(target=_play, daemon=True).start()
 
-    def speak(self, message: str, force: bool = False) -> bool:
+    def speak(self, message: str, force: bool = False,
+              detected_ts: Optional[float] = None) -> bool:
         """Speak a message using TTS (NeMo process or pyttsx3)."""
         if self.tts_type is None:
+            self._record("speech", message, "dropped", reason="no_engine",
+                         detected_ts=detected_ts)
             return False
 
         now = time.time()
         if not force and (now - self.last_tts_time) < self.tts_cooldown:
+            self._record("speech", message, "dropped", reason="cooldown",
+                         detected_ts=detected_ts)
             return False
 
         self.last_tts_time = now
 
         if self.tts_type == "nemo" and self._tts_process:
-            self._tts_process.speak(message)
+            # The drain thread logs the actual "played" event from the worker.
+            self._tts_process.speak(message, requested_ts=detected_ts)
             return True
 
         elif self.tts_type == "pyttsx3":
@@ -202,10 +294,15 @@ class AudioFeedback:
                 try:
                     self.tts_speaking = True
                     print(f"[AUDIO TTS] {message}")
+                    played_ts = time.time()  # playback starts here
                     self.tts_engine.say(message)
                     self.tts_engine.runAndWait()
+                    self._record("speech", message, "played",
+                                 detected_ts=detected_ts, played_ts=played_ts)
                 except Exception as e:
                     print(f"[AUDIO ERROR] pyttsx3 TTS: {e}")
+                    self._record("speech", message, "failed", reason=str(e),
+                                 detected_ts=detected_ts)
                 finally:
                     self.tts_speaking = False
 
@@ -222,6 +319,7 @@ class AudioFeedback:
         user_looking: bool,
         force_tts: bool = False,
         threat_level: str = "WARNING",
+        detected_ts: Optional[float] = None,
     ) -> None:
         """Alert user about a dangerous object.
 
@@ -232,6 +330,7 @@ class AudioFeedback:
             zone=zone,
             distance=distance,
             threat_level=threat_level,
+            detected_ts=detected_ts,
         )
 
         # TTS: speak threat+direction if forced or if DANGER
@@ -239,27 +338,32 @@ class AudioFeedback:
             zone_word = ZONE_WORDS.get(zone, "")
             tts_level = threat_level.lower() if threat_level != "ATTENTION" else ""
             if tts_level:
-                self.speak(f"{tts_level} {zone_word}")
+                self.speak(f"{tts_level} {zone_word}", detected_ts=detected_ts)
 
-    def alert_traffic_light(self, state: str, zone: str) -> None:
+    def alert_traffic_light(self, state: str, zone: str,
+                            detected_ts: Optional[float] = None) -> None:
         """Alert user about traffic light state (Channel B context)."""
         self.play_spatial_beep(
             zone=zone,
             distance="medium",
             threat_level="ATTENTION",
+            detected_ts=detected_ts,
         )
-        self.speak(f"{state} light", force=True)
+        self.speak(f"{state} light", force=True, detected_ts=detected_ts)
 
-    def alert_sign(self, sign_name: str, zone: str, distance: str) -> None:
+    def alert_sign(self, sign_name: str, zone: str, distance: str,
+                   detected_ts: Optional[float] = None) -> None:
         """Alert user about a road sign (Channel B context)."""
         self.play_spatial_beep(
             zone=zone,
             distance=distance,
             threat_level="ATTENTION",
+            detected_ts=detected_ts,
         )
-        self.speak(f"{sign_name} ahead", force=True)
+        self.speak(f"{sign_name} ahead", force=True, detected_ts=detected_ts)
 
     def shutdown(self):
         """Clean shutdown of TTS process."""
+        self._tts_drain_stop.set()
         if self._tts_process:
             self._tts_process.stop()

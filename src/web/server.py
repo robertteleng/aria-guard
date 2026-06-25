@@ -7,7 +7,7 @@ import threading
 import time
 
 import cv2
-from flask import Flask, Response, render_template, jsonify
+from flask import Flask, Response, render_template, jsonify, request
 
 import logging
 
@@ -156,11 +156,52 @@ def status():
             'threat_level': getattr(d, 'threat_level', 'NONE'),
             'collision_risk': round(getattr(d, 'collision_risk', 0.0), 3),
         } for d in state["current_detections"]] if state["current_detections"] else []
+    audio_ref = state.get("audio_ref")
+    audio_stats = audio_ref.get_stats() if audio_ref is not None else None
     return jsonify({
         'fps': state["system_stats"]["server_fps"],
         'detections': dets,
-        'gaze': list(state["current_gaze"]) if state["current_gaze"] else None
+        'gaze': list(state["current_gaze"]) if state["current_gaze"] else None,
+        'audio': audio_stats,
     })
+
+
+@app.route('/tts/test', methods=['POST'])
+def tts_test():
+    """Speak an arbitrary phrase on demand (dashboard 'probar voz' button).
+
+    Doubles as the by-ear voice A/B tool and the seed for aria-scene's
+    dynamic (VLM) text path.
+    """
+    audio_ref = state.get("audio_ref")
+    if audio_ref is None:
+        return jsonify({"ok": False, "error": "audio not ready"}), 503
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "peligro izquierda").strip()
+    audio_ref.speak(text, force=True, detected_ts=time.time())
+    return jsonify({"ok": True, "text": text})
+
+
+@app.route('/audio/sim', methods=['POST'])
+def audio_sim():
+    """Trigger an exact beep scenario without standing in front of the camera.
+
+    The methodology's scenario matrix: pick (level x zone x distance) and
+    confirm dashboard <-> ear correspondence.
+    """
+    audio_ref = state.get("audio_ref")
+    if audio_ref is None:
+        return jsonify({"ok": False, "error": "audio not ready"}), 503
+    data = request.get_json(silent=True) or {}
+    zone = data.get("zone", "center")
+    distance = data.get("distance", "medium")
+    threat_level = data.get("threat_level", "WARNING")
+    audio_ref.play_spatial_beep(
+        zone=zone, distance=distance, threat_level=threat_level,
+        detected_ts=time.time(),
+    )
+    return jsonify({"ok": True, "zone": zone, "distance": distance,
+                    "threat_level": threat_level})
 
 
 @app.route('/stats')

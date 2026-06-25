@@ -30,9 +30,15 @@ PRECACHE_PHRASES = [
 ]
 
 
-def _tts_worker(queue, sample_rate_out):
-    """Worker process for NeMo TTS. Has its own CUDA context."""
+def _tts_worker(queue, sample_rate_out, result_queue):
+    """Worker process for NeMo TTS. Has its own CUDA context.
+
+    result_queue: return channel — after each utterance actually plays (or
+    fails) the worker reports {text, requested_ts, played_ts, status, reason}
+    so the main process can confirm audio reached the user and measure latency.
+    """
     import os
+    import time
     # Restore CUDA visibility BEFORE importing torch (main process hides it for FastDDS)
     os.environ.pop("CUDA_VISIBLE_DEVICES", None)
     os.environ["NVIDIA_VISIBLE_DEVICES"] = "all"
@@ -122,7 +128,7 @@ def _tts_worker(queue, sample_rate_out):
     # Signal ready
     sample_rate_out.put(sample_rate)
 
-    # Process messages
+    # Process messages. Each message is (text, requested_ts); None = shutdown.
     while True:
         try:
             msg = queue.get()
@@ -142,9 +148,24 @@ def _tts_worker(queue, sample_rate_out):
                 except:
                     break
 
-            audio = generate_audio(msg)
-            print(f"[TTS] {msg}")
-            sd.play(audio, samplerate=sample_rate, blocking=True)
+            text, requested_ts = msg
+            try:
+                audio = generate_audio(text)
+                print(f"[TTS] {text}")
+                # played_ts = instant playback STARTS (so latency = detection ->
+                # sound-start incl. synthesis, not incl. the utterance duration)
+                played_ts = time.time()
+                sd.play(audio, samplerate=sample_rate, blocking=True)
+                result_queue.put({
+                    "text": text, "requested_ts": requested_ts,
+                    "played_ts": played_ts, "status": "played", "reason": "",
+                })
+            except Exception as e:
+                print(f"[TTS PROCESS ERROR] play: {e}")
+                result_queue.put({
+                    "text": text, "requested_ts": requested_ts,
+                    "played_ts": time.time(), "status": "failed", "reason": str(e),
+                })
 
         except Exception as e:
             print(f"[TTS PROCESS ERROR] {e}")
@@ -155,6 +176,7 @@ class TTSProcess:
 
     def __init__(self):
         self.queue = None
+        self.result_queue = None
         self.process = None
         self.sample_rate: int = 22050
         self._ready = False
@@ -162,11 +184,12 @@ class TTSProcess:
     def start(self):
         """Start the TTS process."""
         self.queue = _ctx.Queue()
+        self.result_queue = _ctx.Queue()
         sample_rate_out = _ctx.Queue()
 
         self.process = _ctx.Process(
             target=_tts_worker,
-            args=(self.queue, sample_rate_out),
+            args=(self.queue, sample_rate_out, self.result_queue),
             daemon=True
         )
         self.process.start()
@@ -181,10 +204,30 @@ class TTSProcess:
             self._ready = True
             print("[TTS] Process ready")
 
-    def speak(self, text: str):
-        """Send text to be spoken (non-blocking)."""
+    def speak(self, text: str, requested_ts: Optional[float] = None):
+        """Send text to be spoken (non-blocking).
+
+        requested_ts: detection/request timestamp (time.time()), echoed back
+        in the result so the main process can compute detection->sound latency.
+        """
         if self._ready and self.queue:
-            self.queue.put(text)
+            self.queue.put((text, requested_ts))
+
+    def poll_results(self) -> List[dict]:
+        """Drain the worker's return channel (non-blocking).
+
+        Returns a list of {text, requested_ts, played_ts, status, reason} for
+        each utterance that played or failed since the last poll.
+        """
+        results: List[dict] = []
+        if not self.result_queue:
+            return results
+        while True:
+            try:
+                results.append(self.result_queue.get_nowait())
+            except Exception:
+                break
+        return results
 
     def stop(self):
         """Stop the TTS process."""

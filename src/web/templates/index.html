@@ -514,6 +514,39 @@
                     <span class="value" id="uptime">--</span>
                 </div>
             </div>
+
+            <div class="system-stats" id="audio-panel" style="margin-top:8px">
+                <div class="system-stats-title">🔊 Audio en vivo</div>
+                <div class="stat-row">
+                    <span class="label">Dispositivo</span>
+                    <span class="value" id="audio-device">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="label">Motor</span>
+                    <span class="value" id="audio-engine">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="label">Sonó / Descart. / Falló</span>
+                    <span class="value" id="audio-counters">0 / 0 / 0</span>
+                </div>
+                <div id="audio-events" style="margin-top:6px; max-height:140px; overflow-y:auto; font-size:10px; font-family:monospace; line-height:1.5;">
+                    <div class="empty-state">Sin eventos de audio</div>
+                </div>
+                <div style="margin-top:8px; display:flex; gap:4px;">
+                    <input id="tts-text" type="text" value="peligro izquierda"
+                        style="flex:1; min-width:80px; background:#1f1f2a; border:1px solid #2a2a35; color:#fff; padding:4px 6px; border-radius:4px; font-size:10px;">
+                    <button id="tts-test-btn"
+                        style="background:#2a6df4; border:none; color:#fff; padding:4px 10px; border-radius:4px; cursor:pointer; font-size:10px;">Probar voz</button>
+                </div>
+                <div style="margin-top:6px; display:flex; gap:4px; flex-wrap:wrap;">
+                    <button class="sim-btn" data-level="DANGER" data-zone="left" data-dist="very_close"
+                        style="background:#1f1f2a; border:1px solid #2a2a35; color:#fff; padding:4px 6px; border-radius:4px; cursor:pointer; font-size:10px;">DANGER izq cerca</button>
+                    <button class="sim-btn" data-level="WARNING" data-zone="center" data-dist="medium"
+                        style="background:#1f1f2a; border:1px solid #2a2a35; color:#fff; padding:4px 6px; border-radius:4px; cursor:pointer; font-size:10px;">WARNING centro</button>
+                    <button class="sim-btn" data-level="ATTENTION" data-zone="right" data-dist="far"
+                        style="background:#1f1f2a; border:1px solid #2a2a35; color:#fff; padding:4px 6px; border-radius:4px; cursor:pointer; font-size:10px;">ATTN dcha lejos</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -555,10 +588,62 @@
                     gazeEl.textContent = '--';
                     gazeEl.classList.remove('gaze-active');
                 }
+
+                // --- Audio en vivo: correspondencia dashboard <-> sonido ---
+                const a = data.audio;
+                if (a) {
+                    const devEl = document.getElementById('audio-device');
+                    devEl.textContent = a.device_ok ? 'OK ✅' : 'SIN AUDIO ❌';
+                    devEl.style.color = a.device_ok ? '#4aff4a' : '#ff4a4a';
+                    document.getElementById('audio-engine').textContent =
+                        a.engine + (a.enabled ? '' : ' (beeps off)');
+                    const c = a.counters || {};
+                    document.getElementById('audio-counters').textContent =
+                        (c.played || 0) + ' / ' + (c.dropped || 0) + ' / ' + (c.failed || 0);
+
+                    const evEl = document.getElementById('audio-events');
+                    if (!a.events || a.events.length === 0) {
+                        evEl.innerHTML = '<div class="empty-state">Sin eventos de audio</div>';
+                    } else {
+                        let h = '';
+                        a.events.slice().reverse().forEach(e => {
+                            const icon = e.status === 'played' ? '🔊'
+                                : (e.status === 'dropped' ? '⚠️' : '❌');
+                            const color = e.status === 'played' ? '#4aff4a'
+                                : (e.status === 'dropped' ? '#ffa54a' : '#ff4a4a');
+                            const kind = e.kind === 'speech' ? '🗣' : '·';
+                            const lat = (e.latency_ms != null) ? (' ' + e.latency_ms + 'ms') : '';
+                            const reason = e.reason ? (' (' + e.reason + ')') : '';
+                            h += `<div style="color:${color}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${icon}${kind} ${e.detail}${lat}${reason}</div>`;
+                        });
+                        evEl.innerHTML = h;
+                    }
+                }
             } catch (e) {
                 console.error('Status fetch error:', e);
             }
         }, 200);
+
+        // --- Botones de test de audio (probar voz + simular escenario) ---
+        document.getElementById('tts-test-btn')?.addEventListener('click', () => {
+            const text = document.getElementById('tts-text').value;
+            fetch('/tts/test', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text })
+            }).catch(err => console.error('tts test:', err));
+        });
+        document.querySelectorAll('.sim-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                fetch('/audio/sim', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        threat_level: btn.dataset.level,
+                        zone: btn.dataset.zone,
+                        distance: btn.dataset.dist
+                    })
+                }).catch(err => console.error('audio sim:', err));
+            });
+        });
 
         // Fetch system stats every second
         setInterval(async () => {

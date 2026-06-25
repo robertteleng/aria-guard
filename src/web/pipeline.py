@@ -106,6 +106,10 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True, stat
     audio = AudioFeedback(enabled=enable_audio, use_nemo=enable_audio)
     alert_engine = AlertArbiter()
     tracker = SimpleTracker()
+    if state is not None:
+        # Expose the audio object so the web layer can read its live event
+        # log (/status) and trigger test sounds (/tts/test, /audio/sim).
+        state["audio_ref"] = audio
     print("[PIPELINE] Componentes inicializados")
 
     # Suscribir a DDS DESPUES de que TODOS los componentes esten listos
@@ -185,6 +189,8 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True, stat
 
         # Audio feedback via 2-channel arbiter
         if tracked:
+            # t0 for detection->sound latency: when the detector processed this frame
+            det_ts = result.get("timestamp") if result else None
             channel_a, channel_b = alert_engine.decide(tracker)
 
             if channel_a and channel_a.should_alert:
@@ -196,6 +202,7 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True, stat
                     user_looking=obj.is_gazed,
                     force_tts=channel_a.use_tts,
                     threat_level=channel_a.threat_level,
+                    detected_ts=det_ts,
                 )
 
             if channel_b and channel_b.should_alert:
@@ -204,12 +211,14 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True, stat
                     audio.alert_traffic_light(
                         state=obj.traffic_light_state,
                         zone=obj.zone,
+                        detected_ts=det_ts,
                     )
                 elif obj.name == "stop sign":
                     audio.alert_sign(
                         sign_name=obj.name,
                         zone=obj.zone,
                         distance=obj.distance,
+                        detected_ts=det_ts,
                     )
 
         # Render dashboard
