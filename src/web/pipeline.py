@@ -310,6 +310,10 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True, stat
             audio.shutdown()
         except Exception:
             pass
+        if state is not None:
+            # drop the stale ref so /tts/test and /audio/sim stop acting on a
+            # shut-down audio object
+            state.pop("audio_ref", None)
         if hasattr(observer, 'stop'):
             try:
                 observer.stop()

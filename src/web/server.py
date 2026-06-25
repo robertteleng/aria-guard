@@ -166,6 +166,19 @@ def status():
     })
 
 
+# NOTE: /tts/test and /audio/sim are dashboard control endpoints with NO auth.
+# They assume a trusted local/LAN network (the dashboard is local-only). Do not
+# expose them to the public internet. A minimal cooldown guards /tts/test against
+# accidental synthesis floods (each NeMo utterance is GPU-expensive).
+_SIM_ZONES = {"left", "center", "right"}
+_SIM_DISTANCES = {"very_close", "close", "medium", "far", "unknown"}
+_SIM_LEVELS = {"DANGER", "WARNING", "ATTENTION"}
+
+_tts_test_lock = threading.Lock()
+_last_tts_test = {"t": 0.0}
+_TTS_TEST_COOLDOWN = 0.5  # s — anti-spam for on-demand synthesis
+
+
 @app.route('/tts/test', methods=['POST'])
 def tts_test():
     """Speak an arbitrary phrase on demand (dashboard 'probar voz' button).
@@ -178,7 +191,17 @@ def tts_test():
         return jsonify({"ok": False, "error": "audio not ready"}), 503
     data = request.get_json(silent=True) or {}
     text = (data.get("text") or "peligro izquierda").strip()
-    audio_ref.speak(text, force=True, detected_ts=time.time())
+    if not text or len(text) > 200:
+        return jsonify({"ok": False, "error": "text must be 1..200 chars"}), 400
+
+    # Anti-spam: drop on-demand requests within the cooldown window.
+    now = time.time()
+    with _tts_test_lock:
+        if now - _last_tts_test["t"] < _TTS_TEST_COOLDOWN:
+            return jsonify({"ok": False, "error": "rate limited"}), 429
+        _last_tts_test["t"] = now
+
+    audio_ref.speak(text, force=True, detected_ts=now)
     return jsonify({"ok": True, "text": text})
 
 
@@ -196,6 +219,15 @@ def audio_sim():
     zone = data.get("zone", "center")
     distance = data.get("distance", "medium")
     threat_level = data.get("threat_level", "WARNING")
+    if zone not in _SIM_ZONES or distance not in _SIM_DISTANCES \
+            or threat_level not in _SIM_LEVELS:
+        return jsonify({
+            "ok": False,
+            "error": "invalid params",
+            "allowed": {"zone": sorted(_SIM_ZONES),
+                        "distance": sorted(_SIM_DISTANCES),
+                        "threat_level": sorted(_SIM_LEVELS)},
+        }), 400
     audio_ref.play_spatial_beep(
         zone=zone, distance=distance, threat_level=threat_level,
         detected_ts=time.time(),

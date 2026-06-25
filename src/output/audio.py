@@ -173,6 +173,7 @@ class AudioFeedback:
 
     def _drain_tts_results(self) -> None:
         """Poll the NeMo worker's return channel and log played/failed speech."""
+        consecutive_errors = 0
         while not self._tts_drain_stop.is_set():
             try:
                 if self._tts_process is not None:
@@ -185,9 +186,15 @@ class AudioFeedback:
                             detected_ts=r.get("requested_ts"),
                             played_ts=r.get("played_ts"),
                         )
+                consecutive_errors = 0
+                time.sleep(0.05)
             except Exception as e:
-                print(f"[AUDIO ERROR] tts drain: {e}")
-            time.sleep(0.05)
+                # Back off on a persistently broken queue (e.g. dead worker) so
+                # we don't print 20x/s forever — log once per second instead.
+                consecutive_errors += 1
+                if consecutive_errors <= 3 or consecutive_errors % 20 == 0:
+                    print(f"[AUDIO ERROR] tts drain: {e}")
+                time.sleep(1.0 if consecutive_errors > 3 else 0.05)
 
     def _generate_beep(self, freq: float, duration_s: float, volume: float,
                        pan: Tuple[float, float]) -> np.ndarray:
