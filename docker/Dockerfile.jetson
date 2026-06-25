@@ -30,8 +30,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip python3-dev git build-essential \
     software-properties-common lsb-release curl \
-    # Audio
-    libportaudio2 libasound2-dev libsndfile1 espeak-ng \
+    # Audio (libasound2-plugins = ALSA->PulseAudio bridge so container beeps
+    # reach the host pulse sink / BT headphones)
+    libportaudio2 libasound2-dev libasound2-plugins libsndfile1 espeak-ng \
     # Video/USB
     usbutils ffmpeg libv4l-dev v4l-utils \
     # RealSense
@@ -39,6 +40,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # OpenCV deps
     libgtk-3-0 libavcodec-dev libavformat-dev libswscale-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Route ALSA (PortAudio default) -> PulseAudio so audio reaches the host sink
+# (BT headphones). PULSE_SERVER is provided at `docker run` (mounted socket).
+RUN printf 'pcm.!default { type pulse }\nctl.!default { type pulse }\n' > /etc/asound.conf
 
 WORKDIR /app
 
