@@ -18,19 +18,37 @@ versions loosely.
   (`libasound2-plugins` + `/etc/asound.conf`) and a mounted pulse socket.
   Validated on device: glasses → FEX receiver → Docker detector (9.1 FPS, real
   person/chair detections) → beeps heard on Shokz OpenRun Pro 2.
+- **Spoken alerts via Piper TTS (on-device, es_ES)**: `ARIA_TTS_ENGINE=piper`
+  loads a light, in-process CPU voice (`models/piper/es_ES-davefx-medium.onnx`)
+  — no GPU, no NeMo. Validated on ARM64: synth + playback of a Spanish phrase
+  (2.2 s) on the Shokz. The bridge's `launch_pipeline.sh` enables it by default
+  when the voice model is present (`VOICE=0` to disable).
+- **A2DP stereo restored on Jetson** (was HFP mono): root-caused to NVIDIA's
+  `nv-bluetooth-service.conf` starting `bluetoothd --noplugin=audio,a2dp,avrcp`,
+  which disables BlueZ's A2DP plugin. A `/etc` systemd override re-enables it;
+  the Shokz sink is now `s16le 2ch 44100Hz`. Full write-up in
+  `docs/research/bluetooth-a2dp-jetson-shokz.md`.
+- **`scripts/bt-audio.sh`**: host BT audio control — `status` / `a2dp` (stereo)
+  / `mic [secs]` (A2DP↔HFP switch + record) / `fix` (print the A2DP plugin fix).
 
 ### Changed
 - **Beeps decoupled from NeMo TTS**: spatial beeps (the dominant guidance
-  channel) now run without loading NeMo on the GPU. NeMo is opt-in via
-  `ARIA_TTS_ENGINE=nemo`; the voice engine choice is deferred to a by-ear A/B
-  (Piper rejected as robotic, cloud rejected as non-local).
+  channel) now run without loading NeMo on the GPU. NeMo stays opt-in via
+  `ARIA_TTS_ENGINE=nemo`; **Piper (es_ES) is the selected on-device voice**
+  (`ARIA_TTS_ENGINE=piper`) after the by-ear A/B (cloud rejected as non-local).
+
+### Fixed
+- **A2DP stereo on the Shokz** — see Added. The earlier "HFP mono only"
+  limitation was a disabled BlueZ plugin, not a missing capability.
 
 ### Known limitations
-- BT output is **HFP mono** — PulseAudio 15 on the Jetson does not expose the
-  A2DP profile for the Shokz, so stereo left/right panning is lost. Distance
-  (pitch) and threat level (beep count) are conveyed; the per-side cue is a
-  pending audio-design task (a non-spatial pattern is the right fix for
-  bone-conduction headphones, not A2DP).
+- **Mic capture not working yet on Jetson onboard BT**: the Shokz HFP source
+  streams but delivers silence (rms=0) — SCO-over-HCI on the onboard controller.
+  The A2DP↔HFP switch mechanism (`bt-audio.sh mic`) works; the SCO path does not.
+  Recommended mic source is a **USB mic** (direct ALSA, no profile switch); the
+  Aria glasses' mics are rejected (crash under FEX + steal RGB DDS bandwidth).
+  Decision recorded in `docs/research/bluetooth-a2dp-jetson-shokz.md` and
+  `aria-scene/docs/development/voice-input-and-vlm-feeding.md`.
 
 ### Tests
 - `tests/test_audio_loop.py` (10) — event lifecycle, latency, no-device /

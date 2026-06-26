@@ -46,3 +46,7 @@ Thumbs.db
 
 # Docker build artifacts
 docker/Video_Codec_SDK_*.zip
+
+# Piper voice model (binario, descargable — ver models/piper/README.md)
+models/piper/*.onnx
+models/piper/*.onnx.json

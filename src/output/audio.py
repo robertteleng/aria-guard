@@ -6,6 +6,7 @@ TTS speaks threat level ("danger left") not object type ("car left").
 NeMo TTS runs in a separate process to avoid CUDA conflicts with detector.
 """
 
+import os
 import threading
 import time
 from collections import deque
@@ -74,7 +75,8 @@ ZONE_WORDS = {"left": "left", "right": "right", "center": "straight"}
 class AudioFeedback:
     """Spatial audio feedback with BRR bursts, pitch-by-distance, and TTS."""
 
-    def __init__(self, enabled: bool = True, use_nemo: bool = True):
+    def __init__(self, enabled: bool = True, use_nemo: bool = True,
+                 tts_engine: Optional[str] = None):
         self.enabled = enabled and sd is not None and _audio_available
         self.beep_sample_rate = 44100
         self.base_volume = 0.6
@@ -94,7 +96,25 @@ class AudioFeedback:
         self.tts_speaking = False
         self._tts_process = None
 
-        if use_nemo:
+        # Engine selection: explicit arg > ARIA_TTS_ENGINE env > legacy use_nemo.
+        engine = (tts_engine or os.environ.get("ARIA_TTS_ENGINE", "")).strip().lower()
+        if not engine and use_nemo:
+            engine = "nemo"
+
+        if engine == "piper":
+            try:
+                from src.output.tts import PiperProcess
+                self._tts_process = PiperProcess()
+                self._tts_process.start()
+                if self._tts_process.ready:
+                    self.tts_type = "piper"
+                    print("[AUDIO] Piper TTS ready")
+                else:
+                    self._tts_process = None
+            except Exception as e:
+                print(f"[AUDIO WARN] Piper failed: {e}")
+                self._tts_process = None
+        elif engine == "nemo":
             try:
                 from src.output.tts import TTSProcess
                 self._tts_process = TTSProcess()
@@ -123,9 +143,9 @@ class AudioFeedback:
         self.last_tts_time = 0
         self.tts_cooldown = 2.0
 
-        # NeMo plays in a subprocess — drain its return channel into the event
+        # NeMo/Piper play in a worker — drain their return channel into the event
         # log so the dashboard knows when speech ACTUALLY reached the user.
-        if self.tts_type == "nemo" and self._tts_process is not None:
+        if self.tts_type in ("nemo", "piper") and self._tts_process is not None:
             threading.Thread(target=self._drain_tts_results, daemon=True).start()
 
         if self.enabled:
@@ -291,7 +311,7 @@ class AudioFeedback:
 
         self.last_tts_time = now
 
-        if self.tts_type == "nemo" and self._tts_process:
+        if self.tts_type in ("nemo", "piper") and self._tts_process:
             # The drain thread logs the actual "played" event from the worker.
             self._tts_process.speak(message, requested_ts=detected_ts)
             return True

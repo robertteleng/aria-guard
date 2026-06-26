@@ -241,3 +241,105 @@ class TTSProcess:
     @property
     def ready(self) -> bool:
         return self._ready
+
+
+class PiperProcess:
+    """Piper TTS engine (CPU, local, es_ES). Same interface as TTSProcess, but
+    thread-based (in-process) — Piper is light and needs no CUDA isolation.
+
+    Voice path: ARIA_PIPER_VOICE env, else /app/models/piper/es_ES-davefx-medium.onnx.
+    """
+
+    def __init__(self, voice_path: Optional[str] = None):
+        self.voice_path = voice_path or os.environ.get(
+            "ARIA_PIPER_VOICE",
+            "/app/models/piper/es_ES-davefx-medium.onnx",
+        )
+        self._voice = None
+        self.sample_rate: int = 22050
+        self._queue = None
+        self._results = None
+        self._thread = None
+        self._stop = None
+        self._ready = False
+
+    def start(self):
+        """Load the voice and start the synth/play worker thread."""
+        import queue as _q
+        import threading as _t
+        try:
+            from piper import PiperVoice
+            self._voice = PiperVoice.load(self.voice_path)
+            self.sample_rate = self._voice.config.sample_rate
+        except Exception as e:
+            print(f"[PIPER] load failed ({self.voice_path}): {e}")
+            self._ready = False
+            return
+        self._queue = _q.Queue()
+        self._results = _q.Queue()
+        self._stop = _t.Event()
+        self._thread = _t.Thread(target=self._worker, daemon=True)
+        self._thread.start()
+        self._ready = True
+        print(f"[PIPER] ready (voice={self.voice_path}, {self.sample_rate} Hz)")
+
+    def _worker(self):
+        import time as _time
+        import queue as _q
+        import numpy as np
+        import sounddevice as sd
+        while not self._stop.is_set():
+            try:
+                item = self._queue.get(timeout=0.2)
+            except _q.Empty:
+                continue
+            if item is None:  # shutdown
+                break
+            text, requested_ts = item
+            try:
+                chunks = [c.audio_float_array for c in self._voice.synthesize(text)]
+                audio = (np.concatenate(chunks).astype(np.float32)
+                         if chunks else np.zeros(1, dtype=np.float32))
+                # played_ts = playback start (latency = detection -> sound-start)
+                played_ts = _time.time()
+                sd.play(audio, samplerate=self.sample_rate, blocking=True)
+                self._results.put({
+                    "text": text, "requested_ts": requested_ts,
+                    "played_ts": played_ts, "status": "played", "reason": "",
+                })
+            except Exception as e:
+                print(f"[PIPER] synth/play error: {e}")
+                self._results.put({
+                    "text": text, "requested_ts": requested_ts,
+                    "played_ts": _time.time(), "status": "failed", "reason": str(e),
+                })
+
+    def speak(self, text: str, requested_ts: Optional[float] = None):
+        """Queue text for synthesis + playback (non-blocking)."""
+        if self._ready and self._queue is not None:
+            self._queue.put((text, requested_ts))
+
+    def poll_results(self) -> List[dict]:
+        """Drain played/failed results (non-blocking) — same shape as TTSProcess."""
+        import queue as _q
+        results: List[dict] = []
+        if self._results is None:
+            return results
+        while True:
+            try:
+                results.append(self._results.get_nowait())
+            except _q.Empty:
+                break
+        return results
+
+    def stop(self):
+        if self._stop is not None:
+            self._stop.set()
+        if self._queue is not None:
+            self._queue.put(None)
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+
+    @property
+    def ready(self) -> bool:
+        return self._ready

@@ -103,10 +103,10 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True, stat
     # Non-CUDA components en main process — ANTES de resume_streaming
     print("[PIPELINE] Iniciando componentes...")
     dashboard = Dashboard()
-    # Beeps follow enable_audio; the heavy NeMo TTS is opt-in (engine choice is
-    # deferred to a by-ear A/B). Set ARIA_TTS_ENGINE=nemo to also load NeMo.
-    use_nemo = enable_audio and os.environ.get("ARIA_TTS_ENGINE", "").lower() == "nemo"
-    audio = AudioFeedback(enabled=enable_audio, use_nemo=use_nemo)
+    # Beeps follow enable_audio; the voice engine is chosen by ARIA_TTS_ENGINE
+    # (piper | nemo). Default = beeps only (no voice engine loaded).
+    tts_engine = (os.environ.get("ARIA_TTS_ENGINE", "").lower() or None) if enable_audio else None
+    audio = AudioFeedback(enabled=enable_audio, tts_engine=tts_engine)
     alert_engine = AlertArbiter()
     tracker = SimpleTracker()
     if state is not None:

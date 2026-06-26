@@ -169,6 +169,46 @@ def test_drain_thread_records_speech_with_latency(silent_audio):
 
 # --- counters + ring buffer ---------------------------------------------------
 
+def test_engine_selection_piper_wires_through(monkeypatch):
+    """tts_engine='piper' selects PiperProcess and routes speak() to it."""
+    class FakePiper:
+        ready = True
+        def __init__(self): self.spoken = []
+        def start(self): pass
+        def speak(self, text, requested_ts=None): self.spoken.append((text, requested_ts))
+        def poll_results(self): return []
+        def stop(self): pass
+
+    import src.output.tts as tts_mod
+    monkeypatch.setattr(tts_mod, "PiperProcess", FakePiper, raising=False)
+    monkeypatch.setattr(audio_mod, "_audio_available", False)
+    monkeypatch.setattr(audio_mod, "sd", None)
+    monkeypatch.setattr(audio_mod, "_pyttsx3_available", False)
+
+    a = AudioFeedback(enabled=True, tts_engine="piper")
+    assert a.tts_type == "piper"
+    assert a.speak("peligro izquierda", detected_ts=1.0) is True
+    assert a._tts_process.spoken == [("peligro izquierda", 1.0)]
+
+
+def test_engine_piper_load_failure_is_graceful(monkeypatch):
+    """A Piper that fails to load leaves tts_type=None and speak() drops cleanly."""
+    class FakePiperFail:
+        ready = False
+        def start(self): pass
+
+    import src.output.tts as tts_mod
+    monkeypatch.setattr(tts_mod, "PiperProcess", FakePiperFail, raising=False)
+    monkeypatch.setattr(audio_mod, "_audio_available", False)
+    monkeypatch.setattr(audio_mod, "sd", None)
+    monkeypatch.setattr(audio_mod, "_pyttsx3_available", False)
+
+    a = AudioFeedback(enabled=True, tts_engine="piper")
+    assert a.tts_type is None
+    assert a.speak("x") is False
+    assert a.get_stats()["events"][-1]["reason"] == "no_engine"
+
+
 def test_counters_accumulate_and_events_bounded(silent_audio):
     for _ in range(40):                 # all dropped (no device)
         silent_audio.play_spatial_beep("left", "close", "DANGER")
