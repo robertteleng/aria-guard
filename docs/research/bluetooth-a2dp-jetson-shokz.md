@@ -117,33 +117,49 @@ pactl set-card-profile $CARD a2dp_sink
 
 ### Hallazgo empírico (2026-06-26) y decisión de fuente de micro
 
-Al validar la captura por el perfil HFP del Shokz se observó:
+Test definitivo (hablando al casco 8 s, monitorizando el contador SCO de `hciconfig`):
 
 ```
-$ ./scripts/bt-audio.sh mic 3
-[mic] frames=79800 dur=4.99s rms=0   <- entrega stream pero TODO CEROS
+$ ./scripts/bt-audio.sh mic 8     # + hablando fuerte
+SCO RX delta = 1002 bytes en 8s   # audio real serían DECENAS DE MILES
+frames=143640 dur=8.98s rms=2 max=297   # silencio: PA rellena con ceros
 ```
 
-El stream existe pero **rms=0 (silencio puro)**: es el problema conocido de **SCO sobre HCI**
-en el controlador BT *onboard* del Jetson — el enlace SCO se establece pero el audio del micro
-no llega al host. Es decir, el perfil HFP cambia bien, pero el micro **no captura** por esta vía.
+El perfil HFP cambia y la fuente aparece, pero el **transporte SCO no entrega el audio del
+micro al host** (~1000 bytes en 8 s = nada). Causa: el controlador es un **Realtek USB
+(`rtk_btusb`)** que anuncia paquetes **CVSD (HV1/2/3) pero NO eSCO (EV3/4/5)** — mSBC necesita
+eSCO transparente, así que no puede transportar; y el SCO CVSD tampoco entrega los paquetes del
+micro. Es una debilidad conocida del SCO de Realtek en Linux. (Por qué Siri sí: en un móvil el
+chip BT + firmware implementan HFP/SCO completo por hardware.)
 
 Contexto adicional: usar **los micros de las propias gafas Aria** tampoco es viable aquí — la SDK
 de audio bajo FEX-Emu **crasheaba**, y además añadir un stream de audio DDS roba ancho de banda al
 RGB (ya hay `CRITICAL DDS: sample lost`), degradando la detección de colisiones (seguridad crítica).
 
-**Decisión (fuente de micro):**
+**Decisión (fuente de micro) — elegida: Shokz vía dongle USB BT (CSR):**
 
 | Fuente | Veredicto | Motivo |
 |--------|-----------|--------|
-| **Micro USB** | ✅ **Recomendado** | Captura ALSA directa, sin switch de perfil, sin cortar el A2DP, sin SCO. Lo más robusto para producto. |
-| **Shokz HFP** | ⚠️ Arquitectónicamente correcto, hoy bloqueado | Desacoplado de la pipeline de seguridad, pero el SCO del Jetson entrega silencio. Usable si se resuelve SCO o en otra máquina. |
+| **Shokz vía dongle USB BT (CSR8510)** | ✅ **Elegido** | Mismo casco, pero un adaptador BT que SÍ hace SCO/HFP bien en Linux. No es 2º micro. ~5-10 €. |
+| **Shokz vía BT onboard (Realtek)** | ❌ No funciona aquí | SCO no transporta el micro (1002 bytes/8s). Limitación del `rtk_btusb`. |
+| **Micro USB cableado** | 🔁 Fallback | Captura ALSA directa, fiable, pero es un micro aparte. Solo si el dongle fallara. |
 | **Micros Aria** | ❌ Rechazado | Crashean bajo FEX y roban ancho de banda al RGB de seguridad. |
 
 El mecanismo de switch (`bt-audio.sh mic`) queda implementado y probado (el perfil cambia y vuelve);
-el bloqueo es el SCO del hardware, no el código. La integración de voz (aria-scene) debe alimentar
-su `SpeechRecognizer` desde una **captura de micro del host** (USB hoy; Shokz HFP cuando el SCO vaya),
-nunca desde `aria_camera.get_audio_samples` (la vía que crasheaba).
+el bloqueo es el SCO del **adaptador onboard**, no el código. La integración de voz (aria-scene) debe
+alimentar su `SpeechRecognizer` desde una **captura de micro del host** (el `bluez_source...` del casco
+emparejado al dongle), nunca desde `aria_camera.get_audio_samples` (la vía que crasheaba).
+
+### Setup del dongle USB BT (cuando llegue)
+
+1. Enchufar el dongle → aparece `hci1` (`hciconfig -a` debe listar dos controladores).
+2. (Opcional, recomendado) bloquear el BT Realtek onboard para que el casco use solo el dongle:
+   `sudo rfkill block <idx-realtek>` o `hciconfig hci0 down`.
+3. Emparejar el Shokz al dongle: `bluetoothctl` → `select <BD_ADDR-dongle>` → `scan on` →
+   `pair`/`connect <BT_MAC>`.
+4. Verificar: `./scripts/bt-audio.sh mic 5` hablando → `rms` debe subir a >1000 y el `SCO RX delta`
+   a decenas de miles. A2DP estéreo sigue por el dongle (el fix del plugin a2dp es global, ya aplicado).
+5. Ojo con clones CSR falsos: si el `mic` sigue dando silencio, probar otro dongle (CSR8510 genuino).
 
 ## Fuentes
 

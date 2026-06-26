@@ -42,13 +42,16 @@ versions loosely.
   limitation was a disabled BlueZ plugin, not a missing capability.
 
 ### Known limitations
-- **Mic capture not working yet on Jetson onboard BT**: the Shokz HFP source
-  streams but delivers silence (rms=0) — SCO-over-HCI on the onboard controller.
-  The A2DP↔HFP switch mechanism (`bt-audio.sh mic`) works; the SCO path does not.
-  Recommended mic source is a **USB mic** (direct ALSA, no profile switch); the
-  Aria glasses' mics are rejected (crash under FEX + steal RGB DDS bandwidth).
-  Decision recorded in `docs/research/bluetooth-a2dp-jetson-shokz.md` and
-  `aria-scene/docs/development/voice-input-and-vlm-feeding.md`.
+- **Mic capture blocked on the Jetson's onboard Realtek BT**: the Shokz HFP
+  source streams but delivers silence — measured 1002 bytes of SCO in 8 s while
+  speaking (rms=2). The controller advertises CVSD (HV1/2/3) but no eSCO, so
+  mSBC can't transport and CVSD SCO doesn't deliver mic packets either —
+  a known `rtk_btusb` SCO weakness. The A2DP↔HFP switch (`bt-audio.sh mic`)
+  works; the SCO transport does not. **Chosen path: keep the Shokz mic via a
+  USB BT dongle (CSR8510)** that handles HFP/SCO on Linux (a USB wired mic is the
+  fallback). Aria glasses' mics rejected (crash under FEX + steal RGB DDS
+  bandwidth). Setup + evidence in `docs/research/bluetooth-a2dp-jetson-shokz.md`
+  and `aria-scene/docs/development/voice-input-and-vlm-feeding.md`.
 
 ### Tests
 - `tests/test_audio_loop.py` (10) — event lifecycle, latency, no-device /
