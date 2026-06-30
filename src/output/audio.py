@@ -69,7 +69,13 @@ PAN_MAP = {
 }
 
 # Zone to spoken word
-ZONE_WORDS = {"left": "left", "right": "right", "center": "straight"}
+# Voz en español (es_ES): los mensajes hablados van en español para casar con la
+# voz Piper es_ES (antes "warning left" con voz española sonaba incoherente).
+# Los beeps espaciales y las etiquetas del dashboard no cambian.
+ZONE_WORDS = {"left": "izquierda", "right": "derecha", "center": "al frente"}
+THREAT_WORDS_ES = {"DANGER": "peligro", "WARNING": "precaución"}  # ATTENTION = sin voz
+TL_STATE_WORDS_ES = {"red": "rojo", "green": "verde", "yellow": "amarillo"}
+SIGN_WORDS_ES = {"stop sign": "stop", "stop": "stop"}
 
 
 class AudioFeedback:
@@ -363,9 +369,9 @@ class AudioFeedback:
         # TTS: speak threat+direction if forced or if DANGER
         if force_tts:
             zone_word = ZONE_WORDS.get(zone, "")
-            tts_level = threat_level.lower() if threat_level != "ATTENTION" else ""
+            tts_level = THREAT_WORDS_ES.get(threat_level, "")  # ATTENTION → solo beep
             if tts_level:
-                self.speak(f"{tts_level} {zone_word}", detected_ts=detected_ts)
+                self.speak(f"{tts_level} {zone_word}".strip(), detected_ts=detected_ts)
 
     def alert_traffic_light(self, state: str, zone: str,
                             detected_ts: Optional[float] = None) -> None:
@@ -376,7 +382,8 @@ class AudioFeedback:
             threat_level="ATTENTION",
             detected_ts=detected_ts,
         )
-        self.speak(f"{state} light", force=True, detected_ts=detected_ts)
+        self.speak(f"semáforo {TL_STATE_WORDS_ES.get(state, state)}",
+                   force=True, detected_ts=detected_ts)
 
     def alert_sign(self, sign_name: str, zone: str, distance: str,
                    detected_ts: Optional[float] = None) -> None:
@@ -387,7 +394,8 @@ class AudioFeedback:
             threat_level="ATTENTION",
             detected_ts=detected_ts,
         )
-        self.speak(f"{sign_name} ahead", force=True, detected_ts=detected_ts)
+        self.speak(f"{SIGN_WORDS_ES.get(sign_name, sign_name)} delante",
+                   force=True, detected_ts=detected_ts)
 
     def shutdown(self):
         """Clean shutdown of TTS process."""
