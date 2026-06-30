@@ -79,11 +79,13 @@ class Dashboard:
         rgb_out = self._overlay_image(rgb_out, radar, x_radar, y_radar)
 
         # 5. Eye tracking panel (the gaze crosshair is drawn on the RGB, not here).
-        # Horizontal flip so the wearer's left eye shows on the LEFT of the panel.
-        # Confirmed by eye on device (2026-06-30): without it the eyes read L/R
-        # swapped. Display-only — the gaze model uses observer.get_frame('eye').
+        # No horizontal flip: on device the wearer confirmed this orientation is
+        # correct ("el ojo ya está bien") while cv2.flip read L/R swapped. The
+        # observer's np.rot90(image, 2) already handles the un-mirror. If it ever
+        # reads swapped again, toggle a single cv2.flip(eye_frame, 1) here — but
+        # confirm by eye, do not guess. Display-only; gaze model unaffected.
         if eye_frame is not None:
-            eye_out = cv2.flip(eye_frame, 1)
+            eye_out = eye_frame
         else:
             eye_out = np.full((120, 640, 3), 30, dtype=np.uint8)
             cv2.putText(eye_out, "No Eye Tracking", (220, 65),
