@@ -516,22 +516,14 @@
             </div>
 
             <div class="system-stats" id="audio-panel" style="margin-top:8px">
-                <div class="system-stats-title">🔊 Audio en vivo</div>
-                <div class="stat-row">
-                    <span class="label">Dispositivo</span>
-                    <span class="value" id="audio-device">--</span>
+                <div class="system-stats-title">🔊 Audio / Alertas</div>
+                <div style="display:flex; gap:6px; margin:8px 0;">
+                    <div class="azone" id="az-left"   style="flex:1; text-align:center; padding:16px 4px; border-radius:6px; background:#1a1a24; border:1px solid #2a2a35; color:#666; font-weight:700; font-size:12px; transition:all .12s;">IZQ</div>
+                    <div class="azone" id="az-center" style="flex:1; text-align:center; padding:16px 4px; border-radius:6px; background:#1a1a24; border:1px solid #2a2a35; color:#666; font-weight:700; font-size:12px; transition:all .12s;">CENTRO</div>
+                    <div class="azone" id="az-right"  style="flex:1; text-align:center; padding:16px 4px; border-radius:6px; background:#1a1a24; border:1px solid #2a2a35; color:#666; font-weight:700; font-size:12px; transition:all .12s;">DCHA</div>
                 </div>
-                <div class="stat-row">
-                    <span class="label">Motor</span>
-                    <span class="value" id="audio-engine">--</span>
-                </div>
-                <div class="stat-row">
-                    <span class="label">Sonó / Descart. / Falló</span>
-                    <span class="value" id="audio-counters">0 / 0 / 0</span>
-                </div>
-                <div id="audio-events" style="margin-top:6px; max-height:140px; overflow-y:auto; font-size:10px; font-family:monospace; line-height:1.5;">
-                    <div class="empty-state">Sin eventos de audio</div>
-                </div>
+                <div id="alert-phrase" style="text-align:center; font-size:14px; color:#ddd; min-height:20px; font-style:italic;">—</div>
+                <div id="audio-meta" style="font-size:10px; color:#888; text-align:center; margin-top:4px;">Motor: -- · --</div>
                 <div style="margin-top:8px; display:flex; gap:4px;">
                     <input id="tts-text" type="text" value="peligro izquierda"
                         style="flex:1; min-width:80px; background:#1f1f2a; border:1px solid #2a2a35; color:#fff; padding:4px 6px; border-radius:4px; font-size:10px;">
@@ -589,34 +581,20 @@
                     gazeEl.classList.remove('gaze-active');
                 }
 
-                // --- Audio en vivo: correspondencia dashboard <-> sonido ---
+                // --- Audio / Alertas: visualizador espacial ---
                 const a = data.audio;
                 if (a) {
-                    const devEl = document.getElementById('audio-device');
-                    devEl.textContent = a.device_ok ? 'OK ✅' : 'SIN AUDIO ❌';
-                    devEl.style.color = a.device_ok ? '#4aff4a' : '#ff4a4a';
-                    document.getElementById('audio-engine').textContent =
-                        a.engine + (a.enabled ? '' : ' (beeps off)');
-                    const c = a.counters || {};
-                    document.getElementById('audio-counters').textContent =
-                        (c.played || 0) + ' / ' + (c.dropped || 0) + ' / ' + (c.failed || 0);
-
-                    const evEl = document.getElementById('audio-events');
-                    if (!a.events || a.events.length === 0) {
-                        evEl.innerHTML = '<div class="empty-state">Sin eventos de audio</div>';
-                    } else {
-                        let h = '';
-                        a.events.slice().reverse().forEach(e => {
-                            const icon = e.status === 'played' ? '🔊'
-                                : (e.status === 'dropped' ? '⚠️' : '❌');
-                            const color = e.status === 'played' ? '#4aff4a'
-                                : (e.status === 'dropped' ? '#ffa54a' : '#ff4a4a');
-                            const kind = e.kind === 'speech' ? '🗣' : '·';
-                            const lat = (e.latency_ms != null) ? (' ' + e.latency_ms + 'ms') : '';
-                            const reason = e.reason ? (' (' + e.reason + ')') : '';
-                            h += `<div style="color:${color}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${icon}${kind} ${e.detail}${lat}${reason}</div>`;
-                        });
-                        evEl.innerHTML = h;
+                    document.getElementById('audio-meta').textContent =
+                        'Motor: ' + a.engine + (a.enabled ? '' : ' (beeps off)') +
+                        ' · ' + (a.device_ok ? 'audio ✓' : 'SIN AUDIO ✗');
+                    const evs = a.events || [];
+                    if (evs.length) {
+                        let latest = evs[0];
+                        for (const e of evs) if (e.id > latest.id) latest = e;
+                        if (latest.id !== window._lastAlertId) {
+                            window._lastAlertId = latest.id;
+                            showAlert(latest);
+                        }
                     }
                 }
             } catch (e) {
@@ -644,6 +622,38 @@
                 }).catch(err => console.error('audio sim:', err));
             });
         });
+
+        // --- Visualizador espacial de alertas de audio ---
+        const ALERT_COLORS = { DANGER: '#ff3b3b', WARNING: '#ff9a3b', ATTENTION: '#ffd23b' };
+        const ZONE_ES = { left: 'IZQUIERDA', center: 'AL FRENTE', right: 'DERECHA' };
+        let _alertFade = null;
+        function _resetZones() {
+            ['left', 'center', 'right'].forEach(z => {
+                const el = document.getElementById('az-' + z);
+                if (!el) return;
+                el.style.background = '#1a1a24'; el.style.borderColor = '#2a2a35';
+                el.style.color = '#666'; el.style.boxShadow = 'none'; el.style.transform = 'scale(1)';
+            });
+            const p = document.getElementById('alert-phrase'); if (p) p.textContent = '—';
+        }
+        function showAlert(e) {
+            const d = (e.detail || '').toLowerCase();
+            const level = (d.includes('danger') || d.includes('peligro')) ? 'DANGER'
+                        : (d.includes('warning') || d.includes('precauci')) ? 'WARNING' : 'ATTENTION';
+            const zone = (d.includes('left') || d.includes('izquierda')) ? 'left'
+                       : (d.includes('right') || d.includes('derecha')) ? 'right' : 'center';
+            _resetZones();
+            const el = document.getElementById('az-' + zone);
+            if (!el) return;
+            const c = ALERT_COLORS[level];
+            el.style.background = c; el.style.borderColor = c; el.style.color = '#111';
+            el.style.boxShadow = '0 0 18px ' + c; el.style.transform = 'scale(1.06)';
+            const p = document.getElementById('alert-phrase');
+            if (p) p.textContent = (e.kind === 'speech') ? ('“' + e.detail + '”')
+                                                          : (level + ' · ' + ZONE_ES[zone]);
+            clearTimeout(_alertFade);
+            _alertFade = setTimeout(_resetZones, 2200);
+        }
 
         // Fetch system stats every second
         setInterval(async () => {
