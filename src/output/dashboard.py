@@ -305,3 +305,43 @@ class SimpleDashboard:
         h, w = img.shape[:2]
         new_w = int(w * height / h)
         return cv2.resize(img, (new_w, height))
+
+
+def _label_tile(img: Optional[np.ndarray], label: str, tw: int, th: int) -> np.ndarray:
+    """Resize a panel to a (th, tw) BGR tile with a label banner.
+
+    None / empty → black placeholder (so missing streams don't break the grid).
+    """
+    if img is None or getattr(img, "size", 0) == 0:
+        tile = np.zeros((th, tw, 3), dtype=np.uint8)
+    else:
+        if img.ndim == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        tile = cv2.resize(img, (tw, th))
+    cv2.rectangle(tile, (0, 0), (tw, 20), (0, 0, 0), -1)
+    cv2.putText(tile, label, (4, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+    return tile
+
+
+def compose_dashboard_frame(panels: dict, status_lines=None,
+                            tw: int = 320, th: int = 240) -> np.ndarray:
+    """Tile dashboard panels into ONE BGR image for recording/streaming.
+
+    panels: dict with optional keys rgb, depth, eye, slam1, slam2 (np arrays or None).
+    Returns a 2x3 grid (rgb|depth|eye / slam1|slam2|status). Pure + testable.
+    """
+    rgb = _label_tile(panels.get("rgb"), "RGB + detecciones", tw, th)
+    depth = _label_tile(panels.get("depth"), "Depth", tw, th)
+    eye = _label_tile(panels.get("eye"), "Eye / Gaze", tw, th)
+    slam1 = _label_tile(panels.get("slam1"), "SLAM L", tw, th)
+    slam2 = _label_tile(panels.get("slam2"), "SLAM R", tw, th)
+
+    status = np.zeros((th, tw, 3), dtype=np.uint8)
+    cv2.rectangle(status, (0, 0), (tw, 20), (0, 0, 0), -1)
+    cv2.putText(status, "Status", (4, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+    for i, line in enumerate(status_lines or []):
+        cv2.putText(status, str(line), (6, 50 + i * 26),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+
+    return np.vstack([np.hstack([rgb, depth, eye]),
+                      np.hstack([slam1, slam2, status])])

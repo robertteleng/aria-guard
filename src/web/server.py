@@ -103,6 +103,50 @@ def generate_frames(feed_type="rgb"):
             time.sleep(remaining)
 
 
+def generate_dashboard():
+    """MJPEG of the FULL dashboard — all panels tiled into ONE frame.
+
+    Lets `ffmpeg -f mpjpeg -i .../dashboard_feed` record the whole dashboard
+    (RGB+detections, depth, eye, SLAM, status) in a single synced video, instead
+    of only the RGB feed. Same ~12 FPS rate-limit as the per-panel feeds.
+    """
+    from src.output.dashboard import compose_dashboard_frame
+    MIN_INTERVAL = 1.0 / 12
+    while True:
+        t_iter = time.time()
+        with state["frame_lock"]:
+            panels = {
+                "rgb": state.get("current_frame"),
+                "depth": state.get("current_depth"),
+                "eye": state.get("current_eye"),
+                "slam1": state.get("current_slam1"),
+                "slam2": state.get("current_slam2"),
+            }
+            panels = {k: (v.copy() if v is not None else None)
+                      for k, v in panels.items()}
+        if not any(p is not None for p in panels.values()):
+            time.sleep(0.05)
+            continue
+        with state["stats_lock"]:
+            st = dict(state.get("system_stats") or {})
+        status_lines = [
+            f"FPS det: {float(st.get('detector_fps', 0) or 0):.1f}",
+            f"Latencia: {float(st.get('latency_ms', 0) or 0):.0f} ms",
+            f"Uptime: {float(st.get('uptime_sec', 0) or 0):.0f} s",
+        ]
+        composite = compose_dashboard_frame(panels, status_lines)
+        if _TURBOJPEG:
+            buffer = _TURBOJPEG.encode(composite, quality=75)
+        else:
+            _, buf = cv2.imencode('.jpg', composite, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            buffer = buf.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + buffer + b'\r\n')
+        remaining = MIN_INTERVAL - (time.time() - t_iter)
+        if remaining > 0:
+            time.sleep(remaining)
+
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -135,6 +179,13 @@ def slam1_feed():
 @app.route('/slam2_feed')
 def slam2_feed():
     return Response(generate_frames("slam2"),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/dashboard_feed')
+def dashboard_feed():
+    """Full dashboard (all panels tiled) as one MJPEG stream — for recording."""
+    return Response(generate_dashboard(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
 

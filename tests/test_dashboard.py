@@ -7,7 +7,7 @@ regression where the mirror is removed.
 """
 import numpy as np
 
-from src.output.dashboard import Dashboard
+from src.output.dashboard import Dashboard, compose_dashboard_frame
 
 # Gaze marker color drawn by _draw_gaze (BGR magenta)
 _GAZE_BGR = (255, 0, 255)
@@ -65,3 +65,29 @@ class TestGazeRendering:
         w, h = out.shape[1], out.shape[0]
         assert cx > w * 0.5, f"x should clamp to the right edge (cx={cx})"
         assert cy < h * 0.5, f"y should clamp to the top (cy={cy})"
+
+
+class TestDashboardComposite:
+    """The /dashboard_feed composite frame (all panels tiled into one image)."""
+
+    def test_full_grid_shape(self):
+        out = compose_dashboard_frame(
+            {
+                "rgb": np.full((100, 200, 3), 50, dtype=np.uint8),
+                "depth": np.full((80, 80, 3), 60, dtype=np.uint8),
+                "eye": np.zeros((40, 120), dtype=np.uint8),   # grayscale → must convert
+                "slam1": np.zeros((480, 640), dtype=np.uint8),
+                "slam2": None,
+            },
+            status_lines=["FPS det: 8.1", "Latencia: 120 ms"], tw=320, th=240,
+        )
+        assert out.shape == (480, 960, 3)  # 2 rows x 3 cols of 240x320
+        assert out.dtype == np.uint8
+
+    def test_missing_panels_no_crash(self):
+        out = compose_dashboard_frame({}, status_lines=None, tw=100, th=80)
+        assert out.shape == (160, 300, 3)  # all-black placeholders, still a valid grid
+
+    def test_grayscale_panel_is_converted_to_bgr(self):
+        out = compose_dashboard_frame({"rgb": np.zeros((50, 50), dtype=np.uint8)}, tw=100, th=80)
+        assert out.ndim == 3 and out.shape[2] == 3
