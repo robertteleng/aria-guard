@@ -56,3 +56,12 @@ class TestGazeRendering:
         _, cy = _marker_center(out)
         h = out.shape[0]
         assert abs(cy - 0.25 * h) < 20, f"y should be ~0.25*h (cy={cy})"
+
+    def test_gaze_out_of_range_is_clamped(self):
+        """Out-of-range gaze (x>1, y<0) is clamped to the frame, no off-frame draw."""
+        frame = np.zeros((200, 400, 3), dtype=np.uint8)
+        out = Dashboard()._draw_gaze(frame, (1.5, -0.2))  # would draw off-frame unclamped
+        cx, cy = _marker_center(out)
+        w, h = out.shape[1], out.shape[0]
+        assert cx > w * 0.5, f"x should clamp to the right edge (cx={cx})"
+        assert cy < h * 0.5, f"y should clamp to the top (cy={cy})"

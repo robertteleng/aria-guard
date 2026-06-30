@@ -157,8 +157,10 @@ class Dashboard:
         h, w = frame.shape[:2]
         # Sin espejo: el modelo de gaze ya da la x en coordenadas del RGB. Un
         # (1-x) extra invertía el crosshair (izq<->der). Usar la x directa.
-        gx = int(gaze_point[0] * w)
-        gy = int(gaze_point[1] * h)
+        # Clamp a [0,1]: el gaze del detector no viene saturado (sí el precomputed),
+        # un valor fuera de rango dibujaría fuera del frame.
+        gx = int(min(max(gaze_point[0], 0.0), 1.0) * w)
+        gy = int(min(max(gaze_point[1], 0.0), 1.0) * h)
 
         # Círculo grande con crosshair
         cv2.circle(frame, (gx, gy), 20, (255, 0, 255), 2)
