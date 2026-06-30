@@ -7,6 +7,21 @@ versions loosely.
 ## [Unreleased]
 
 ### Added
+- **Ego-motion compensation + bbox-height looming (fewer false DANGER alerts)**:
+  while the user walks, every object ahead "approaches" (depth grows) even when
+  static — the dominant source of "alertas mediocres". The tracker now subtracts
+  a walking bias (`EGO_MOTION_WALKING_BIAS = 0.05`) from the apparent approach
+  when `motion_state == "walking"`, so static obstacles don't read as collisions
+  while genuinely fast approachers still trigger DANGER. A complementary,
+  depth-model-independent **looming** cue from bbox-height growth
+  (`(Δheight/height)·depth_value`, fused via `max`) survives the relative-depth
+  (`NORM_MINMAX`) noise; it stays in depth-slope units so TTC is unchanged.
+  Motion state comes from IMU accel variance (`AriaDemoObserver` and, on Jetson,
+  `AriaBridgeObserver.get_motion_state`). Tests: `tests/test_ego_motion.py`
+  (+ bridge `tests/test_motion_state.py`). Depth/near-far path audited in
+  `docs/research/depth-and-approach-audit.md`. (Offline benchmark regression not
+  re-run — its detection JSON isn't in the repo; the change only reduces false
+  approaches, the safe direction for the alert-rate constraint.)
 - **Real-time audio test loop**: the command dashboard now shows, per audio
   event, whether what the system detects actually reaches the user as sound —
   `played` / `dropped` / `failed`, the reason, and detection→sound latency,
