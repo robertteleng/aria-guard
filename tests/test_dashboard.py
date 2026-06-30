@@ -30,29 +30,29 @@ def _marker_center(frame: np.ndarray):
     return (xs.min() + xs.max()) / 2, (ys.min() + ys.max()) / 2
 
 
-class TestGazeMirror:
-    def test_gaze_x_mirrored_to_opposite_half(self):
-        """Model x=0.2 (left) must be drawn near the RIGHT (0.8*w)."""
+class TestGazeRendering:
+    def test_gaze_x_follows_model(self):
+        """Model x=0.2 is drawn at ~0.2*w (no horizontal mirror)."""
         frame = np.zeros((200, 400, 3), dtype=np.uint8)
         out = Dashboard()._draw_gaze(frame, (0.2, 0.5))
         cx, _ = _marker_center(out)
         w = out.shape[1]
-        assert cx > w * 0.5, f"marker not mirrored to right half (cx={cx})"
-        assert abs(cx - 0.8 * w) < 20, f"marker not near 0.8*w (cx={cx})"
+        assert cx < w * 0.5, f"marker should be on the left (cx={cx})"
+        assert abs(cx - 0.2 * w) < 20, f"marker should be near 0.2*w (cx={cx})"
 
-    def test_gaze_x_mirror_is_symmetric(self):
-        """A right-side gaze (0.85) must land on the LEFT (~0.15*w)."""
+    def test_gaze_x_right_stays_right(self):
+        """A right gaze (0.85) is drawn near 0.85*w (right half)."""
         frame = np.zeros((200, 400, 3), dtype=np.uint8)
         out = Dashboard()._draw_gaze(frame, (0.85, 0.5))
         cx, _ = _marker_center(out)
         w = out.shape[1]
-        assert cx < w * 0.5, f"marker not mirrored to left half (cx={cx})"
-        assert abs(cx - 0.15 * w) < 20, f"marker not near 0.15*w (cx={cx})"
+        assert cx > w * 0.5, f"marker should be on the right (cx={cx})"
+        assert abs(cx - 0.85 * w) < 20, f"marker should be near 0.85*w (cx={cx})"
 
-    def test_gaze_y_not_mirrored(self):
-        """Vertical coordinate is NOT flipped — only the horizontal axis is."""
+    def test_gaze_y_follows_model(self):
+        """Vertical coordinate tracks the model y directly (no flip)."""
         frame = np.zeros((200, 400, 3), dtype=np.uint8)
         out = Dashboard()._draw_gaze(frame, (0.5, 0.25))
         _, cy = _marker_center(out)
         h = out.shape[0]
-        assert abs(cy - 0.25 * h) < 20, f"y should track input (~0.25*h), got cy={cy}"
+        assert abs(cy - 0.25 * h) < 20, f"y should be ~0.25*h (cy={cy})"

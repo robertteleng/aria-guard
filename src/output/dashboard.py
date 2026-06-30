@@ -155,9 +155,9 @@ class Dashboard:
     ) -> np.ndarray:
         """Dibuja punto de mirada."""
         h, w = frame.shape[:2]
-        # Espejo horizontal solo de display: el modelo de gaze da la x correcta,
-        # pero en el dashboard el punto salia en el lado contrario (izq<->der).
-        gx = int((1.0 - gaze_point[0]) * w)
+        # Sin espejo: el modelo de gaze ya da la x en coordenadas del RGB. Un
+        # (1-x) extra invertía el crosshair (izq<->der). Usar la x directa.
+        gx = int(gaze_point[0] * w)
         gy = int(gaze_point[1] * h)
 
         # Círculo grande con crosshair
