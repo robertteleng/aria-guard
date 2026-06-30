@@ -74,12 +74,14 @@ RUN pip3 install --no-cache-dir opencv-python-headless
 # TensorRT ya está incluido en L4T base
 
 # Resto de dependencias (sin Aria SDK)
+# pyzmq: consumir frames del bridge FEX (antes se instalaba en cada arranque).
 RUN pip3 install --no-cache-dir \
     numpy \
     flask \
     sounddevice \
     ultralytics \
-    transformers
+    transformers \
+    pyzmq
 
 # NeMo TTS (puede fallar en ARM, usar fallback)
 RUN pip3 install --no-cache-dir "nemo_toolkit[tts]" || \
@@ -89,6 +91,17 @@ RUN pip3 install --no-cache-dir "nemo_toolkit[tts]" || \
 RUN pip3 install --no-cache-dir \
     adafruit-circuitpython-bno08x \
     adafruit-blinka
+
+# Voz on-device (Piper es_ES) + ONNX runtime — horneados para que
+# launch_pipeline.sh no los instale en cada arranque (~30-60 s menos). El modelo
+# de voz se monta del host (models/piper); aquí solo los paquetes Python.
+RUN pip3 install --no-cache-dir piper-tts onnxruntime || \
+    echo "piper-tts/onnxruntime wheel not available for this platform"
+
+# numpy<2 al FINAL (force): cv2 de esta imagen está compilado contra numpy 1.x;
+# numpy 2.x lo rompe ("img is not a numpy array"). Esto elimina el
+# `pip install 'numpy<2' --force-reinstall` que el launch hacía en cada arranque.
+RUN pip3 install --no-cache-dir --force-reinstall 'numpy<2'
 
 # =============================================================================
 # Código fuente
