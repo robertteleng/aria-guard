@@ -78,6 +78,18 @@ TL_STATE_WORDS_ES = {"red": "rojo", "green": "verde", "yellow": "amarillo"}
 SIGN_WORDS_ES = {"stop sign": "stop", "stop": "stop"}
 
 
+def es_alert_phrase(threat_level: str, zone: str) -> str:
+    """Frase hablada en español para una alerta de amenaza (Canal A).
+
+    Devuelve "" cuando no debe hablar (p.ej. ATTENTION → solo beep). Zona
+    desconocida → solo el nivel (sin sufijo). Pura y testeable.
+    """
+    level = THREAT_WORDS_ES.get(threat_level, "")
+    if not level:
+        return ""
+    return f"{level} {ZONE_WORDS.get(zone, '')}".strip()
+
+
 class AudioFeedback:
     """Spatial audio feedback with BRR bursts, pitch-by-distance, and TTS."""
 
@@ -368,10 +380,9 @@ class AudioFeedback:
 
         # TTS: speak threat+direction if forced or if DANGER
         if force_tts:
-            zone_word = ZONE_WORDS.get(zone, "")
-            tts_level = THREAT_WORDS_ES.get(threat_level, "")  # ATTENTION → solo beep
-            if tts_level:
-                self.speak(f"{tts_level} {zone_word}".strip(), detected_ts=detected_ts)
+            phrase = es_alert_phrase(threat_level, zone)
+            if phrase:
+                self.speak(phrase, detected_ts=detected_ts)
 
     def alert_traffic_light(self, state: str, zone: str,
                             detected_ts: Optional[float] = None) -> None:
