@@ -1755,3 +1755,46 @@ Copia esto para cada feature nueva:
 - **Lo que costo:** 3 sesiones de diagnostico — la hipotesis inicial (FastDDS SHM) era incorrecta
 - **Lo que haria diferente:** Filtrar suscripcion DDS desde el principio (solo suscribirse a lo que usas)
 - **Patron reutilizable:** En cualquier sistema pub/sub, suscribirse SOLO a los topics necesarios. El overhead de topics no usados no es gratis — puede causar backpressure y corrupcion
+
+---
+
+## Feature: Ego-motion compensation + bbox-height looming
+**Fecha:** 2026-06-30
+**Branch:** `bugfix/ego-motion-imu`
+**Estado:** Completada (tests verdes; benchmark offline no re-corrido — falta el JSON en el repo)
+
+### P1: Historia del Usuario
+> "Camino por la calle. Como ME muevo hacia delante, TODO lo que tengo enfrente
+> 'se acerca' en la imagen, aunque esté quieto. El sistema me da alertas DANGER
+> de cosas estáticas (un coche aparcado, una farola) solo porque camino hacia
+> ellas. Necesito que distinga 'yo avanzo' de 'el objeto viene a por mí'."
+
+### P2: Estados y Transiciones
+```
+[depth_history] ─slope──┐
+                        ├─ max() ─▶ approach ─(si walking: −bias)─▶ is_approaching ─▶ collision_risk
+[height_history]─looming┘
+```
+- `approach_speed` antes era solo el slope de depth → al caminar daba positivo para todo lo de delante.
+- Ahora se fusiona con el *looming* de la altura de bbox y se resta un bias de marcha cuando `motion_state=="walking"`.
+
+### P3: Veo / Necesito
+| Estado | Lo que necesito | De dónde viene |
+|---|---|---|
+| Caminando hacia objeto estático | `motion_state="walking"` | IMU accel-std (`get_motion_state`) |
+| Objeto que de verdad se acerca | approach alto pese al bias | slope depth ∪ looming bbox |
+| Depth relativo ruidoso (NORM_MINMAX) | señal de aproximación alternativa | crecimiento de altura de bbox |
+
+### P4: Inventario
+| Necesito | ¿Existe? | Decisión |
+|---|---|---|
+| motion_state | Sí en `AriaDemoObserver`; **no** en `AriaBridgeObserver` (ruta Jetson real) | Añadido `get_motion_state` al bridge — si no, el fix era código muerto en producción |
+| Atenuación | — | **Sustracción** de bias (no factor multiplicativo): el peatón casi siempre camina; un factor gutaría amenazas reales |
+| Profundidad métrica | No (relativa, NORM_MINMAX) | Fuera de scope; mitigado con looming. Ver `docs/research/depth-and-approach-audit.md` |
+
+### P5: Prueba / Reflexión
+- **Tests:** `tests/test_ego_motion.py` (Case A caminar+estático → NO DANGER; Case B parado+acercándose → DANGER; aproximación rápida real sobrevive al caminar; looming detecta con depth plano) + bridge `tests/test_motion_state.py`. Suite afectada verde (33 aria-guard, 5 bridge).
+- **Lo que funcionó:** expresar el looming en unidades de slope de depth (`(Δh/h)·depth`) evitó una constante mágica y mantuvo el TTC calibrado.
+- **Lo que costó:** descubrir que la ruta real (bridge) no tenía `motion_state` — el plan de `NEXT_SESSION` apuntaba a `aria.py` (USB directo), no al bridge.
+- **Limitación conocida:** el bias 0.05 es fijo, no derivado del IMU; la profundidad sigue siendo relativa. Siguiente ROI: depth métrico + restar velocidad de avance del IMU.
+- **Patrón reutilizable:** cuando una señal (depth) es estructuralmente ruidosa, añadir una segunda señal independiente (looming) y fusionar con `max` es más robusto que afinar la primera.

@@ -28,12 +28,14 @@ class TrackedObject:
     # Tracking data
     depth_history: deque = field(default_factory=lambda: deque(maxlen=10))
     bearing_history: deque = field(default_factory=lambda: deque(maxlen=10))  # bearing in radians (0 = center, negative = left, positive = right)
+    height_history: deque = field(default_factory=lambda: deque(maxlen=10))  # bbox height (px) — looming cue
     frames_seen: int = 1
     frames_missing: int = 0
 
     # Computed
     is_approaching: bool = False
     approach_speed: float = 0.0  # positive = approaching
+    looming_speed: float = 0.0  # bbox-height approach, in depth-slope units
     lateral_speed: float = 0.0  # rad/frame, positive = moving right
     enters_path: bool = False  # object moving laterally into user's path (center)
     bearing: float = 0.0  # current bearing in radians
@@ -46,9 +48,12 @@ class TrackedObject:
             self.depth_history = deque(maxlen=10)
         if not self.bearing_history:
             self.bearing_history = deque(maxlen=10)
+        if not self.height_history:
+            self.height_history = deque(maxlen=10)
         self.depth_history.append(self.depth_value)
         self.bearing = self._pixel_to_bearing(self.bbox)
         self.bearing_history.append(self.bearing)
+        self.height_history.append(self.bbox[3])
 
     def _pixel_to_bearing(self, bbox) -> float:
         """Convert bbox center_x to bearing angle in radians using FOV."""
@@ -91,6 +96,17 @@ THREAT_THRESHOLDS = {
     "WARNING": 0.35,   # ~TTC < 3s (Mobileye FCW)
     "ATTENTION": 0.15, # ~TTC < 5s
 }
+
+# Ego-motion compensation: while the user WALKS, everything ahead appears to
+# "approach" (depth grows) even when static — the dominant source of false
+# DANGER alerts ("alertas mediocres"). We subtract a fixed walking bias from
+# the apparent approach slope so a static object ahead nets to ~0 approach,
+# while a genuinely fast approaching object (closing faster than the walk)
+# keeps most of its signal. Subtraction (not a multiplicative factor) is
+# deliberate: a blind pedestrian is almost always walking, so scaling the
+# approach down would gut REAL threats in the common case. This is the v1
+# proxy for subtracting an IMU-estimated forward velocity.
+EGO_MOTION_WALKING_BIAS = 0.05
 
 
 def _iou(box1: Tuple[int, int, int, int], box2: Tuple[int, int, int, int]) -> float:
@@ -135,7 +151,8 @@ class SimpleTracker:
         self.tracks: Dict[int, TrackedObject] = {}
         self.next_id = 0
 
-    def update(self, detections: List, frame_width: int = 1280, fov_h: float = 1.15) -> List[TrackedObject]:
+    def update(self, detections: List, frame_width: int = 1280, fov_h: float = 1.15,
+               motion_state: str = "unknown") -> List[TrackedObject]:
         """
         Update tracks with new detections.
 
@@ -143,6 +160,10 @@ class SimpleTracker:
             detections: List of Detection objects from detector
             frame_width: Width of the frame in pixels
             fov_h: Horizontal field of view in radians
+            motion_state: User's ego-motion from the IMU ("walking" | "stationary"
+                | "unknown"). When "walking", the apparent approach of objects is
+                ego-compensated so static obstacles ahead don't read as collisions.
+                "unknown" (default) applies no compensation (backwards-compatible).
 
         Returns:
             List of TrackedObject with tracking info
@@ -197,11 +218,12 @@ class SimpleTracker:
                 track.depth_history.append(det.depth_value)
                 track.bearing = track._pixel_to_bearing(det.bbox)
                 track.bearing_history.append(track.bearing)
+                track.height_history.append(det.bbox[3])
                 track.frames_seen += 1
                 track.frames_missing = 0
 
                 # Calculate approach + lateral speed
-                self._update_approach(track)
+                self._update_approach(track, motion_state)
                 self._update_lateral(track)
 
                 # Calculate collision risk (H18)
@@ -247,21 +269,55 @@ class SimpleTracker:
             reverse=True
         )
 
-    def _update_approach(self, track: TrackedObject):
-        """Calculate if object is approaching based on depth history."""
+    def _update_approach(self, track: TrackedObject, motion_state: str = "unknown"):
+        """Estimate approach by fusing depth slope with bbox-height looming.
+
+        Two complementary cues:
+        - Depth slope: DepthAnything value rising = object getting closer. But
+          the value is relative (NORM_MINMAX) and noisy.
+        - Looming: the bbox HEIGHT growing = the object subtends more FoV =
+          closing in. Independent of the depth model.
+
+        Looming is expressed in the SAME units as the depth slope via
+        (Δheight/height)·depth_value, so the downstream TTC (depth/approach)
+        stays consistent and no arbitrary scale factor is introduced. The two
+        are fused with max() — either can flag an approach; when the bbox is
+        static, looming is 0 and depth drives it (backwards-compatible).
+
+        When the user is walking, part of any positive approach is self-motion,
+        not the object closing in: we subtract EGO_MOTION_WALKING_BIAS from the
+        fused signal so a STATIC object ahead nets to ~0 while a genuinely fast
+        approacher keeps the residual.
+        """
         if len(track.depth_history) < 3:
             track.is_approaching = False
             track.approach_speed = 0.0
+            track.looming_speed = 0.0
             return
 
         # Depth Anything: higher value = closer
-        # If depth is increasing, object is approaching
         history = list(track.depth_history)
         recent = history[-3:]  # Last 3 frames
-
-        # Simple linear regression slope
         x = np.arange(len(recent))
-        slope = np.polyfit(x, recent, 1)[0]
+        depth_slope = np.polyfit(x, recent, 1)[0]
+
+        # Bbox-height looming, converted to depth-slope units.
+        looming = 0.0
+        if len(track.height_history) >= 3:
+            hrecent = list(track.height_history)[-3:]
+            mean_h = sum(hrecent) / len(hrecent)
+            if mean_h > 0:
+                h_rel_growth = np.polyfit(x, hrecent, 1)[0] / mean_h  # per frame
+                looming = h_rel_growth * track.depth_value
+        track.looming_speed = float(looming)
+
+        # Fuse: either cue can flag an approach.
+        slope = max(float(depth_slope), looming)
+
+        # Ego-motion compensation: only the approaching (positive) component is
+        # inflated by walking — recession is left untouched.
+        if motion_state == "walking" and slope > 0:
+            slope = slope - EGO_MOTION_WALKING_BIAS
 
         track.approach_speed = slope
         track.is_approaching = slope > 0.01  # Threshold for noise

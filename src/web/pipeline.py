@@ -178,9 +178,12 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True, stat
                 gaze_y = max(0, min(1, 0.5 - pitch / fov_v))
                 gaze_point = (gaze_x, gaze_y)
 
-        # Update tracker
+        # Update tracker — feed ego-motion so a static object ahead doesn't read
+        # as "approaching" just because the user is walking toward it.
         frame_w = rgb.shape[1] if rgb is not None else 1280
-        tracked = tracker.update(detections, frame_width=frame_w, fov_h=observer.fov_h)
+        motion_state = observer.get_motion_state() if hasattr(observer, "get_motion_state") else "unknown"
+        tracked = tracker.update(detections, frame_width=frame_w, fov_h=observer.fov_h,
+                                 motion_state=motion_state)
 
         # Enrich detections with tracker info
         track_by_bbox = {t.bbox: t for t in tracked} if tracked else {}
