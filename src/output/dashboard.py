@@ -78,11 +78,14 @@ class Dashboard:
         y_radar = rgb_out.shape[0] - self._radar_size - 10
         rgb_out = self._overlay_image(rgb_out, radar, x_radar, y_radar)
 
-        # 5. Eye tracking (gaze is shown on RGB). Display-only mirror: the IR
-        # camera faces the wearer, so their left eye lands on the right half
-        # of the raw frame. The gaze model keeps the unflipped frame.
+        # 5. Eye tracking panel (the gaze crosshair itself is drawn on the RGB).
+        # NO extra flip here: the observer already rotates the eye 180°
+        # (np.rot90(image, 2) in aria.py / aria_bridge_observer.py), which
+        # ALREADY un-mirrors the wearer-facing IR camera horizontally. A cv2.flip
+        # here was a redundant 2nd horizontal flip → the two cancelled and the
+        # panel showed L/R swapped (left eye on the right). Show the frame as-is.
         if eye_frame is not None:
-            eye_out = cv2.flip(eye_frame, 1)
+            eye_out = eye_frame
         else:
             eye_out = np.full((120, 640, 3), 30, dtype=np.uint8)
             cv2.putText(eye_out, "No Eye Tracking", (220, 65),
