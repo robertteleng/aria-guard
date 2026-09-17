@@ -4,11 +4,14 @@ Real-time collision alerts for blind and low-vision pedestrians, running on
 Meta Project Aria glasses: a navigation detector, monocular depth and eye gaze
 feed a tracker that decides when to warn, with spatial audio.
 
-![aria-guard's alerts next to the path the wearer actually walked](docs/media/aria-guard-metric-inpath.gif)
+![aria-guard warning about a person walking ahead, next to the path the wearer actually walked](docs/media/aria-guard-hero.gif)
 
 *Left: what aria-guard sees and says. Right: the ground truth, where the wearer
 actually walked (Meta MPS SLAM, metres). A green ring is an alert about an
-object that was in that path; a red ring is an alert about one that never was.*
+object that was in that path; a red ring is an alert about one that never was.
+These 15 s were chosen by a fixed rule to show justified alerts, so they are
+better than typical; the numbers at the bottom are pooled over all six
+recordings ([how the clip is chosen](docs/media/README.md)).*
 
 > **Status: research prototype, evaluated offline.** Measured on six outdoor
 > walking recordings from Project Aria's *Reading in the Wild* dataset. Not
