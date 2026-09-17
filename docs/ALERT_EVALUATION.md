@@ -208,3 +208,45 @@ the refactor reproduced the recorded results exactly.
 - Next candidates, to be registered the same way: per-wearer eye-height
   estimate, a distance-aware DANGER threshold with ego speed, and lead time as a
   registered metric.
+
+## Amendment 2026-09-17: the wearer's own body (error found, before recomputing)
+
+**Error.** While preparing the README clip, the hazard it showed was a `person`
+that was the wearer's own hand holding a phone. Twelve random `person` alerts
+whose box touches the bottom edge were inspected: all twelve were the wearer's
+hand or arm. The reference counted these as objects in the path, so hazard
+episodes and "justified" alerts included the wearer's body, and the published
+numbers for candidate change 1 (37.6 % precision, 33.1 % recall) are inflated.
+They are withdrawn until recomputed under this amendment.
+
+**Reference, corrected.** MPS hand tracking gives each hand's wrist position in
+the device frame (`hand_tracking_frames.jsonl`, `T_wrist_device.translation`, mm).
+A detection is **the wearer's body** when its class is `person` and the wrist of
+a hand with `existence_confidence >= 0.5`, within 60 ms of the frame, projects
+inside its box enlarged by 10 % on each side. The convention was checked before
+any metric: on `recording_968813465288489`, 92 % of tracked wrists paired with
+bottom-edge `person` boxes fall inside them, against 2.6 % for other boxes.
+Wearer-body detections get no ground position: they never form hazard
+episodes, and an alert about a track with no in-path time is unjustified. This
+applies to every variant, including the ones already reported.
+
+**Candidate change 2: wearer-body filter (live-available data only).** Hand
+tracking is not available live, so the pipeline uses image geometry and gravity:
+a `person` detection is treated as the wearer's body when its box bottom is at
+or below 97 % of the image height **and** the ray through its top-centre points
+at least 15° below horizontal. A standing person close enough to cut the bottom
+edge has a head near or above eye level; a hand or arm held in front does not.
+Such detections get threat level `NONE`. Parameters fixed here; 10° and 20° are
+reported as sensitivity only.
+
+**Reported.** For `ttc_fix`, `metric_inpath` and `metric_inpath_selfbody`, the
+usual metrics under the corrected reference, pooled and per recording. For the
+filter against the hand-tracking reference: share of wearer-body detections it
+removes, and share of the detections it removes that the reference does not
+mark as wearer body (possible real people suppressed).
+
+**Decision rule.** Same as candidate change 1: recall must not drop; unjustified
+alerts per minute must not rise more than 10 % (or recall +5 points with at most
++20 %); precision up in at least 4 of 6 recordings. The comparison is
+`metric_inpath_selfbody` against `metric_inpath`, both under the corrected
+reference. The README is updated with the corrected numbers whatever the result.
