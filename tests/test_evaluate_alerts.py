@@ -123,3 +123,24 @@ def test_demo_window_prefers_walking_segments():
     episodes = [{"start": s} for s in (5, 6, 7, 8, 70, 75)]   # more episodes while standing
     t0, speed = pick_window(episodes, frames, 120.0, 40.0)
     assert t0 >= 60 - 2 and speed >= 0.5
+
+
+def test_hero_window_rule_scores_justified_minus_unjustified_and_skips_standing():
+    pytest.importorskip("cv2")
+    from scripts.render_demo import pick_hero_window
+
+    def recording(walk_from, alerts, episodes=()):
+        frames = [{"t": i / 10, "path": np.array([[0, 0], [3.0 if i / 10 >= walk_from else 0.0, 0]])}
+                  for i in range(1200)]
+        return {"frames": frames, "episodes": list(episodes),
+                "alerts": [{"t": t, "justified": j, "track_id": k} for t, j, k in alerts]}
+
+    # A: best score (2 - 0) but the wearer stands still there -> must be skipped
+    a = recording(walk_from=100, alerts=[(20, True, 1), (22, True, 2)])
+    # B: walking; window at 45 s holds 2 justified + 1 unjustified (score 1)
+    b = recording(walk_from=0, alerts=[(50, True, 3), (52, True, 4), (55, False, 5)])
+    # C: walking; same score 1, but one hazard episode warned -> wins the tie
+    c = recording(walk_from=0, alerts=[(80, True, 6), (83, True, 7), (84, False, 8)],
+                  episodes=[{"track_id": 6, "start": 79.0}])
+    name, t0, score = pick_hero_window({"a": a, "b": b, "c": c})
+    assert (name, score) == ("c", 1) and t0 == pytest.approx(75.0)

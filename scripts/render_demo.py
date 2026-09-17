@@ -6,15 +6,19 @@ Left: the glasses' RGB with aria-guard's tracks and alerts. Right: top-down view
 from Meta's MPS (metric trajectory, 3D points), the 3 s path corridor and the
 objects' ground positions. Bottom: timeline of hazard episodes vs alerts, each
 alert marked justified or not. Everything drawn comes from
-scripts/evaluate_alerts.py; the clip is chosen by a fixed rule (the 40 s window
-with the most hazard episodes), not by hand.
+scripts/evaluate_alerts.py; windows are chosen by fixed rules written in
+docs/media/README.md, not by hand.
 
 Usage:
     python scripts/evaluate_alerts.py ... --details-out /tmp/details.pkl
     python scripts/render_demo.py --details /tmp/details.pkl \\
         --recording ~/Datasets/aria/ritw/recording_XXXX --out docs/media/demo.mp4
+    # README hero clip: rule applied over every recording's details
+    python scripts/render_demo.py --hero --details-dir DIR --recordings-root ~/Datasets/aria/ritw \\
+        --records benchmarks/alerts/candidate1/*.json --out docs/media/aria-guard-hero.mp4
 """
 import argparse
+import pickle
 import subprocess
 import sys
 from pathlib import Path
@@ -26,7 +30,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts import evaluate_alerts as ev  # noqa: E402
-from scripts.replay_vrs import VrsRecording  # noqa: E402
 
 W, H = 1280, 720
 CAM = 560                 # camera panel side
@@ -35,9 +38,12 @@ TL_H = H - CAM            # timeline height
 PX_PER_M = 36.0
 DEVICE_Y = BEV - 70       # device position in the top-down panel
 MIN_WALK_MPS = 0.5
+HERO_SECONDS, HERO_LEAD_S = 15.0, 5.0
 LEVEL_COLOR = {"ATTENTION": (0, 200, 255), "WARNING": (0, 140, 255), "DANGER": (40, 40, 230)}
 OK, BAD, PATH_C, GREY = (90, 200, 90), (70, 70, 230), (255, 190, 90), (150, 150, 150)
-FONT = cv2.FONT_HERSHEY_SIMPLEX
+HAZARD = (60, 60, 240)
+FONT_FILES = {False: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+              True: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"}
 VARIANT_LABEL = "heuristic"
 VARIANT_LABELS = {"ttc_fix": "heuristic (image thirds)", "pre_ttc": "heuristic, pre TTC fix",
                   "metric_inpath": "metric in-path (metres)"}
@@ -62,9 +68,60 @@ def pick_window(episodes, frames, duration_s, length_s):
     return best[2], best[1]
 
 
-def text(img, s, org, scale=0.5, color=(235, 235, 235), thick=1):
-    cv2.putText(img, s, org, FONT, scale, (0, 0, 0), thick + 2, cv2.LINE_AA)
-    cv2.putText(img, s, org, FONT, scale, color, thick, cv2.LINE_AA)
+def warned_in_window(det, t0, length_s):
+    """Hazard episodes starting in the window with a justified alert on the same track inside it."""
+    justified = {a["track_id"] for a in det["alerts"] if a["justified"] and t0 <= a["t"] < t0 + length_s}
+    return sum(1 for e in det["episodes"] if t0 <= e["start"] < t0 + length_s and e["track_id"] in justified)
+
+
+def pick_hero_window(details_by_recording, length_s=HERO_SECONDS, lead_s=HERO_LEAD_S, min_speed=MIN_WALK_MPS):
+    """README hero clip rule (docs/media/README.md): windows starting lead_s before each
+    justified alert, walking only, score = justified - unjustified alerts; ties: more
+    episodes warned, recording name order, earliest start. Returns (recording, t0, score)."""
+    best, best_key = None, None
+    for order, name in enumerate(sorted(details_by_recording)):
+        det = details_by_recording[name]
+        duration = det["frames"][-1]["t"]
+        for a in det["alerts"]:
+            if not a["justified"]:
+                continue
+            t0 = max(0.0, min(a["t"] - lead_s, duration - length_s))
+            if walking_speed(det["frames"], t0, length_s) < min_speed:
+                continue
+            inside = [x for x in det["alerts"] if t0 <= x["t"] < t0 + length_s]
+            score = sum(x["justified"] for x in inside) - sum(not x["justified"] for x in inside)
+            key = (score, warned_in_window(det, t0, length_s), -order, -t0)
+            if best_key is None or key > best_key:
+                best, best_key = (name, t0, score), key
+    return best
+
+
+_fonts = {}
+
+
+def _font(px, bold):
+    from PIL import ImageFont
+    if (px, bold) not in _fonts:
+        _fonts[(px, bold)] = ImageFont.truetype(FONT_FILES[bold], px)
+    return _fonts[(px, bold)]
+
+
+def draw_texts(img, items):
+    """items: (text, (x, y) top-left, size px, BGR color, bold). DejaVu via Pillow; OpenCV Hershey fallback."""
+    try:
+        from PIL import Image, ImageDraw
+        pil = Image.fromarray(np.ascontiguousarray(img[..., ::-1]))
+        d = ImageDraw.Draw(pil)
+        for s, (x, y), px, color, bold in items:
+            d.text((x, y), s, font=_font(px, bold), fill=tuple(int(c) for c in color[::-1]),
+                   stroke_width=2, stroke_fill=(0, 0, 0))
+        img[:] = np.asarray(pil)[..., ::-1]
+    except (ImportError, OSError):
+        for s, (x, y), px, color, bold in items:
+            scale, thick = px / 32.0, 2 if bold else 1
+            cv2.putText(img, s, (x, y + px), cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), thick + 2, cv2.LINE_AA)
+            cv2.putText(img, s, (x, y + px), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thick, cv2.LINE_AA)
+    return img
 
 
 def world_to_bev(xy, origin, heading):
@@ -78,6 +135,7 @@ def world_to_bev(xy, origin, heading):
 
 def draw_bev(fd, traj, cam, points_xyz, ground, t_ns, alerts_now):
     img = np.full((BEV, BEV_W, 3), 18, np.uint8)
+    texts = []
     R_wd, pos = traj.pose(t_ns)
     origin = pos[:2]
     walk = fd["path"][min(10, len(fd["path"]) - 1)] - fd["path"][0]   # next 1 s
@@ -92,7 +150,7 @@ def draw_bev(fd, traj, cam, points_xyz, ground, t_ns, alerts_now):
     near = near[(near[:, 2] > ground + 0.4) & (near[:, 2] < ground + 1.6)][::6]
     for u, v in world_to_bev(near, origin, heading).astype(int):
         if 0 <= u < BEV_W and 0 <= v < BEV:
-            img[v, u] = (72, 72, 72)
+            img[v, u] = (58, 58, 58)
     past = np.array([traj.position(t_ns - int(s * 1e9))[:2] for s in np.arange(0, 10, 0.2)])
     cv2.polylines(img, [world_to_bev(past, origin, heading).astype(np.int32)], False, GREY, 2, cv2.LINE_AA)
     fut = world_to_bev(fd["path"], origin, heading).astype(np.int32)
@@ -106,21 +164,23 @@ def draw_bev(fd, traj, cam, points_xyz, ground, t_ns, alerts_now):
         u, v = world_to_bev(tr["ground_xy"], origin, heading)[0].astype(int)
         if not (-20 <= u < BEV_W + 20 and -20 <= v < BEV + 20):
             continue
-        color = (60, 60, 240) if tr["in_path"] else (190, 190, 190)
-        cv2.circle(img, (u, v), 7, color, -1, cv2.LINE_AA)
-        text(img, tr["name"], (u + 10, v + 5), 0.45, color)
+        color = HAZARD if tr["in_path"] else (190, 190, 190)
+        cv2.circle(img, (u, v), 8, color, -1, cv2.LINE_AA)
+        texts.append((tr["name"], (u + 13, v - 10), 17, color, False))
         if tr["id"] in alerted:
-            a = alerted[tr["id"]]
-            cv2.circle(img, (u, v), 15, OK if a["justified"] else BAD, 3, cv2.LINE_AA)
-    cv2.circle(img, (BEV_W // 2, DEVICE_Y), 9, (255, 255, 255), -1, cv2.LINE_AA)
-    text(img, "Truth: where the wearer actually walked (Meta MPS SLAM, 1 m grid)", (12, 24), 0.55, PATH_C)
-    text(img, "blue band = next 3 s of path   red = object in that band   grey line = last 10 s", (12, 48), 0.45, (200, 200, 200))
-    text(img, "ring on an object = aria-guard alerted about it (green justified, red not)", (12, 70), 0.45, (200, 200, 200))
-    return img
+            cv2.circle(img, (u, v), 17, OK if alerted[tr["id"]]["justified"] else BAD, 4, cv2.LINE_AA)
+    cv2.circle(img, (BEV_W // 2, DEVICE_Y), 10, (255, 255, 255), -1, cv2.LINE_AA)
+    texts += [("You are here", (BEV_W // 2 + 16, DEVICE_Y + 8), 16, (235, 235, 235), False),
+              ("Where the wearer really walked (Meta SLAM, 1 m grid)", (14, 10), 21, PATH_C, True),
+              ("blue band: path walked in the next 3 s   ·   grey: last 10 s", (14, 40), 16, (215, 215, 215), False),
+              ("red dot: object in that path   ·   ring: alert (green = justified, red = not)",
+               (14, 62), 16, (215, 215, 215), False)]
+    return draw_texts(img, texts)
 
 
 def draw_cam(rgb, fd, alerts_now, alert_banner):
     img = cv2.resize(rgb, (CAM, CAM))
+    texts = [(f"What aria-guard sees · {VARIANT_LABEL}", (12, 10), 20, (240, 240, 240), True)]
     s = CAM / ev.RGB_SIZE
     for tr in fd["tracks"] if fd else []:
         x, y, w, h = [int(v * s) for v in tr["bbox"]]
@@ -128,89 +188,119 @@ def draw_cam(rgb, fd, alerts_now, alert_banner):
             cv2.rectangle(img, (x, y), (x + w, y + h), (170, 170, 170), 1)
             continue
         color = LEVEL_COLOR[tr["threat"]]
-        cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)
-        text(img, f'{tr["name"]} {tr["threat"].lower()}', (x, max(14, y - 5)), 0.45, color)
-    text(img, f"aria-guard | threat: {VARIANT_LABEL}", (10, 22), 0.5)
+        cv2.rectangle(img, (x, y), (x + w, y + h), color, 3)
+        texts.append((f'{tr["name"]} · {tr["threat"].lower()}', (x, max(36, y - 24)), 17, color, True))
     if alert_banner:
         a = alert_banner
-        verdict = "justified" if a["justified"] else "not in path"
-        cv2.rectangle(img, (0, CAM - 44), (CAM, CAM), (20, 20, 20), -1)
-        text(img, f'ALERT {a["level"]}: {a["name"]}', (10, CAM - 18), 0.7, LEVEL_COLOR[a["level"]], 2)
-        text(img, verdict, (CAM - 150, CAM - 18), 0.6, OK if a["justified"] else BAD, 2)
-    return img
+        cv2.rectangle(img, (0, CAM - 58), (CAM, CAM), (20, 20, 20), -1)
+        texts.append((f'ALERT {a["level"]}: {a["name"]}', (14, CAM - 46), 25, LEVEL_COLOR[a["level"]], True))
+        texts.append(("✓ justified" if a["justified"] else "✗ not in path", (CAM - 175, CAM - 43), 21,
+                      OK if a["justified"] else BAD, True))
+    return draw_texts(img, texts)
 
 
-def draw_timeline(t, t0, length, episodes, alerts, metrics):
+def summary_line(metrics, pooled):
+    if pooled:
+        return (f'All six recordings ({pooled["minutes"]:.1f} min): {pooled["precision"]:.0%} of alerts justified  ·  '
+                f'{pooled["recall"]:.0%} of hazards warned  ·  {pooled["unjustified_per_min"]:.1f} unjustified alerts/min')
+    return (f'This recording: {metrics["alert_precision"]:.0%} of alerts justified  ·  '
+            f'{metrics["episode_recall"]:.0%} of hazards warned  ·  '
+            f'{metrics["unjustified_alerts_per_min"]:.1f} unjustified alerts/min')
+
+
+def draw_timeline(t, t0, length, episodes, alerts, metrics, pooled=None):
     img = np.full((TL_H, W, 3), 16, np.uint8)
     x_of = lambda tt: int(20 + (tt - t0) / length * (W - 40))
-    text(img, "hazard episodes (object entered the wearer's path)", (20, 22), 0.45, (60, 60, 240))
     for e in episodes:
         if e["end"] >= t0 and e["start"] <= t0 + length:
-            cv2.rectangle(img, (x_of(max(e["start"], t0)), 32), (x_of(min(e["end"] + 0.1, t0 + length)), 58), (60, 60, 240), -1)
-    text(img, "alerts (green = justified, red = object never in path)", (20, 86), 0.45)
+            cv2.rectangle(img, (x_of(max(e["start"], t0)), 34), (x_of(min(e["end"] + 0.1, t0 + length)), 58), HAZARD, -1)
     for a in alerts:
         if t0 <= a["t"] <= t0 + length:
             x = x_of(a["t"])
-            cv2.line(img, (x, 94), (x, 124), OK if a["justified"] else BAD, 3)
-    cv2.line(img, (x_of(t), 28), (x_of(t), 128), (255, 255, 255), 1)
-    text(img, (f'Whole recording: alert precision {metrics["alert_precision"]:.0%} | '
-               f'episodes warned {metrics["episode_recall"]:.0%} | '
-               f'{metrics["unjustified_alerts_per_min"]:.1f} unjustified alerts/min'),
-         (20, TL_H - 12), 0.5, (230, 230, 230))
-    text(img, "Data: Reading in the Wild, Project Aria (CC BY-NC 4.0)", (W - 430, TL_H - 12), 0.42, GREY)
-    return img
+            cv2.line(img, (x, 94), (x, 122), OK if a["justified"] else BAD, 4)
+    cv2.line(img, (x_of(t), 30), (x_of(t), 126), (255, 255, 255), 1)
+    return draw_texts(img, [
+        ("hazards: an object was in the path the wearer walked", (20, 8), 16, HAZARD, True),
+        ("alerts: green = justified, red = about an object never in the path", (20, 68), 16, (225, 225, 225), True),
+        (summary_line(metrics, pooled), (20, TL_H - 28), 18, (240, 240, 240), True),
+        ("Data: Reading in the Wild, Project Aria (CC BY-NC 4.0)", (W - 400, 8), 14, GREY, False)])
 
 
 def render_comparison(details_path: Path, variants, t0: float, length: float, records, out: Path):
     """Static before/after: the same window's timeline for each variant, plus pooled metrics."""
-    import pickle
     from scripts.alert_table import by_variant, pooled
     with open(details_path, "rb") as f:
         data = pickle.load(f)
     groups = by_variant(records)
-    rows = [np.full((56, W, 3), 12, np.uint8)]
-    text(rows[0], f"Same {length:.0f} s of walking, two threat models (hazard episodes from the wearer's real path)",
-         (20, 36), 0.65, (235, 235, 235), 1)
+    rows = [draw_texts(np.full((56, W, 3), 12, np.uint8), [
+        (f"Same {length:.0f} s of walking, two threat models (hazards from the wearer's real path)",
+         (20, 16), 24, (235, 235, 235), True)])]
     for v in variants:
         res = data[v]
         det = res["details"]
         tl = draw_timeline(t0 - 1, t0, length, det["episodes"], det["alerts"], res)
         p = pooled(groups[v])
-        band = np.full((34, W, 3), 12, np.uint8)
-        text(band, f"{VARIANT_LABELS.get(v, v)}  -  six recordings: precision {p['precision']:.0%}, "
-                   f"episodes warned {p['recall']:.0%}, unjustified alerts {p['unjustified_per_min']:.1f}/min",
-             (20, 24), 0.55, (90, 200, 90) if v == variants[-1] else (200, 200, 200), 1)
-        rows += [band, tl[:TL_H - 26]]
+        band = draw_texts(np.full((38, W, 3), 12, np.uint8), [
+            (f"{VARIANT_LABELS.get(v, v)}  ·  six recordings: {p['precision']:.0%} of alerts justified, "
+             f"{p['recall']:.0%} of hazards warned, {p['unjustified_per_min']:.1f} unjustified alerts/min",
+             (20, 8), 20, OK if v == variants[-1] else (200, 200, 200), True)])
+        rows += [band, tl[:TL_H - 34]]
     cv2.imwrite(str(out), np.vstack(rows), [cv2.IMWRITE_PNG_COMPRESSION, 9])
     print(f"[DEMO] {out}")
 
 
+def load_hero_details(details_dir: Path, variant: str):
+    """{recording name: details} from evaluate_alerts pickles named c1_<recording>.pkl."""
+    out = {}
+    for p in sorted(details_dir.glob("c1_*.pkl")):
+        with open(p, "rb") as f:
+            out[p.stem[len("c1_"):]] = (p, pickle.load(f)[variant]["details"])
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    ap.add_argument("--details", required=True, type=Path, help="pickle from evaluate_alerts.py --details-out")
-    ap.add_argument("--recording", required=True, type=Path)
+    ap.add_argument("--details", type=Path, help="pickle from evaluate_alerts.py --details-out")
+    ap.add_argument("--recording", type=Path)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--variant", default="ttc_fix")
     ap.add_argument("--compare", nargs=2, metavar="VARIANT", help="Write a before/after PNG for two variants instead of video")
-    ap.add_argument("--records", nargs="*", type=Path, default=[], help="alert records for pooled numbers (--compare)")
+    ap.add_argument("--records", nargs="*", type=Path, default=[],
+                    help="alert records: pooled numbers for --compare and on the video's summary line")
     ap.add_argument("--seconds", type=float, default=40.0)
     ap.add_argument("--start", type=float, help="Window start in seconds (default: the fixed selection rule); "
                                                    "use it to render another variant on the same window")
     ap.add_argument("--fps", type=float, default=12.0)
     ap.add_argument("--gif-seconds", type=float, default=10.0,
                     help="Also write a GIF of the N seconds of the clip with the most alerts (0 = none)")
+    ap.add_argument("--gif-width", type=int, default=800)
+    ap.add_argument("--gif-fps", type=int, default=6)
+    ap.add_argument("--hero", action="store_true",
+                    help="README hero clip: pick recording and window with the rule in docs/media/README.md "
+                         "(sets --variant metric_inpath, --seconds 15, GIF of the whole clip)")
+    ap.add_argument("--details-dir", type=Path, help="--hero: folder with c1_<recording>.pkl files")
+    ap.add_argument("--recordings-root", type=Path, help="--hero: folder with the recordings")
     args = ap.parse_args()
 
-    import pickle
     global VARIANT_LABEL
+    from scripts.alert_table import by_variant, load, pooled
     if args.compare:
-        from scripts.alert_table import load
         start = args.start if args.start is not None else 0.0
         render_comparison(args.details, args.compare, start, args.seconds, load(args.records), args.out)
         return
+    if args.hero:
+        args.variant, args.seconds, args.gif_seconds = "metric_inpath", HERO_SECONDS, HERO_SECONDS
+        loaded = load_hero_details(args.details_dir, args.variant)
+        name, args.start, score = pick_hero_window({k: v[1] for k, v in loaded.items()})
+        args.details, args.recording = loaded[name][0], args.recordings_root / name
+        print(f"[DEMO] hero rule -> {name} at {args.start:.1f} s (justified - unjustified = {score})")
+    if args.details is None or args.recording is None:
+        ap.error("--details and --recording are required (or --hero with --details-dir and --recordings-root)")
     VARIANT_LABEL = VARIANT_LABELS.get(args.variant, args.variant)
+    pooled_metrics = pooled(by_variant(load(args.records))[args.variant]) if args.records else None
     with open(args.details, "rb") as f:
         result = pickle.load(f)[args.variant]
+    from scripts.replay_vrs import VrsRecording
     cam = ev.RgbCamera(args.recording / "recording.vrs")
     traj = ev.Trajectory(args.recording / "mps" / "slam" / "closed_loop_trajectory.csv")
     pts = ev.Points(args.recording / "mps" / "slam" / "semidense_points.csv.gz")
@@ -246,7 +336,7 @@ def main():
         canvas = np.zeros((H, W, 3), np.uint8)
         canvas[:CAM, :CAM] = draw_cam(rgb, fd, alerts_now, banner)
         canvas[:CAM, CAM:] = draw_bev(fd, traj, cam, pts.xyz, ground, t_ns, alerts_now)
-        canvas[CAM:, :] = draw_timeline(fd["t"], t0, args.seconds, det["episodes"], det["alerts"], result)
+        canvas[CAM:, :] = draw_timeline(fd["t"], t0, args.seconds, det["episodes"], det["alerts"], result, pooled_metrics)
         writer.write(canvas)
     writer.release()
     tmp = args.out.with_suffix(".tmp.mp4")
@@ -257,7 +347,8 @@ def main():
         tmp.unlink()
         if args.gif_seconds > 0:
             gif = args.out.with_suffix(".gif")
-            vf = ("fps=6,scale=800:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=48:stats_mode=diff[p];"
+            vf = (f"fps={args.gif_fps},scale={args.gif_width}:-1:flags=lanczos,split[a][b];"
+                  "[a]palettegen=max_colors=64:stats_mode=diff[p];"
                   "[b][p]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle")
             subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{gif_start:.1f}", "-t", str(args.gif_seconds),
                             "-i", str(args.out), "-vf", vf, str(gif)], check=True)
