@@ -9,6 +9,7 @@ set -euo pipefail
 DATA_DIR=${1:?usage: replay_benchmark.sh DATA_DIR OUT_DIR}
 OUT_DIR=${2:?usage: replay_benchmark.sh DATA_DIR OUT_DIR}
 PYTHON=${PYTHON:-python3}
+TAG=${TAG:-}          # optional run label, e.g. TAG=opt, so variants do not overwrite each other
 MODE=${MODE:-outdoor}
 export ARIA_YOLO_MODEL=${ARIA_YOLO_MODEL:-yolo26n_nav}
 host=$(hostname -s)
@@ -17,7 +18,7 @@ cd "$(dirname "$0")/.."
 for vrs in "$DATA_DIR"/*/recording.vrs; do
   seq=$(basename "$(dirname "$vrs")")
   for pace in realtime all; do
-    name="${host}_${seq}_${ARIA_YOLO_MODEL}_${pace}"
+    name="${host}_${seq}_${ARIA_YOLO_MODEL}${TAG:+_$TAG}_${pace}"
     out="$OUT_DIR/$name.json"
     # realtime keeps per-frame detections so alert logic can be re-evaluated
     # offline (benchmark_offline.py --from-json) without re-running the GPU

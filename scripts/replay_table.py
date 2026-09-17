@@ -35,6 +35,14 @@ def device_label(r: dict) -> str:
     return f"{gpu} · TensorRT {trt}" if trt else gpu
 
 
+def build_label(r: dict) -> str:
+    """Code version and pipeline variant, so optimizations are compared row by row."""
+    commit = _get(r, "environment", "commit") or "?"
+    backend = _get(r, "model", "yolo_backend") or "ultralytics"
+    depth = "async depth" if _get(r, "settings", "depth_async") else "sync depth"
+    return f"{commit} · YOLO {backend} · {depth}"
+
+
 def _get(r: dict, *path, default=None):
     cur = r
     for k in path:
@@ -57,13 +65,13 @@ def realtime_table(records: List[dict]) -> str:
     groups: Dict[str, List[dict]] = defaultdict(list)
     for r in records:
         if _get(r, "settings", "pace") == "realtime":
-            groups[(device_label(r), _get(r, "model", "yolo"))].append(r)
+            groups[(device_label(r), build_label(r), _get(r, "model", "yolo"))].append(r)
     lines = [
-        "| Device | Model | Recordings | Effective FPS (median / worst) | Frames dropped | "
+        "| Device | Build | Model | Recordings | Effective FPS (median / worst) | Frames dropped | "
         "Capture → detections p50 / p95 (ms) | Alerts/min (median / max) | All alert criteria pass |",
-        "|---|---|---|---|---|---|---|---|",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
-    for (dev, model), rs in sorted(groups.items()):
+    for (dev, build, model), rs in sorted(groups.items()):
         fps = [_get(r, "throughput", "effective_fps") for r in rs]
         processed = sum(_get(r, "throughput", "processed_frames", default=0) for r in rs)
         dropped = sum(_get(r, "throughput", "dropped_frames", default=0) for r in rs)
@@ -73,7 +81,7 @@ def realtime_table(records: List[dict]) -> str:
                          ("pass_silent_ratio", "pass_alerts_per_min", "pass_min_gap", "pass_max_concurrent"))
                      for r in rs)
         lines.append(
-            f"| {dev} | {model} | {len(rs)} | {_fmt(_median(fps))} / {_fmt(min(f for f in fps if f is not None))} | "
+            f"| {dev} | {build} | {model} | {len(rs)} | {_fmt(_median(fps))} / {_fmt(min(f for f in fps if f is not None))} | "
             f"{dropped / total * 100 if total else 0:.1f} % | "
             f"{_fmt(_median(_get(r, 'latency_ms', 'capture_to_detections', 'p50') for r in rs))} / "
             f"{_fmt(_median(_get(r, 'latency_ms', 'capture_to_detections', 'p95') for r in rs))} | "
@@ -97,7 +105,7 @@ def stage_table(records: List[dict]) -> str:
     groups: Dict[str, List[dict]] = defaultdict(list)
     for r in records:
         if _get(r, "settings", "pace") == "all" and _get(r, "settings", "breakdown"):
-            groups[device_label(r)].append(r)
+            groups[f"{device_label(r)} · {build_label(r)}"].append(r)
     devices = sorted(groups)
     head = "| Stage (ms, median of per-recording p50 / p95) | " + " | ".join(devices) + " |"
     lines = [head, "|---|" + "---|" * len(devices)]
