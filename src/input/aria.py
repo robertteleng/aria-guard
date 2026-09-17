@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any
 import cv2
 import numpy as np
 
+from .aria_frames import MotionClassifier, eye_to_bgr, nearest_index, rgb_to_bgr_upright
 from .observer import BaseObserver
 
 
@@ -70,8 +71,7 @@ class AriaDemoObserver(BaseObserver):
         self._start_time = time.time()
 
         # IMU data
-        from collections import deque
-        self._imu_history = deque(maxlen=50)
+        self._motion = MotionClassifier()
         self._motion_state = "unknown"
 
         # Calibraciones
@@ -186,12 +186,9 @@ class AriaDemoObserver(BaseObserver):
 
         # Minimal transform — no cv2 heavy ops in DDS callback
         if key == "rgb":
-            processed = np.rot90(image, -1).copy()  # 90 CW, contiguous
-            processed = cv2.cvtColor(processed, cv2.COLOR_RGB2BGR)
+            processed = rgb_to_bgr_upright(image)
         elif key == "eye":
-            processed = np.rot90(image, 2).copy()
-            if len(processed.shape) == 2:
-                processed = cv2.cvtColor(processed, cv2.COLOR_GRAY2BGR)
+            processed = eye_to_bgr(image)
         else:  # slam1, slam2
             processed = np.rot90(image, -1).copy()
             if len(processed.shape) == 2:
@@ -212,19 +209,8 @@ class AriaDemoObserver(BaseObserver):
         if not samples or imu_idx != 0:
             return
 
-        sample = samples[0]
-        accel = sample.accel_msec2
-        magnitude = (accel[0]**2 + accel[1]**2 + accel[2]**2)**0.5
-
         with self._lock:
-            self._imu_history.append(magnitude)
-
-            if len(self._imu_history) >= 10:
-                std = np.std(list(self._imu_history)[-20:])
-                if std < 0.3:
-                    self._motion_state = "stationary"
-                elif std > 0.6:
-                    self._motion_state = "walking"
+            self._motion_state = self._motion.update(samples[0].accel_msec2)
 
     def on_streaming_client_failure(self, reason, message: str) -> None:
         """Callback de error del SDK."""
@@ -310,16 +296,11 @@ class AriaDatasetObserver(BaseObserver):
         self._num_et_frames = self._provider.get_num_data(self._et_stream)
         print(f"[OBSERVER] RGB frames: {self._num_rgb_frames}, ET frames: {self._num_et_frames}")
 
-        # Build timestamp index for synchronization
-        self._rgb_timestamps = []
-        for i in range(self._num_rgb_frames):
-            ts = self._provider.get_image_data_by_index(self._rgb_stream, i)[1].capture_timestamp_ns
-            self._rgb_timestamps.append(ts)
-
-        self._et_timestamps = []
-        for i in range(self._num_et_frames):
-            ts = self._provider.get_image_data_by_index(self._et_stream, i)[1].capture_timestamp_ns
-            self._et_timestamps.append(ts)
+        # Timestamp index for synchronization, read from the index without
+        # decoding every image (decoding took minutes on long recordings)
+        from projectaria_tools.core.sensor_data import TimeDomain
+        self._rgb_timestamps = list(self._provider.get_timestamps_ns(self._rgb_stream, TimeDomain.DEVICE_TIME))
+        self._et_timestamps = list(self._provider.get_timestamps_ns(self._et_stream, TimeDomain.DEVICE_TIME))
 
         # Cargar eye gaze CSV si existe
         self._gaze_data = None
@@ -357,18 +338,6 @@ class AriaDatasetObserver(BaseObserver):
         self._gaze_data = np.stack([yaw, pitch, depth], axis=1)
         print(f"[OBSERVER] Gaze samples: {len(self._gaze_data)}")
 
-    def _find_nearest_idx(self, timestamps: list, target_ts: int) -> int:
-        """Encuentra el indice mas cercano al timestamp objetivo."""
-        import bisect
-        idx = bisect.bisect_left(timestamps, target_ts)
-        if idx == 0:
-            return 0
-        if idx == len(timestamps):
-            return len(timestamps) - 1
-        if abs(timestamps[idx] - target_ts) < abs(timestamps[idx-1] - target_ts):
-            return idx
-        return idx - 1
-
     def _playback_loop(self):
         """Hilo de playback que itera por los frames."""
         frame_interval = 1.0 / self._target_fps
@@ -391,22 +360,16 @@ class AriaDatasetObserver(BaseObserver):
                 rgb_data = self._provider.get_image_data_by_index(
                     self._rgb_stream, self._current_rgb_idx
                 )
-                rgb_frame = rgb_data[0].to_numpy_array()
                 rgb_ts = rgb_data[1].capture_timestamp_ns
+                # Same orientation as live streaming (AriaDemoObserver)
+                self._current_frame = rgb_to_bgr_upright(rgb_data[0].to_numpy_array())
 
-                bgr_frame = cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2BGR)
-                self._current_frame = cv2.rotate(bgr_frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-
-                et_idx = self._find_nearest_idx(self._et_timestamps, rgb_ts)
+                et_idx = nearest_index(self._et_timestamps, rgb_ts)
                 et_data = self._provider.get_image_data_by_index(self._et_stream, et_idx)
-                et_frame = et_data[0].to_numpy_array()
-                if len(et_frame.shape) == 2:
-                    self._current_et_frame = cv2.cvtColor(et_frame, cv2.COLOR_GRAY2BGR)
-                else:
-                    self._current_et_frame = et_frame
+                self._current_et_frame = eye_to_bgr(et_data[0].to_numpy_array())
 
                 if self._gaze_data is not None:
-                    gaze_idx = self._find_nearest_idx(list(self._gaze_timestamps), rgb_ts)
+                    gaze_idx = nearest_index(self._gaze_timestamps, rgb_ts)
                     self._current_gaze = self._gaze_data[gaze_idx]
 
                 self._current_rgb_idx += 1
