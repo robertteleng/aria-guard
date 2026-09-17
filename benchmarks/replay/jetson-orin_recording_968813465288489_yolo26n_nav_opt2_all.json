@@ -1,0 +1,164 @@
+{
+  "schema": "aria-guard/replay/2",
+  "date": "2026-09-17T11:01:04+00:00",
+  "command": "replay_vrs.py /data/recording_968813465288489/recording.vrs --pace all --mode outdoor --breakdown --out /bench/aria-guard/benchmarks/replay/jetson-orin_recording_968813465288489_yolo26n_nav_opt2_all.json",
+  "recording": {
+    "file": "recording.vrs",
+    "sequence": "recording_968813465288489",
+    "rgb_shape": [
+      1408,
+      1408,
+      3
+    ],
+    "rgb_frames": 9208,
+    "seconds": 306.7
+  },
+  "settings": {
+    "pace": "all",
+    "mode": "outdoor",
+    "depth": true,
+    "depth_interval": 5,
+    "breakdown": true,
+    "depth_async": false,
+    "warmup_frames": 30,
+    "imu_target_hz": 100.0,
+    "fov_h": 1.919
+  },
+  "model": {
+    "yolo": "yolo26n_nav",
+    "yolo_backend": "tensorrt",
+    "file": "yolo26n_nav.engine",
+    "sha256": "6981bdbe25ac3ee53b1eeee971b57238727e28fa51237d9e8590d221e9f4601f",
+    "depth": "tensorrt",
+    "gaze": "tensorrt"
+  },
+  "environment": {
+    "host": "jetson-orin",
+    "machine": "aarch64",
+    "python": "3.10.12",
+    "commit": "84902f6",
+    "dirty": false,
+    "driver": "540.5.0",
+    "jetson_l4t": "R36.5.2",
+    "nvpmodel": "MAXN_SUPER",
+    "cv2_threads": 6,
+    "torch": "2.5.0a0+872d972e41.nv24.8",
+    "tensorrt": "10.3.0",
+    "ultralytics": "8.4.14",
+    "cv2": "4.11.0",
+    "projectaria_tools": "2.3.0",
+    "cuda": "12.6",
+    "gpu": "Orin"
+  },
+  "throughput": {
+    "processed_frames": 9208,
+    "dropped_frames": 0,
+    "wall_seconds": 676.11,
+    "effective_fps": 13.62
+  },
+  "latency_ms": {
+    "decode": {
+      "n": 9208,
+      "mean": 39.794,
+      "p50": 38.303,
+      "p95": 48.453,
+      "p99": 50.463,
+      "max": 61.515
+    },
+    "detector": {
+      "n": 9208,
+      "mean": 33.601,
+      "p50": 24.787,
+      "p95": 90.547,
+      "p99": 93.999,
+      "max": 241.111
+    },
+    "tracker_arbiter": {
+      "n": 9208,
+      "mean": 1.18,
+      "p50": 1.079,
+      "p95": 2.238,
+      "p99": 2.985,
+      "max": 275.391
+    },
+    "loop": {
+      "n": 9208,
+      "mean": 73.397,
+      "p50": 62.77,
+      "p95": 128.733,
+      "p99": 132.085,
+      "max": 280.857
+    },
+    "capture_to_detections": {
+      "n": 0
+    },
+    "stage.run_yolo": {
+      "n": 9208,
+      "mean": 17.135,
+      "p50": 18.397,
+      "p95": 18.798,
+      "p99": 19.641,
+      "max": 25.531
+    },
+    "stage.create_detections": {
+      "n": 6240,
+      "mean": 0.362,
+      "p50": 0.329,
+      "p95": 0.587,
+      "p99": 0.761,
+      "max": 1.285
+    },
+    "stage.estimate_gaze": {
+      "n": 4604,
+      "mean": 4.932,
+      "p50": 5.365,
+      "p95": 5.819,
+      "p99": 6.469,
+      "max": 9.493
+    },
+    "stage.run_depth": {
+      "n": 1841,
+      "mean": 62.042,
+      "p50": 62.936,
+      "p95": 68.379,
+      "p99": 68.887,
+      "max": 69.976
+    }
+  },
+  "alerts": {
+    "video_path": "recording.vrs",
+    "total_frames": 9208,
+    "total_seconds": 306.7,
+    "fps": 30.0,
+    "total_alerts": 58,
+    "danger_count": 5,
+    "warning_count": 27,
+    "attention_count": 26,
+    "channel_b_count": 0,
+    "alerts_per_min": 11.3,
+    "silent_ratio": 0.81,
+    "min_gap_s": 2.03,
+    "max_gap_s": 6.9,
+    "max_concurrent": 1,
+    "pass_silent_ratio": true,
+    "pass_alerts_per_min": true,
+    "pass_min_gap": true,
+    "pass_max_concurrent": true
+  },
+  "detections_per_class": {
+    "car": 4949,
+    "Tree": 3503,
+    "fire hydrant": 1667,
+    "person": 859,
+    "motorcycle": 19,
+    "bicycle": 5,
+    "Stairs": 2,
+    "backpack": 1,
+    "truck": 1
+  },
+  "motion_state": {
+    "unknown": 3,
+    "stationary": 4454,
+    "walking": 4751
+  }
+}
