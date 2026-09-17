@@ -63,6 +63,9 @@ class ParallelDetector:
         self._frame_idx = 0
         self._cached_depth = None
         self._cached_gaze = None
+        # ARIA_DEPTH_ASYNC=1: depth on its own thread, frames never wait for it
+        self._depth_async = os.environ.get("ARIA_DEPTH_ASYNC", "0") == "1"
+        self._depth_worker = None
 
         # CUDA streams (solo si hay GPU)
         if device == "cuda":
@@ -93,6 +96,12 @@ class ParallelDetector:
         self.depth_processor = None
         if enable_depth:
             self._load_depth()
+
+        if self._depth_async and self.depth_model is not None:
+            from src.detection.async_worker import LatestOnlyWorker
+            self._depth_worker = LatestOnlyWorker(self._run_depth, name="depth",
+                                                  cuda_stream=self.depth_stream)
+            print("[DETECTOR] Depth asincrono (ARIA_DEPTH_ASYNC=1)")
 
         # Cargar Eye Gaze model (Meta)
         self.gaze_model = None
@@ -373,7 +382,13 @@ class ParallelDetector:
                 yolo_results = self._run_yolo(frame)
 
             # Stream 2: Depth (solo cada N frames)
-            if should_compute_depth:
+            if self._depth_worker is not None:
+                if should_compute_depth:
+                    self._depth_worker.submit(frame)
+                latest = self._depth_worker.latest()  # newest finished map, every frame
+                if latest is not None:
+                    self._cached_depth = latest
+            elif should_compute_depth:
                 with torch.cuda.stream(self.depth_stream):
                     self._cached_depth = self._run_depth(frame)
 
@@ -383,8 +398,13 @@ class ParallelDetector:
                     self._cached_gaze = self.estimate_gaze(eye_frame)
             gaze_point = self._cached_gaze
 
-            # Sincronizar todos los streams
-            torch.cuda.synchronize()
+            # Sincronizar los streams de este frame. Con depth asincrono no se
+            # espera al stream de depth (un synchronize global lo haria)
+            if self._depth_worker is not None:
+                self.yolo_stream.synchronize()
+                self.gaze_stream.synchronize()
+            else:
+                torch.cuda.synchronize()
         else:
             # CPU: secuencial
             yolo_results = self._run_yolo(frame)

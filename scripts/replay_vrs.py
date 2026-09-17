@@ -309,6 +309,11 @@ def replay(args) -> dict:
     model_name = os.environ.get("ARIA_YOLO_MODEL", "yolo26s")
     detector = ParallelDetector(enable_depth=not args.no_depth, mode=args.mode, fov_h=ARIA_RGB_FOV_H)
     sync = torch.cuda.synchronize if torch.cuda.is_available() else (lambda: None)
+    # After process() only this thread's work must be finished: a device-wide
+    # synchronize would also wait for an asynchronous depth worker
+    sync_frame = torch.cuda.current_stream().synchronize if torch.cuda.is_available() else (lambda: None)
+    if args.breakdown and os.environ.get("ARIA_DEPTH_ASYNC") == "1":
+        raise SystemExit("--breakdown times stages synchronously; run it without ARIA_DEPTH_ASYNC=1")
 
     stage_ms: Dict[str, List[float]] = {}
     if args.breakdown:
@@ -344,7 +349,7 @@ def replay(args) -> dict:
             idx, ts, rgb, eye, motion, dec_ms = item
             t1 = time.perf_counter()
             detections, _, _ = detector.process(rgb, eye)
-            sync()
+            sync_frame()
             done_ns = time.perf_counter_ns()
             detect_ms.append((done_ns / 1e9 - t1) * 1000)
             decode_ms.append(dec_ms)
@@ -360,7 +365,7 @@ def replay(args) -> dict:
             t1 = time.perf_counter()
             motion = rec.motion_state_at(ts)
             detections, _, _ = detector.process(rgb, eye)
-            sync()
+            sync_frame()
             t2 = time.perf_counter()
             decode_ms.append((t1 - t0) * 1000)
             detect_ms.append((t2 - t1) * 1000)
@@ -395,6 +400,7 @@ def replay(args) -> dict:
         "settings": {
             "pace": args.pace, "mode": args.mode, "depth": not args.no_depth,
             "depth_interval": detector.depth_interval, "breakdown": args.breakdown,
+            "depth_async": detector._depth_worker is not None,
             "warmup_frames": args.warmup, "imu_target_hz": args.imu_hz,
             "fov_h": ARIA_RGB_FOV_H,
         },
