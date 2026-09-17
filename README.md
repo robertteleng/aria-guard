@@ -168,6 +168,18 @@ python scripts/alert_table.py benchmarks/alerts/candidate1/*.json --variants ttc
 
 Tests: `uv run pytest` (198 tests, no hardware needed; GPU tests skip).
 
+## Limitations and next steps
+
+What this version does not do, and what would come next, one change at a time:
+
+| Limitation | Why | Possible next step |
+|---|---|---|
+| Obstacles that do not touch the ground in front of the wearer (branches, awnings, signs at head height) are missed or placed too far | The adopted threat model locates each object by where its box meets the ground | Metric monocular depth (e.g. Depth Anything V2 Metric Small), evaluated against the MPS point cloud before adoption |
+| Very close objects whose bottom edge leaves the image | Same ground-contact assumption | Same as above |
+| Capture → detections p95 is 136 ms on the Jetson, above the 100 ms target | CPU JPEG decoding (39 ms) and decoding sharing the detector's Python process | Decoding in a separate process; GPU at fixed frequency (`jetson_clocks`) |
+| Eye height fixed at 1.6 m | No per-wearer calibration | Estimate it from the IMU and SLAM at start-up |
+| Not tested live with the glasses on the Jetson, nor with blind or low-vision users | Offline evaluation only | Live session with the native ARM64 Aria SDK, same metrics as the replay |
+
 ## Related
 
 - [vision-fine-tuning](https://github.com/robertteleng/vision-fine-tuning): the navigation detector, its dataset and edge benchmarks
