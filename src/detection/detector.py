@@ -27,6 +27,13 @@ _PROJECT_ROOT = Path(__file__).parent.parent.parent
 MODELS_DIR = _PROJECT_ROOT / "models"
 
 
+def normalize_depth_u8(depth: "torch.Tensor") -> "torch.Tensor":
+    """Min-max a relative depth map to uint8 0-255 (same as cv2.NORM_MINMAX + astype)."""
+    dmin, dmax = depth.min(), depth.max()
+    scaled = (depth - dmin) * (255.0 / (dmax - dmin).clamp_min(1e-12))
+    return scaled.to(torch.uint8)
+
+
 class ParallelDetector:
     """YOLO + Depth en paralelo con CUDA streams."""
 
@@ -196,6 +203,10 @@ class ParallelDetector:
                 self._depth_trt_inputs.append({"name": name, "shape": shape, "mem": device_mem})
             else:
                 self._depth_trt_outputs.append({"name": name, "shape": shape, "mem": device_mem})
+
+        # ImageNet normalization runs on the GPU (see _run_depth_tensorrt)
+        self._depth_mean = torch.tensor([0.485, 0.456, 0.406], device="cuda").view(3, 1, 1)
+        self._depth_std = torch.tensor([0.229, 0.224, 0.225], device="cuda").view(3, 1, 1)
 
         self._depth_tensorrt = True
         self.depth_model = True  # Mark as loaded (non-None)
@@ -398,8 +409,6 @@ class ParallelDetector:
         if self.depth_model is None:
             return None
         try:
-            h, w = frame.shape[:2]
-
             # Preprocesar con OpenCV CUDA si está disponible
             if _OPENCV_CUDA:
                 gpu_frame = cv2.cuda_GpuMat()
@@ -408,12 +417,12 @@ class ParallelDetector:
                 gpu_small = cv2.cuda.resize(gpu_rgb, (518, 518))  # Depth Anything V2 uses 518x518
                 rgb_small = gpu_small.download()
             else:
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                rgb_small = cv2.resize(rgb, (518, 518))
+                # Resize first: the channel swap on 518x518 instead of 1408x1408
+                rgb_small = cv2.cvtColor(cv2.resize(frame, (518, 518)), cv2.COLOR_BGR2RGB)
 
-            # TensorRT path
+            # TensorRT path: normalized uint8 map at the model resolution
             if self._depth_tensorrt:
-                depth_np = self._run_depth_tensorrt(rgb_small)
+                return self._run_depth_tensorrt(rgb_small)
             else:
                 # HuggingFace path
                 from PIL import Image
@@ -426,33 +435,26 @@ class ParallelDetector:
                     outputs = self.depth_model(**inputs)
                     depth_np = outputs.predicted_depth.squeeze().float().cpu().numpy()
 
-            # Resize a tamaño original
-            depth_resized = cv2.resize(depth_np, (w, h))
-
-            # Normalizar a 0-255
-            depth_normalized = cv2.normalize(depth_resized, None, 0, 255, cv2.NORM_MINMAX)
+            # Kept at the model resolution: detections sample it by scaling
+            # their bbox to the map size, and the dashboard resizes it to draw.
+            # Upscaling to the full frame cost a 2 MP float resize per run.
+            depth_normalized = cv2.normalize(depth_np, None, 0, 255, cv2.NORM_MINMAX)
             return depth_normalized.astype(np.uint8)
         except Exception as e:
             print(f"[DETECTOR ERROR] Depth: {e}")
             return None
 
     def _run_depth_tensorrt(self, rgb_image: np.ndarray) -> np.ndarray:
-        """Ejecuta Depth Anything V2 con TensorRT."""
-        import tensorrt as trt
+        """Depth Anything V2 on TensorRT: uint8 RGB (518x518) -> uint8 proximity map.
 
-        # Preprocess: normalize to [0, 1] and convert to NCHW
-        img = rgb_image.astype(np.float32) / 255.0
-        # Normalize with ImageNet mean/std
-        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-        img = (img - mean) / std
-        img = img.transpose(2, 0, 1)  # HWC -> CHW
-        img = np.expand_dims(img, 0)  # Add batch dimension
-        img = np.ascontiguousarray(img)
-
-        # Copy input to GPU
-        input_tensor = torch.from_numpy(img).cuda()
-        self._depth_trt_inputs[0]["mem"].copy_(input_tensor.flatten())
+        Pre- and post-processing run on the GPU: only the uint8 image goes up
+        and only the uint8 map comes back (on the Jetson the float32 numpy
+        normalization and the min-max on the CPU dominated this stage).
+        """
+        x = torch.from_numpy(np.ascontiguousarray(rgb_image)).cuda()
+        x = x.permute(2, 0, 1).float().div_(255.0)
+        x = (x - self._depth_mean) / self._depth_std
+        self._depth_trt_inputs[0]["mem"].copy_(x.reshape(-1))
 
         # Set tensor addresses
         for inp in self._depth_trt_inputs:
@@ -463,12 +465,9 @@ class ParallelDetector:
         # Execute (no sync here — process() syncs all streams at the end)
         self._depth_trt_context.execute_async_v3(torch.cuda.current_stream().cuda_stream)
 
-        # Get output (stream-ordered, safe after global sync in process())
-        output_shape = self._depth_trt_outputs[0]["shape"]
-        depth = self._depth_trt_outputs[0]["mem"][:np.prod(output_shape)].cpu().numpy()
-        depth = depth.reshape(output_shape).squeeze()
-
-        return depth
+        output_shape = tuple(self._depth_trt_outputs[0]["shape"])
+        depth = self._depth_trt_outputs[0]["mem"][:int(np.prod(output_shape))].view(output_shape).squeeze()
+        return normalize_depth_u8(depth).cpu().numpy()
 
     @staticmethod
     def _classify_traffic_light(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int) -> Optional[str]:
