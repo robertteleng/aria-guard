@@ -4,7 +4,7 @@ Evaluate aria-guard alerts against the wearer's real path (docs/ALERT_EVALUATION
 
 Inputs per recording: the replay detections (scripts/replay_vrs.py
 --save-detections), the VRS (timestamps and RGB calibration) and Meta's MPS
-output (trajectory and semidense points). No manual labels.
+output (trajectory, semidense points and hand tracking). No manual labels.
 
 Usage:
     python scripts/evaluate_alerts.py \\
@@ -29,6 +29,7 @@ from scripts.benchmark_offline import FrameResult, run_benchmark  # noqa: E402
 from src.evaluation.geometry import (GridIndex2D, bearing_deg, merge_episodes,  # noqa: E402
                                      point_to_polyline_2d, quat_to_matrix, ray_ground_intersection,
                                      upright_to_raw_pixel)
+from src.input.aria_frames import raw_to_upright_pixel  # noqa: E402
 
 # --- pre-registered parameters (docs/ALERT_EVALUATION.md) -------------------------
 HORIZON_S = 3.0
@@ -47,6 +48,11 @@ STATIC_CLASSES = {"car", "truck", "bus", "bench", "fire hydrant", "stop sign", "
                   "potted plant", "Door", "Stairs", "Street light", "Traffic sign", "Tree"}
 RGB_SIZE = 1408
 FOV_H = 1.919
+# amendment "the wearer's own body"
+HAND_CONFIDENCE_MIN = 0.5
+HAND_MAX_DT_S = 0.06
+WEARER_BOX_MARGIN = 0.10
+WEARER_SENSITIVITY_DEG = (10.0, 20.0)
 
 
 # --- MPS / VRS loading --------------------------------------------------------------
@@ -128,20 +134,66 @@ class ImuUp:
         return None if n < 1e-6 else mean / n
 
 
-def live_metric_threats(frames: List[dict], cam: "RgbCamera", imu: ImuUp) -> Dict:
-    """(frame_idx, det_index) -> {threat, forward_m, lateral_m}, using the live
-    MetricInPath class with the VRS accelerometer (live-available data only)."""
+def live_metric_threats(frames: List[dict], cam: "RgbCamera", imu: ImuUp, wearer_body_filter: bool = False) -> Dict:
+    """(frame_idx, det_index) -> {threat, forward_m, lateral_m, wearer_body, ...}, using
+    the live MetricInPath class with the VRS accelerometer (live-available data only)."""
     from types import SimpleNamespace
     from src.input.metric_inpath import MetricInPath
-    model = MetricInPath(cam.calib, imu.R_di)
+    model = MetricInPath(cam.calib, imu.R_di, wearer_body_filter=wearer_body_filter)
     out = {}
     for fr in frames:
         up_imu = imu.up_imu(int(cam.rgb_ts[fr["frame_idx"]]))
-        dets = [SimpleNamespace(bbox=d["bbox"]) for d in fr["detections"]]
+        dets = [SimpleNamespace(bbox=d["bbox"], name=d["name"]) for d in fr["detections"]]
         model.annotate(dets, up_imu)
         for k, d in enumerate(dets):
-            out[(fr["frame_idx"], k)] = {"threat": d.metric_threat, "forward_m": d.forward_m, "lateral_m": d.lateral_m}
+            out[(fr["frame_idx"], k)] = {"threat": d.metric_threat, "forward_m": d.forward_m, "lateral_m": d.lateral_m,
+                                         "wearer_body": d.wearer_body, "top_down_deg": d.top_down_deg,
+                                         "bottom_frac": d.bottom_frac, "name": d.name}
     return out
+
+
+def wearer_filter_agreement(metric: Dict, wearer_ref: set, thresholds=None) -> dict:
+    """Live wearer-body rule vs the hand-tracking reference, at the registered angle and sensitivity angles."""
+    from src.domain.ground_projection import WEARER_BODY_TOP_DOWN_DEG, is_wearer_body
+    out = {"reference_wearer_detections": len(wearer_ref)}
+    for deg in (WEARER_BODY_TOP_DOWN_DEG, *(thresholds or WEARER_SENSITIVITY_DEG)):
+        flagged = {k for k, m in metric.items() if is_wearer_body(m["name"], m["bottom_frac"], m["top_down_deg"], deg)}
+        hit = len(flagged & wearer_ref)
+        out[f"{deg:g}deg"] = {"flagged": len(flagged),
+                              "share_of_reference_removed": round(hit / len(wearer_ref), 3) if wearer_ref else None,
+                              "flagged_not_in_reference": len(flagged - wearer_ref)}
+    return out
+
+
+class HandTracking:
+    """Wrist positions (device frame, metres) from MPS hand_tracking_frames.jsonl."""
+
+    def __init__(self, jsonl: Path):
+        t, wrists = [], []
+        with open(jsonl) as f:
+            for line in f:
+                d = json.loads(line)
+                t.append(int(d["tracking_timestamp_us"]) * 1000)
+                wrists.append([np.asarray(h["T_wrist_device"]["translation"], dtype=np.float64) / 1000.0
+                               for h in d["hand_poses"].values()
+                               if h["existence_confidence"] >= HAND_CONFIDENCE_MIN])
+        order = np.argsort(t)
+        self.t_ns = np.asarray(t, dtype=np.int64)[order]
+        self._wrists = [wrists[i] for i in order]
+
+    def wrists(self, t_ns: int) -> List[np.ndarray]:
+        if not len(self.t_ns):
+            return []
+        i = int(np.clip(np.searchsorted(self.t_ns, t_ns), 1, len(self.t_ns) - 1))
+        i = i - 1 if abs(self.t_ns[i - 1] - t_ns) < abs(self.t_ns[i] - t_ns) else i
+        return self._wrists[i] if abs(self.t_ns[i] - t_ns) <= HAND_MAX_DT_S * 1e9 else []
+
+
+def wrist_in_box(uv, bbox, margin: float = WEARER_BOX_MARGIN) -> bool:
+    if uv is None:
+        return False
+    x, y, w, h = bbox
+    return x - margin * w <= uv[0] <= x + (1 + margin) * w and y - margin * h <= uv[1] <= y + (1 + margin) * h
 
 
 class RgbCamera:
@@ -162,18 +214,36 @@ class RgbCamera:
         v = np.asarray(self.calib.unproject_no_checks(np.array([rx, ry], dtype=np.float64)), dtype=np.float64)
         return v / np.linalg.norm(v)
 
+    def project_device_upright(self, p_device: np.ndarray):
+        """Upright-frame pixel of a device-frame point, or None behind the camera."""
+        p_cam = self.R_dc.T @ (np.asarray(p_device, dtype=np.float64) - self.t_dc)
+        if p_cam[2] <= 0.05:
+            return None
+        uv = self.calib.project_no_checks(p_cam)
+        return None if uv is None else raw_to_upright_pixel(float(uv[0]), float(uv[1]), RGB_SIZE)
+
 
 # --- reference geometry per detection --------------------------------------------------
 
-def reference_geometry(frames: List[dict], cam: RgbCamera, traj: Trajectory, pts: Points) -> Dict:
-    """World ground position of every detection bottom-centre, plus the static cross-check."""
+def reference_geometry(frames: List[dict], cam: RgbCamera, traj: Trajectory, pts: Points,
+                       hands: Optional["HandTracking"] = None) -> Dict:
+    """World ground position of every detection bottom-centre, plus the static cross-check.
+
+    With hand tracking, 'person' detections containing a tracked wrist are the
+    wearer's body: they get no ground position (amendment) and are listed apart."""
     geo = {}  # (frame_idx, det_index) -> dict
+    wearer = set()
     stats = Counter()
     crosscheck = []
     static_frames_seen = 0
     for fr in frames:
         fi = fr["frame_idx"]
         t_ns = int(cam.rgb_ts[fi])
+        if hands is not None and any(d["name"] == "person" for d in fr["detections"]):
+            uvs = [cam.project_device_upright(w) for w in hands.wrists(t_ns)]
+            for k, d in enumerate(fr["detections"]):
+                if d["name"] == "person" and any(wrist_in_box(uv, d["bbox"]) for uv in uvs):
+                    wearer.add((fi, k))
         if not traj.covers(t_ns):
             stats["frames_outside_trajectory"] += 1
             continue
@@ -190,6 +260,9 @@ def reference_geometry(frames: List[dict], cam: RgbCamera, traj: Trajectory, pts
             static_frames_seen += 1
         near_pts = pts.near(cam_center, 20.0) if do_cross else None
         for k, d in enumerate(fr["detections"]):
+            if (fi, k) in wearer:
+                stats["wearer_body"] += 1
+                continue
             x, y, w, h = d["bbox"]
             ray_w = R_wc @ cam.ray_upright(x + w / 2, y + h)
             hit = ray_ground_intersection(cam_center, ray_w, ground, MAX_GROUND_RANGE_M)
@@ -202,7 +275,7 @@ def reference_geometry(frames: List[dict], cam: RgbCamera, traj: Trajectory, pts
                 sd = semidense_distance(near_pts, cam_center, R_wc, cam, d["bbox"])
                 if sd is not None:
                     crosscheck.append((d["name"], geo[(fi, k)]["distance"], sd))
-    return {"geo": geo, "stats": stats, "crosscheck": crosscheck}
+    return {"geo": geo, "stats": stats, "crosscheck": crosscheck, "wearer": wearer}
 
 
 def semidense_distance(points_w, cam_center, R_wc, cam, bbox):
@@ -230,12 +303,13 @@ def semidense_distance(points_w, cam_center, R_wc, cam, bbox):
 @contextmanager
 def tracker_variant(name: str):
     """'ttc_fix' = current heuristic; 'pre_ttc' = proximity used as distance (before
-    3c56e50); 'metric_inpath' = candidate change 1 (needs metric threats injected)."""
+    3c56e50); 'metric_inpath' = candidate change 1 and 'metric_inpath_selfbody' =
+    candidate change 2 (both need metric threats injected)."""
     import src.domain.tracker as tracker_mod
     original = tracker_mod.remaining_gap
     if name == "pre_ttc":
         tracker_mod.remaining_gap = lambda proximity: proximity
-    elif name not in ("ttc_fix", "metric_inpath"):
+    elif name not in ("ttc_fix", "metric_inpath", "metric_inpath_selfbody"):
         raise ValueError(name)
     try:
         yield
@@ -250,7 +324,7 @@ def evaluate(frames: List[dict], geo: Dict, cam: RgbCamera, traj: Trajectory, va
     """Metrics for one tracker variant. details=True also returns the per-frame
     matching (tracks with ground position and in-path flag, alerts with their
     verdict) used by scripts/render_demo.py."""
-    if variant == "metric_inpath":
+    if variant.startswith("metric_inpath"):
         if metric is None:
             raise ValueError("metric_inpath needs live metric threats")
         frames = [{**f, "detections": [{**d, "metric_threat": metric[(f["frame_idx"], k)]["threat"]}
@@ -406,7 +480,9 @@ def main():
     ap.add_argument("--recording", required=True, type=Path, help="folder with recording.vrs and mps/")
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--variants", nargs="+", default=["pre_ttc", "ttc_fix"],
-                    help="pre_ttc, ttc_fix, metric_inpath")
+                    help="pre_ttc, ttc_fix, metric_inpath, metric_inpath_selfbody")
+    ap.add_argument("--no-hands", action="store_true",
+                    help="Ignore MPS hand tracking (reference before the wearer-body amendment)")
     ap.add_argument("--details-out", type=Path,
                     help="Also pickle per-frame matching of every variant (input of render_demo.py)")
     args = ap.parse_args()
@@ -415,21 +491,30 @@ def main():
     cam = RgbCamera(args.recording / "recording.vrs")
     traj = Trajectory(args.recording / "mps" / "slam" / "closed_loop_trajectory.csv")
     pts = Points(args.recording / "mps" / "slam" / "semidense_points.csv.gz")
-    ref = reference_geometry(frames, cam, traj, pts)
-    metric = None
-    if "metric_inpath" in args.variants:
-        metric = live_metric_threats(frames, cam, ImuUp(args.recording / "recording.vrs"))
+    hands_path = args.recording / "mps" / "hand_tracking" / "hand_tracking_frames.jsonl"
+    hands = None if args.no_hands or not hands_path.exists() else HandTracking(hands_path)
+    ref = reference_geometry(frames, cam, traj, pts, hands)
+    metric = metric_sb = None
+    if any(v.startswith("metric_inpath") for v in args.variants):
+        imu = ImuUp(args.recording / "recording.vrs")
+        metric = live_metric_threats(frames, cam, imu)
+        if "metric_inpath_selfbody" in args.variants:
+            metric_sb = live_metric_threats(frames, cam, imu, wearer_body_filter=True)
     record = {
-        "schema": "aria-guard/alert-eval/1",
+        "schema": "aria-guard/alert-eval/2",
+        "wearer_body_reference": hands is not None,
         "commit": _git_commit(),
         "recording": args.recording.name,
         "detections": args.detections.name,
         "parameters": {k: v for k, v in globals().items() if k.isupper() and not k.startswith("_")
                        and isinstance(v, (int, float))},
         "reference": {**dict(ref["stats"]), "crosscheck": summarize_crosscheck(ref["crosscheck"])},
-        "results": [evaluate(frames, ref["geo"], cam, traj, v, details=args.details_out is not None, metric=metric)
+        "results": [evaluate(frames, ref["geo"], cam, traj, v, details=args.details_out is not None,
+                             metric=metric_sb if v == "metric_inpath_selfbody" else metric)
                     for v in args.variants],
         **({"live_vs_reference_distance": live_reference_agreement(metric, ref["geo"])} if metric else {}),
+        **({"wearer_filter_vs_hand_tracking": wearer_filter_agreement(metric, ref["wearer"])}
+           if metric and hands is not None else {}),
     }
     if args.details_out:
         import pickle

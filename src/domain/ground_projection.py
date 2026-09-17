@@ -71,3 +71,25 @@ def metric_threat(contact: Optional[Tuple[float, float]], corridor: float = CORR
     if F <= ATTENTION_M:
         return "ATTENTION"
     return "NONE"
+
+
+# Candidate change 2 (docs/ALERT_EVALUATION.md, amendment "the wearer's own body")
+WEARER_BODY_BOTTOM_FRAC = 0.97
+WEARER_BODY_TOP_DOWN_DEG = 15.0
+
+
+def degrees_below_horizontal(ray: np.ndarray, up: np.ndarray) -> float:
+    """Angle of a ray below the horizontal plane, in degrees (negative above it)."""
+    r = np.asarray(ray, dtype=np.float64)
+    u = np.asarray(up, dtype=np.float64)
+    s = -np.dot(r / np.linalg.norm(r), u / np.linalg.norm(u))
+    return float(np.degrees(np.arcsin(np.clip(s, -1.0, 1.0))))
+
+
+def is_wearer_body(name: str, bottom_frac: float, top_down_deg: Optional[float],
+                   min_top_down_deg: float = WEARER_BODY_TOP_DOWN_DEG,
+                   min_bottom_frac: float = WEARER_BODY_BOTTOM_FRAC) -> bool:
+    """A 'person' box that reaches the bottom edge and whose top is well below eye
+    level: the wearer's own hand or arm, not someone standing in front."""
+    return (name == "person" and top_down_deg is not None
+            and bottom_frac >= min_bottom_frac and top_down_deg >= min_top_down_deg)

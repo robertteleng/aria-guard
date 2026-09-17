@@ -144,3 +144,25 @@ def test_hero_window_rule_scores_justified_minus_unjustified_and_skips_standing(
                   episodes=[{"track_id": 6, "start": 79.0}])
     name, t0, score = pick_hero_window({"a": a, "b": b, "c": c})
     assert (name, score) == ("c", 1) and t0 == pytest.approx(75.0)
+
+
+def test_hand_tracking_reads_confident_wrists_in_metres_within_time_window(tmp_path):
+    import json
+    rows = []
+    for i, conf in enumerate((0.9, 0.2)):
+        hand = {"existence_confidence": conf, "joint_angles": [],
+                "T_wrist_device": {"translation": [100.0 * (i + 1), -250.0, 200.0], "quaternion": [0, 0, 0, 1]}}
+        rows.append({"tracking_timestamp_us": 1_000_000 * (i + 1), "hand_poses": {"left": hand, "right": hand}})
+    p = tmp_path / "hands.jsonl"
+    p.write_text("\n".join(json.dumps(r) for r in rows))
+    hands = ev.HandTracking(p)
+    w = hands.wrists(1_000_000_000 + 30_000_000)            # 30 ms after the first row
+    assert len(w) == 2 and w[0] == pytest.approx([0.1, -0.25, 0.2])
+    assert hands.wrists(2_000_000_000) == []                 # low confidence
+    assert hands.wrists(1_500_000_000) == []                 # no row within 60 ms
+
+
+def test_wrist_in_box_uses_ten_percent_margin():
+    assert ev.wrist_in_box((105, 50), (0, 0, 100, 100))
+    assert not ev.wrist_in_box((115, 50), (0, 0, 100, 100))
+    assert not ev.wrist_in_box(None, (0, 0, 100, 100))

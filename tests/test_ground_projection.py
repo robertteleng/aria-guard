@@ -152,3 +152,35 @@ def test_metric_inpath_without_gravity_is_none():
     det = SimpleNamespace(bbox=(600, 600, 40, 60))
     model.annotate([det], None)
     assert det.metric_threat == "NONE" and det.forward_m is None
+
+
+def test_degrees_below_horizontal():
+    from src.domain.ground_projection import degrees_below_horizontal
+    up = np.array([0.0, 0.0, 1.0])
+    assert degrees_below_horizontal(np.array([1.0, 0.0, 0.0]), up) == pytest.approx(0.0)
+    assert degrees_below_horizontal(np.array([1.0, 0.0, -1.0]), up) == pytest.approx(45.0)
+    assert degrees_below_horizontal(np.array([1.0, 0.0, 0.2]), up) < 0
+
+
+def test_is_wearer_body_needs_person_bottom_edge_and_top_below_eye_level():
+    from src.domain.ground_projection import is_wearer_body
+    assert is_wearer_body("person", 1.0, 30.0)
+    assert not is_wearer_body("person", 0.90, 30.0)       # feet visible: someone ahead
+    assert not is_wearer_body("person", 1.0, 5.0)         # head near eye level: standing person
+    assert not is_wearer_body("car", 1.0, 30.0)
+    assert not is_wearer_body("person", 1.0, None)        # no gravity, no decision
+    assert is_wearer_body("person", 1.0, 12.0, min_top_down_deg=10.0)
+
+
+def test_metric_inpath_wearer_body_filter_sets_threat_none():
+    from types import SimpleNamespace
+    from src.input.metric_inpath import MetricInPath
+    calib = PinholeCalib()
+    up_imu = np.array([-1.0, 0.0, 0.0])               # upright rows = raw x, so raw +x points down
+    c = int(calib.c)
+    bbox = (c - 100, c + 300, 200, 1407 - (c + 300))   # upright box from 300 px below centre to the bottom edge
+    for flt, expected in ((False, "DANGER"), (True, "NONE")):
+        det = SimpleNamespace(bbox=bbox, name="person")
+        MetricInPath(calib, R_device_imu=np.eye(3), wearer_body_filter=flt).annotate([det], up_imu)
+        assert det.wearer_body and det.top_down_deg > 15
+        assert det.metric_threat == expected
