@@ -182,7 +182,7 @@ def draw_bev(fd, traj, cam, points_xyz, ground, t_ns, alerts_now):
 
 def draw_cam(rgb, fd, alerts_now, alert_banner):
     img = cv2.resize(rgb, (CAM, CAM))
-    texts = [(f"What aria-guard sees · {VARIANT_LABEL}", (12, 10), 20, (240, 240, 240), True)]
+    texts = [(f"aria-guard sees · {VARIANT_LABEL}", (12, 10), 18, (240, 240, 240), True)]
     s = CAM / ev.RGB_SIZE
     for tr in fd["tracks"] if fd else []:
         x, y, w, h = [int(v * s) for v in tr["bbox"]]
@@ -243,9 +243,9 @@ def render_comparison(details_path: Path, variants, t0: float, length: float, re
         tl = draw_timeline(t0 - 1, t0, length, det["episodes"], det["alerts"], res)
         p = pooled(groups[v])
         band = draw_texts(np.full((38, W, 3), 12, np.uint8), [
-            (f"{VARIANT_LABELS.get(v, v)}  ·  six recordings: {p['precision']:.0%} of alerts justified, "
-             f"{p['recall']:.0%} of hazards warned, {p['unjustified_per_min']:.1f} unjustified alerts/min",
-             (20, 8), 20, OK if v == variants[-1] else (200, 200, 200), True)])
+            (f"{VARIANT_LABELS.get(v, v)}  ·  6 recordings: {p['precision']:.0%} alerts justified  ·  "
+             f"{p['recall']:.0%} hazards warned  ·  {p['unjustified_per_min']:.1f} unjustified/min",
+             (20, 9), 19, OK if v == variants[-1] else (200, 200, 200), True)])
         rows += [band, tl[:TL_H - 34]]
     cv2.imwrite(str(out), np.vstack(rows), [cv2.IMWRITE_PNG_COMPRESSION, 9])
     print(f"[DEMO] {out}")
