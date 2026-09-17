@@ -38,6 +38,9 @@ MIN_WALK_MPS = 0.5
 LEVEL_COLOR = {"ATTENTION": (0, 200, 255), "WARNING": (0, 140, 255), "DANGER": (40, 40, 230)}
 OK, BAD, PATH_C, GREY = (90, 200, 90), (70, 70, 230), (255, 190, 90), (150, 150, 150)
 FONT = cv2.FONT_HERSHEY_SIMPLEX
+VARIANT_LABEL = "heuristic"
+VARIANT_LABELS = {"ttc_fix": "heuristic (image thirds)", "pre_ttc": "heuristic, pre TTC fix",
+                  "metric_inpath": "metric in-path (metres)"}
 
 
 def walking_speed(frames, t0, length_s):
@@ -127,7 +130,7 @@ def draw_cam(rgb, fd, alerts_now, alert_banner):
         color = LEVEL_COLOR[tr["threat"]]
         cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)
         text(img, f'{tr["name"]} {tr["threat"].lower()}', (x, max(14, y - 5)), 0.45, color)
-    text(img, "aria-guard (yolo26n_nav + depth + tracker + arbiter)", (10, 22), 0.5)
+    text(img, f"aria-guard | threat: {VARIANT_LABEL}", (10, 22), 0.5)
     if alert_banner:
         a = alert_banner
         verdict = "justified" if a["justified"] else "not in path"
@@ -158,19 +161,54 @@ def draw_timeline(t, t0, length, episodes, alerts, metrics):
     return img
 
 
+def render_comparison(details_path: Path, variants, t0: float, length: float, records, out: Path):
+    """Static before/after: the same window's timeline for each variant, plus pooled metrics."""
+    import pickle
+    from scripts.alert_table import by_variant, pooled
+    with open(details_path, "rb") as f:
+        data = pickle.load(f)
+    groups = by_variant(records)
+    rows = [np.full((56, W, 3), 12, np.uint8)]
+    text(rows[0], f"Same {length:.0f} s of walking, two threat models (hazard episodes from the wearer's real path)",
+         (20, 36), 0.65, (235, 235, 235), 1)
+    for v in variants:
+        res = data[v]
+        det = res["details"]
+        tl = draw_timeline(t0 - 1, t0, length, det["episodes"], det["alerts"], res)
+        p = pooled(groups[v])
+        band = np.full((34, W, 3), 12, np.uint8)
+        text(band, f"{VARIANT_LABELS.get(v, v)}  -  six recordings: precision {p['precision']:.0%}, "
+                   f"episodes warned {p['recall']:.0%}, unjustified alerts {p['unjustified_per_min']:.1f}/min",
+             (20, 24), 0.55, (90, 200, 90) if v == variants[-1] else (200, 200, 200), 1)
+        rows += [band, tl[:TL_H - 26]]
+    cv2.imwrite(str(out), np.vstack(rows), [cv2.IMWRITE_PNG_COMPRESSION, 9])
+    print(f"[DEMO] {out}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--details", required=True, type=Path, help="pickle from evaluate_alerts.py --details-out")
     ap.add_argument("--recording", required=True, type=Path)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--variant", default="ttc_fix")
+    ap.add_argument("--compare", nargs=2, metavar="VARIANT", help="Write a before/after PNG for two variants instead of video")
+    ap.add_argument("--records", nargs="*", type=Path, default=[], help="alert records for pooled numbers (--compare)")
     ap.add_argument("--seconds", type=float, default=40.0)
+    ap.add_argument("--start", type=float, help="Window start in seconds (default: the fixed selection rule); "
+                                                   "use it to render another variant on the same window")
     ap.add_argument("--fps", type=float, default=12.0)
     ap.add_argument("--gif-seconds", type=float, default=10.0,
                     help="Also write a GIF of the N seconds of the clip with the most alerts (0 = none)")
     args = ap.parse_args()
 
     import pickle
+    global VARIANT_LABEL
+    if args.compare:
+        from scripts.alert_table import load
+        start = args.start if args.start is not None else 0.0
+        render_comparison(args.details, args.compare, start, args.seconds, load(args.records), args.out)
+        return
+    VARIANT_LABEL = VARIANT_LABELS.get(args.variant, args.variant)
     with open(args.details, "rb") as f:
         result = pickle.load(f)[args.variant]
     cam = ev.RgbCamera(args.recording / "recording.vrs")
@@ -179,6 +217,8 @@ def main():
     det = result["details"]
     duration = det["frames"][-1]["t"]
     t0, speed = pick_window(det["episodes"], det["frames"], duration, args.seconds)
+    if args.start is not None:
+        t0, speed = args.start, walking_speed(det["frames"], args.start, args.seconds)
     print(f"[DEMO] window {t0:.1f}-{t0 + args.seconds:.1f} s of {duration:.0f} s (walking {speed:.2f} m/s), "
           f"precision {result['alert_precision']}, recall {result['episode_recall']}")
 
