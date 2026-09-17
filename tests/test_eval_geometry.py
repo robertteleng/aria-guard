@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.evaluation.geometry import (bearing_deg, merge_episodes, point_to_polyline_2d, quat_to_matrix,
+from src.evaluation.geometry import (GridIndex2D, bearing_deg, merge_episodes, point_to_polyline_2d, quat_to_matrix,
                                      raw_to_upright_pixel, ray_ground_intersection, upright_to_raw_pixel)
 
 
@@ -89,3 +89,18 @@ class TestEpisodes:
 
     def test_empty(self):
         assert merge_episodes([], 0.5) == []
+
+
+def test_grid_index_matches_kdtree_exactly():
+    spatial = pytest.importorskip("scipy.spatial")
+    rng = np.random.default_rng(1)
+    xy = np.vstack([rng.normal(0, 3, (20000, 2)), rng.uniform(-40, 40, (5000, 2))])
+    grid, tree = GridIndex2D(xy, cell=1.0), spatial.cKDTree(xy)
+    for center, radius in [((0.3, -0.2), 5.0), ((12.5, 7.1), 2.2), ((100, 100), 3.0), ((-39.9, 0), 20.0)]:
+        expected = sorted(tree.query_ball_point(center, radius))
+        assert sorted(grid.query_radius(np.array(center), radius).tolist()) == expected
+
+
+def test_grid_index_boundary_is_inclusive():
+    grid = GridIndex2D(np.array([[3.0, 4.0], [3.0, 4.0001]]), cell=1.0)
+    assert grid.query_radius(np.array([0.0, 0.0]), 5.0).tolist() == [0]

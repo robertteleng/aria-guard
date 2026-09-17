@@ -119,3 +119,32 @@ def merge_episodes(samples: Sequence[Tuple[int, float, bool, float, float]],
         if cur is not None:
             episodes.append(cur)
     return sorted(episodes, key=lambda e: (e.start, e.track_id))
+
+
+class GridIndex2D:
+    """Exact radius queries on the XY of many points via a uniform grid.
+
+    Returns the same indices as a KD-tree ball query (order aside) but stays
+    vectorized when a radius holds hundreds of thousands of points.
+    """
+
+    def __init__(self, xy: np.ndarray, cell: float = 1.0):
+        self.xy = np.asarray(xy, dtype=np.float64)[:, :2]
+        self.cell = cell
+        keys = np.floor(self.xy / cell).astype(np.int64)
+        self._order = np.lexsort((keys[:, 1], keys[:, 0]))
+        sk = keys[self._order]
+        uniq, start, counts = np.unique(sk, axis=0, return_index=True, return_counts=True)
+        self._cells = {(int(a), int(b)): (int(s0), int(s0 + c)) for (a, b), s0, c in zip(uniq, start, counts)}
+
+    def query_radius(self, center: np.ndarray, radius: float) -> np.ndarray:
+        c = np.asarray(center, dtype=np.float64)[:2]
+        lo = np.floor((c - radius) / self.cell).astype(np.int64)
+        hi = np.floor((c + radius) / self.cell).astype(np.int64)
+        chunks = [self._order[s:e] for i in range(lo[0], hi[0] + 1) for j in range(lo[1], hi[1] + 1)
+                  if (se := self._cells.get((i, j))) for s, e in [se]]
+        if not chunks:
+            return np.zeros(0, dtype=np.int64)
+        idx = np.concatenate(chunks)
+        d2 = ((self.xy[idx] - c) ** 2).sum(1)
+        return idx[d2 <= radius * radius]

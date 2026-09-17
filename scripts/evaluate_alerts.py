@@ -26,8 +26,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.benchmark_offline import FrameResult, run_benchmark  # noqa: E402
-from src.evaluation.geometry import (bearing_deg, merge_episodes, point_to_polyline_2d,  # noqa: E402
-                                     quat_to_matrix, ray_ground_intersection, upright_to_raw_pixel)
+from src.evaluation.geometry import (GridIndex2D, bearing_deg, merge_episodes,  # noqa: E402
+                                     point_to_polyline_2d, quat_to_matrix, ray_ground_intersection,
+                                     upright_to_raw_pixel)
 
 # --- pre-registered parameters (docs/ALERT_EVALUATION.md) -------------------------
 HORIZON_S = 3.0
@@ -82,20 +83,19 @@ class Trajectory:
 class Points:
     def __init__(self, csv_gz: Path):
         import pandas as pd
-        from scipy.spatial import cKDTree
         df = pd.read_csv(csv_gz, usecols=["px_world", "py_world", "pz_world", "dist_std"])
         df = df[df["dist_std"] <= POINT_STD_MAX_M]
         self.xyz = df[["px_world", "py_world", "pz_world"]].to_numpy(np.float64)
-        self.tree = cKDTree(self.xyz[:, :2])
+        self.index = GridIndex2D(self.xyz)
 
     def ground_z(self, xy: np.ndarray):
-        idx = self.tree.query_ball_point(xy[:2], GROUND_RADIUS_M)
+        idx = self.index.query_radius(xy, GROUND_RADIUS_M)
         if len(idx) < GROUND_MIN_POINTS:
             return None
         return float(np.percentile(self.xyz[idx, 2], GROUND_PERCENTILE))
 
     def near(self, xy: np.ndarray, radius: float) -> np.ndarray:
-        return self.xyz[self.tree.query_ball_point(xy[:2], radius)]
+        return self.xyz[self.index.query_radius(xy, radius)]
 
 
 class RgbCamera:
@@ -198,7 +198,11 @@ def tracker_variant(name: str):
 
 # --- evaluation ------------------------------------------------------------------------
 
-def evaluate(frames: List[dict], geo: Dict, cam: RgbCamera, traj: Trajectory, variant: str) -> dict:
+def evaluate(frames: List[dict], geo: Dict, cam: RgbCamera, traj: Trajectory, variant: str,
+             details: bool = False) -> dict:
+    """Metrics for one tracker variant. details=True also returns the per-frame
+    matching (tracks with ground position and in-path flag, alerts with their
+    verdict) used by scripts/render_demo.py."""
     frame_results = [FrameResult(**{k: f[k] for k in ("frame_idx", "timestamp", "detections", "motion_state")})
                      for f in frames]
     log: List[dict] = []
@@ -207,6 +211,7 @@ def evaluate(frames: List[dict], geo: Dict, cam: RgbCamera, traj: Trajectory, va
 
     t0_ns = int(cam.rgb_ts[frames[0]["frame_idx"]])
     samples = []                               # (track_id, t, in_path, dist, t_closest)
+    frame_details = []
     in_path_times = defaultdict(list)          # track_id -> [t]
     by_frame_dets = {f["frame_idx"]: f["detections"] for f in frames}
     for entry in log:
@@ -220,6 +225,7 @@ def evaluate(frames: List[dict], geo: Dict, cam: RgbCamera, traj: Trajectory, va
         here = path[0]
         heading = traj.position(t_ns + int(0.5e9))[:2] - here
         dets = by_frame_dets[fi]
+        fd = {"frame_idx": fi, "t": t, "path": path, "tracks": []} if details else None
         for tr in entry["tracks"]:
             k = next((i for i, d in enumerate(dets) if d["bbox"] == tr["bbox"] and d["name"] == tr["name"]), None)
             g = geo.get((fi, k)) if k is not None else None
@@ -233,6 +239,11 @@ def evaluate(frames: List[dict], geo: Dict, cam: RgbCamera, traj: Trajectory, va
             samples.append((tr["id"], t, in_path, dist, t_closest))
             if in_path:
                 in_path_times[tr["id"]].append(t)
+            if fd is not None:
+                fd["tracks"].append({**tr, "ground_xy": g["ground_xy"], "in_path": bool(in_path),
+                                     "path_distance": dist})
+        if fd is not None:
+            frame_details.append(fd)
 
     episodes = merge_episodes(samples, EPISODE_GAP_S)
     alerts = [(((int(cam.rgb_ts[e["frame_idx"]]) - t0_ns) / 1e9), a) for e in log for a in e["alerts"]
@@ -257,6 +268,14 @@ def evaluate(frames: List[dict], geo: Dict, cam: RgbCamera, traj: Trajectory, va
             ep_level[first[0][1]["level"]] += 1
 
     minutes = metrics.total_seconds / 60 if metrics.total_seconds else 0
+    detail = None
+    if details:
+        detail = {
+            "frames": frame_details,
+            "alerts": [{"t": t, **a, "justified": justified(t, a)} for t, a in alerts],
+            "episodes": [asdict(e) for e in episodes],
+            "t0_ns": t0_ns,
+        }
     n_alerts = len(alerts)
     n_just = sum(level_just.values())
     return {
@@ -275,6 +294,7 @@ def evaluate(frames: List[dict], geo: Dict, cam: RgbCamera, traj: Trajectory, va
                            "first_alert_of_warned_episodes": ep_level[lvl]}
                      for lvl in ("ATTENTION", "WARNING", "DANGER")},
         "alert_benchmark": asdict(metrics),
+        **({"details": detail} if details else {}),
     }
 
 
@@ -295,6 +315,8 @@ def main():
     ap.add_argument("--recording", required=True, type=Path, help="folder with recording.vrs and mps/")
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--variants", nargs="+", default=["pre_ttc", "ttc_fix"])
+    ap.add_argument("--details-out", type=Path,
+                    help="Also pickle per-frame matching of every variant (input of render_demo.py)")
     args = ap.parse_args()
 
     frames = json.loads(args.detections.read_text())["frames"]
@@ -309,8 +331,16 @@ def main():
         "parameters": {k: v for k, v in globals().items() if k.isupper() and not k.startswith("_")
                        and isinstance(v, (int, float))},
         "reference": {**dict(ref["stats"]), "crosscheck": summarize_crosscheck(ref["crosscheck"])},
-        "results": [evaluate(frames, ref["geo"], cam, traj, v) for v in args.variants],
+        "results": [evaluate(frames, ref["geo"], cam, traj, v, details=args.details_out is not None)
+                    for v in args.variants],
     }
+    if args.details_out:
+        import pickle
+        args.details_out.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.details_out, "wb") as f:
+            pickle.dump({r["variant"]: r for r in record["results"]}, f)
+        for r in record["results"]:
+            r.pop("details", None)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(record, indent=2))
     print(json.dumps({"reference": record["reference"],

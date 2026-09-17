@@ -9,6 +9,7 @@ set -euo pipefail
 DATA_DIR=${1:?usage: replay_benchmark.sh DATA_DIR OUT_DIR}
 OUT_DIR=${2:?usage: replay_benchmark.sh DATA_DIR OUT_DIR}
 PYTHON=${PYTHON:-python3}
+PACES=${PACES:-realtime all}  # e.g. PACES=realtime for variants that cannot run --breakdown
 TAG=${TAG:-}          # optional run label, e.g. TAG=opt, so variants do not overwrite each other
 MODE=${MODE:-outdoor}
 export ARIA_YOLO_MODEL=${ARIA_YOLO_MODEL:-yolo26n_nav}
@@ -17,7 +18,7 @@ mkdir -p "$OUT_DIR"
 cd "$(dirname "$0")/.."
 for vrs in "$DATA_DIR"/*/recording.vrs; do
   seq=$(basename "$(dirname "$vrs")")
-  for pace in realtime all; do
+  for pace in $PACES; do
     name="${host}_${seq}_${ARIA_YOLO_MODEL}${TAG:+_$TAG}_${pace}"
     out="$OUT_DIR/$name.json"
     # realtime keeps per-frame detections so alert logic can be re-evaluated
