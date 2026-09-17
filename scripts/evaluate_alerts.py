@@ -325,6 +325,18 @@ def summarize_crosscheck(rows) -> dict:
     }
 
 
+def _git_commit():
+    import subprocess
+    try:
+        out = subprocess.run(["git", "-C", str(PROJECT_ROOT), "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, check=True).stdout.strip()
+        dirty = subprocess.run(["git", "-C", str(PROJECT_ROOT), "status", "--porcelain", "--untracked-files=no"],
+                               capture_output=True, text=True).stdout.strip()
+        return out + ("-dirty" if dirty else "")
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
 def main():
     ap = argparse.ArgumentParser(description="Evaluate alerts against the wearer's real path (MPS)")
     ap.add_argument("--detections", required=True, type=Path)
@@ -342,6 +354,7 @@ def main():
     ref = reference_geometry(frames, cam, traj, pts)
     record = {
         "schema": "aria-guard/alert-eval/1",
+        "commit": _git_commit(),
         "recording": args.recording.name,
         "detections": args.detections.name,
         "parameters": {k: v for k, v in globals().items() if k.isupper() and not k.startswith("_")
