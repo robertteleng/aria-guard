@@ -41,6 +41,7 @@ class FrameResult:
     frame_idx: int
     timestamp: float  # seconds into video
     detections: list  # list of dicts with name, bbox, zone, distance, depth_value, confidence, is_gazed
+    motion_state: str = "unknown"  # user ego-motion from the IMU, as the live tracker receives it
 
 
 @dataclass
@@ -163,8 +164,15 @@ def process_video(video_path: str, mode: str = "all", skip_frames: int = 1) -> L
     return results
 
 
-def run_benchmark(frame_results: List[FrameResult], video_fps: float = 30.0) -> BenchmarkMetrics:
-    """Run tracker + arbiter on frame results and compute metrics."""
+def run_benchmark(frame_results: List[FrameResult], video_fps: float = 30.0,
+                  frame_width: int = 1920, fov_h: float = 1.15,
+                  step_ms: Optional[List[float]] = None) -> BenchmarkMetrics:
+    """Run tracker + arbiter on frame results and compute metrics.
+
+    frame_width and fov_h must match the source (Aria RGB: 1408 px, 1.919 rad):
+    the tracker turns pixel positions into bearings with them. If step_ms is
+    given, the tracker + arbiter time of each frame is appended to it.
+    """
     tracker = SimpleTracker()
     arbiter = AlertArbiter()
 
@@ -189,14 +197,14 @@ def run_benchmark(frame_results: List[FrameResult], video_fps: float = 30.0) -> 
         for d in dets:
             d.bbox = tuple(d.bbox)
 
-        # Update tracker
-        frame_w = 1920  # assume 1080p
-        tracked = tracker.update(dets, frame_width=frame_w)
+        t0 = time.perf_counter()
+        tracked = tracker.update(dets, frame_width=frame_width, fov_h=fov_h,
+                                 motion_state=fr.motion_state)
 
-        # Run arbiter (use wall-clock simulation)
-        # Override arbiter's time to use video timestamp
-        arbiter_time = fr.timestamp
-        channel_a, channel_b = _decide_with_time(arbiter, tracker, arbiter_time)
+        # Run arbiter on video time, not wall clock
+        channel_a, channel_b = _decide_with_time(arbiter, tracker, fr.timestamp)
+        if step_ms is not None:
+            step_ms.append((time.perf_counter() - t0) * 1000)
 
         concurrent = 0
         if channel_a and channel_a.should_alert:
@@ -324,6 +332,8 @@ def main():
     parser.add_argument("--mode", default="all", help="Detection mode: indoor/outdoor/all")
     parser.add_argument("--skip", type=int, default=1, help="Process every N frames (1=all)")
     parser.add_argument("--fps", type=float, default=30.0, help="Video FPS (for JSON input)")
+    parser.add_argument("--frame-width", type=int, default=1920, help="Frame width in pixels")
+    parser.add_argument("--fov-h", type=float, default=1.15, help="Horizontal FOV in radians")
     args = parser.parse_args()
 
     if args.from_json:
@@ -356,7 +366,8 @@ def main():
         parser.error("Provide video path or --from-json")
 
     # Run benchmark
-    metrics = run_benchmark(frame_results, video_fps=video_fps)
+    metrics = run_benchmark(frame_results, video_fps=video_fps,
+                            frame_width=args.frame_width, fov_h=args.fov_h)
     metrics.video_path = args.video or args.from_json or ""
 
     # Print results
