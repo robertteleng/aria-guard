@@ -46,11 +46,19 @@ def main(out_path: str, weights_dir: str = None):
                        / "model" / "pretrained_weights"
                        / "social_eyes_uncertainty_v1")
     assert (weights_dir / "weights.pth").exists(), f"sin pesos en {weights_dir}"
-    inferencer = EyeGazeInference(
-        str(weights_dir / "weights.pth"),
-        str(weights_dir / "config.yaml"),
-        device="cpu",
-    )
+    # torch>=2.6 defaults to weights_only=True, which cannot unpickle the
+    # EasyDict config inside Meta's checkpoint (not even allowlisted). Same
+    # scoped workaround as the detector: only for this trusted, official file.
+    original_load = torch.load
+    torch.load = lambda *a, **kw: original_load(*a, **{"weights_only": False, **kw})
+    try:
+        inferencer = EyeGazeInference(
+            str(weights_dir / "weights.pth"),
+            str(weights_dir / "config.yaml"),
+            device="cpu",
+        )
+    finally:
+        torch.load = original_load
     model = inferencer.model
     model.eval()
 
