@@ -15,7 +15,7 @@ Usage:
         --recording ~/Datasets/aria/ritw/recording_XXXX --out docs/media/demo.mp4
     # README hero clip: rule applied over every recording's details
     python scripts/render_demo.py --hero --details-dir DIR --recordings-root ~/Datasets/aria/ritw \\
-        --records benchmarks/alerts/candidate1/*.json --out docs/media/aria-guard-hero.mp4
+        --records benchmarks/alerts/candidate2/*.json --out docs/media/aria-guard-hero.mp4
 """
 import argparse
 import pickle
@@ -39,6 +39,7 @@ PX_PER_M = 36.0
 DEVICE_Y = BEV - 70       # device position in the top-down panel
 MIN_WALK_MPS = 0.5
 HERO_SECONDS, HERO_LEAD_S = 15.0, 5.0
+HERO_VARIANT, HERO_DETAILS_PREFIX = "metric_inpath_selfbody", "c2_"  # adopted model, corrected reference
 LEVEL_COLOR = {"ATTENTION": (0, 200, 255), "WARNING": (0, 140, 255), "DANGER": (40, 40, 230)}
 OK, BAD, PATH_C, GREY = (90, 200, 90), (70, 70, 230), (255, 190, 90), (150, 150, 150)
 HAZARD = (60, 60, 240)
@@ -46,7 +47,8 @@ FONT_FILES = {False: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
               True: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"}
 VARIANT_LABEL = "heuristic"
 VARIANT_LABELS = {"ttc_fix": "heuristic (image thirds)", "pre_ttc": "heuristic, pre TTC fix",
-                  "metric_inpath": "metric in-path (metres)"}
+                  "metric_inpath": "metric in-path (metres)",
+                  "metric_inpath_selfbody": "metric in-path + wearer filter"}
 
 
 def walking_speed(frames, t0, length_s):
@@ -249,12 +251,12 @@ def render_comparison(details_path: Path, variants, t0: float, length: float, re
     print(f"[DEMO] {out}")
 
 
-def load_hero_details(details_dir: Path, variant: str):
-    """{recording name: details} from evaluate_alerts pickles named c1_<recording>.pkl."""
+def load_hero_details(details_dir: Path, variant: str, prefix: str = HERO_DETAILS_PREFIX):
+    """{recording name: (path, details)} from evaluate_alerts pickles named <prefix><recording>.pkl."""
     out = {}
-    for p in sorted(details_dir.glob("c1_*.pkl")):
+    for p in sorted(details_dir.glob(f"{prefix}*.pkl")):
         with open(p, "rb") as f:
-            out[p.stem[len("c1_"):]] = (p, pickle.load(f)[variant]["details"])
+            out[p.stem[len(prefix):]] = (p, pickle.load(f)[variant]["details"])
     return out
 
 
@@ -277,8 +279,8 @@ def main():
     ap.add_argument("--gif-fps", type=int, default=6)
     ap.add_argument("--hero", action="store_true",
                     help="README hero clip: pick recording and window with the rule in docs/media/README.md "
-                         "(sets --variant metric_inpath, --seconds 15, GIF of the whole clip)")
-    ap.add_argument("--details-dir", type=Path, help="--hero: folder with c1_<recording>.pkl files")
+                         f"(sets --variant {HERO_VARIANT}, --seconds 15, GIF of the whole clip)")
+    ap.add_argument("--details-dir", type=Path, help=f"--hero: folder with {HERO_DETAILS_PREFIX}<recording>.pkl files")
     ap.add_argument("--recordings-root", type=Path, help="--hero: folder with the recordings")
     args = ap.parse_args()
 
@@ -289,7 +291,7 @@ def main():
         render_comparison(args.details, args.compare, start, args.seconds, load(args.records), args.out)
         return
     if args.hero:
-        args.variant, args.seconds, args.gif_seconds = "metric_inpath", HERO_SECONDS, HERO_SECONDS
+        args.variant, args.seconds, args.gif_seconds = HERO_VARIANT, HERO_SECONDS, HERO_SECONDS
         loaded = load_hero_details(args.details_dir, args.variant)
         name, args.start, score = pick_hero_window({k: v[1] for k, v in loaded.items()})
         args.details, args.recording = loaded[name][0], args.recordings_root / name

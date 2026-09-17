@@ -32,7 +32,8 @@ show what a justified alert looks like; the pooled numbers and
 `before-after.png` carry the evidence.
 
 **Selection rule.** Applied by `scripts/render_demo.py --hero` to the adopted
-variant (`metric_inpath`) of all six recordings:
+variant of all six recordings (`metric_inpath_selfbody` under the corrected
+reference since the wearer-body amendment; see *Correction* below):
 
 1. Candidate windows are 15 s long and start 5 s before each justified alert
    (clamped to the recording).
@@ -44,3 +45,10 @@ variant (`metric_inpath`) of all six recordings:
 **What the clip is and is not.** It is an illustration chosen for clarity, so it
 is better than a typical 15 s. The numbers printed on it are pooled over the six
 recordings (36.9 min), the same as in the README, never those of the clip.
+
+**Correction (2026-09-17).** The first render under this rule picked a window
+whose "justified" alerts were about the wearer's own hand. That render was
+discarded before publication and led to the wearer-body amendment in
+`docs/ALERT_EVALUATION.md`. The rule itself is unchanged; it now runs on the
+corrected evaluation (`c2_*` details) and the adopted variant. Every rendered
+clip is still inspected before it goes into the README.
