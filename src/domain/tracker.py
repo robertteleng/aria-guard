@@ -9,6 +9,8 @@ from collections import deque
 import math
 import numpy as np
 
+from src.domain.ground_projection import LEVEL_RISK
+
 
 @dataclass
 class TrackedObject:
@@ -24,6 +26,7 @@ class TrackedObject:
     frame_width: int = 1280
     fov_h: float = 1.15  # horizontal FOV in radians
     traffic_light_state: Optional[str] = None  # "red", "green", "yellow"
+    metric_threat: Optional[str] = None  # set when the metric in-path model is active
 
     # Tracking data
     depth_history: deque = field(default_factory=lambda: deque(maxlen=10))
@@ -223,6 +226,7 @@ class SimpleTracker:
                 track.confidence = det.confidence
                 track.is_gazed = det.is_gazed
                 track.traffic_light_state = getattr(det, 'traffic_light_state', None)
+                track.metric_threat = getattr(det, 'metric_threat', None)
                 track.frame_width = frame_width
                 track.fov_h = fov_h
                 track.depth_history.append(det.depth_value)
@@ -260,6 +264,7 @@ class SimpleTracker:
                 fov_h=fov_h,
                 traffic_light_state=getattr(det, 'traffic_light_state', None),
             )
+            new_track.metric_threat = getattr(det, 'metric_threat', None)
             self._update_collision_risk(new_track)
             self.tracks[self.next_id] = new_track
             self.next_id += 1
@@ -364,6 +369,16 @@ class SimpleTracker:
         track.enters_path = moving_toward_center and close_enough
 
     def _update_collision_risk(self, track: TrackedObject):
+        metric = getattr(track, "metric_threat", None)
+        if metric is not None:
+            # Candidate change 1 (docs/ALERT_EVALUATION.md): the metric in-path
+            # level from ground contact replaces the heuristic score
+            track.threat_level = metric
+            track.collision_risk = LEVEL_RISK.get(metric, 0.0)
+            return
+        self._update_collision_risk_heuristic(track)
+
+    def _update_collision_risk_heuristic(self, track: TrackedObject):
         """Calculate collision risk score 0.0–1.0 and threat level (H18).
 
         Combines 4 weighted factors from ADAS literature:

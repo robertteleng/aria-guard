@@ -18,7 +18,7 @@ from collections import Counter, defaultdict
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -96,6 +96,55 @@ class Points:
 
     def near(self, xy: np.ndarray, radius: float) -> np.ndarray:
         return self.xyz[self.index.query_radius(xy, radius)]
+
+
+class ImuUp:
+    """Up direction per timestamp from the VRS accelerometer (candidate change 1).
+
+    Mean specific force over the preceding window, rotated to the device frame.
+    """
+
+    def __init__(self, vrs_path: Path, stream: str = "1202-1", label: str = "imu-right", window_s: float = 1.0):
+        from projectaria_tools.core import data_provider
+        from projectaria_tools.core.sensor_data import TimeDomain
+        from projectaria_tools.core.stream_id import StreamId
+        provider = data_provider.create_vrs_data_provider(str(vrs_path))
+        sid = StreamId(stream)
+        self.t_ns = np.asarray(provider.get_timestamps_ns(sid, TimeDomain.DEVICE_TIME), dtype=np.int64)
+        accel = np.array([provider.get_imu_data_by_index(sid, i).accel_msec2 for i in range(len(self.t_ns))])
+        self._cum = np.vstack([np.zeros(3), np.cumsum(accel, axis=0)])
+        T = provider.get_device_calibration().get_imu_calib(label).get_transform_device_imu().to_matrix()
+        self.R_di = T[:3, :3]
+        self.window_ns = int(window_s * 1e9)
+
+    def up_device(self, t_ns: int):
+        hi = int(np.searchsorted(self.t_ns, t_ns, side="right"))
+        lo = int(np.searchsorted(self.t_ns, t_ns - self.window_ns, side="left"))
+        if hi <= lo:
+            return None
+        mean = (self._cum[hi] - self._cum[lo]) / (hi - lo)
+        n = np.linalg.norm(mean)
+        return None if n < 1e-6 else self.R_di @ (mean / n)
+
+
+def live_metric_threats(frames: List[dict], cam: "RgbCamera", imu: ImuUp) -> Dict:
+    """(frame_idx, det_index) -> {threat, forward_m, lateral_m} from live-available data only."""
+    from src.domain.ground_projection import ground_contact, horizontal_basis, metric_threat
+    cam_forward = cam.R_dc @ np.array([0.0, 0.0, 1.0])
+    out = {}
+    for fr in frames:
+        up = imu.up_device(int(cam.rgb_ts[fr["frame_idx"]]))
+        basis = horizontal_basis(up, cam_forward) if up is not None else None
+        for k, d in enumerate(fr["detections"]):
+            contact = None
+            if basis is not None:
+                x, y, w, h = d["bbox"]
+                ray = cam.R_dc @ cam.ray_upright(x + w / 2, y + h)
+                contact = ground_contact(ray, up, *basis)
+            out[(fr["frame_idx"], k)] = {"threat": metric_threat(contact),
+                                         "forward_m": contact[0] if contact else None,
+                                         "lateral_m": contact[1] if contact else None}
+    return out
 
 
 class RgbCamera:
@@ -183,12 +232,13 @@ def semidense_distance(points_w, cam_center, R_wc, cam, bbox):
 
 @contextmanager
 def tracker_variant(name: str):
-    """'ttc_fix' = current code; 'pre_ttc' = proximity used as distance (before 3c56e50)."""
+    """'ttc_fix' = current heuristic; 'pre_ttc' = proximity used as distance (before
+    3c56e50); 'metric_inpath' = candidate change 1 (needs metric threats injected)."""
     import src.domain.tracker as tracker_mod
     original = tracker_mod.remaining_gap
     if name == "pre_ttc":
         tracker_mod.remaining_gap = lambda proximity: proximity
-    elif name != "ttc_fix":
+    elif name not in ("ttc_fix", "metric_inpath"):
         raise ValueError(name)
     try:
         yield
@@ -199,10 +249,15 @@ def tracker_variant(name: str):
 # --- evaluation ------------------------------------------------------------------------
 
 def evaluate(frames: List[dict], geo: Dict, cam: RgbCamera, traj: Trajectory, variant: str,
-             details: bool = False) -> dict:
+             details: bool = False, metric: Optional[Dict] = None) -> dict:
     """Metrics for one tracker variant. details=True also returns the per-frame
     matching (tracks with ground position and in-path flag, alerts with their
     verdict) used by scripts/render_demo.py."""
+    if variant == "metric_inpath":
+        if metric is None:
+            raise ValueError("metric_inpath needs live metric threats")
+        frames = [{**f, "detections": [{**d, "metric_threat": metric[(f["frame_idx"], k)]["threat"]}
+                                       for k, d in enumerate(f["detections"])]} for f in frames]
     frame_results = [FrameResult(**{k: f[k] for k in ("frame_idx", "timestamp", "detections", "motion_state")})
                      for f in frames]
     log: List[dict] = []
@@ -309,6 +364,17 @@ def _agreement(g: np.ndarray, s: np.ndarray) -> dict:
             "share_within_25pct": round(float((rel <= 0.25).mean()), 3)}
 
 
+def live_reference_agreement(metric: Dict, geo: Dict) -> dict:
+    """Candidate forward distance vs the reference's metric distance, same detections."""
+    pairs = [(m["forward_m"], geo[key]["distance"]) for key, m in metric.items()
+             if m["forward_m"] is not None and key in geo]
+    if not pairs:
+        return {"n": 0}
+    live, ref = np.array(pairs).T
+    return {**_agreement(live, ref), "live_only": sum(1 for k, m in metric.items() if m["forward_m"] is not None and k not in geo),
+            "reference_only": sum(1 for k in geo if metric.get(k, {}).get("forward_m") is None)}
+
+
 def summarize_crosscheck(rows) -> dict:
     """Ground-contact vs semidense distance: headline without excluded classes, plus per class."""
     if not rows:
@@ -342,7 +408,8 @@ def main():
     ap.add_argument("--detections", required=True, type=Path)
     ap.add_argument("--recording", required=True, type=Path, help="folder with recording.vrs and mps/")
     ap.add_argument("--out", required=True, type=Path)
-    ap.add_argument("--variants", nargs="+", default=["pre_ttc", "ttc_fix"])
+    ap.add_argument("--variants", nargs="+", default=["pre_ttc", "ttc_fix"],
+                    help="pre_ttc, ttc_fix, metric_inpath")
     ap.add_argument("--details-out", type=Path,
                     help="Also pickle per-frame matching of every variant (input of render_demo.py)")
     args = ap.parse_args()
@@ -352,6 +419,9 @@ def main():
     traj = Trajectory(args.recording / "mps" / "slam" / "closed_loop_trajectory.csv")
     pts = Points(args.recording / "mps" / "slam" / "semidense_points.csv.gz")
     ref = reference_geometry(frames, cam, traj, pts)
+    metric = None
+    if "metric_inpath" in args.variants:
+        metric = live_metric_threats(frames, cam, ImuUp(args.recording / "recording.vrs"))
     record = {
         "schema": "aria-guard/alert-eval/1",
         "commit": _git_commit(),
@@ -360,8 +430,9 @@ def main():
         "parameters": {k: v for k, v in globals().items() if k.isupper() and not k.startswith("_")
                        and isinstance(v, (int, float))},
         "reference": {**dict(ref["stats"]), "crosscheck": summarize_crosscheck(ref["crosscheck"])},
-        "results": [evaluate(frames, ref["geo"], cam, traj, v, details=args.details_out is not None)
+        "results": [evaluate(frames, ref["geo"], cam, traj, v, details=args.details_out is not None, metric=metric)
                     for v in args.variants],
+        **({"live_vs_reference_distance": live_reference_agreement(metric, ref["geo"])} if metric else {}),
     }
     if args.details_out:
         import pickle

@@ -67,3 +67,30 @@ class MotionClassifier:
             elif std > self._walking_std:
                 self.state = "walking"
         return self.state
+
+
+class GravityEstimator:
+    """Up direction from the accelerometer, averaged over a time window.
+
+    At rest the accelerometer measures +g upward (specific force), so the mean
+    over ~1 s of walking points up; acceleration from steps averages out.
+    """
+
+    def __init__(self, window_s: float = 1.0):
+        self._window_ns = int(window_s * 1e9)
+        self._samples = deque()
+        self._sum = np.zeros(3)
+
+    def update(self, t_ns: int, accel: Sequence[float]) -> None:
+        a = np.asarray(accel, dtype=np.float64)
+        self._samples.append((t_ns, a))
+        self._sum += a
+        while self._samples and self._samples[0][0] < t_ns - self._window_ns:
+            self._sum -= self._samples.popleft()[1]
+
+    def up(self) -> Optional[np.ndarray]:
+        """Unit up vector in the accelerometer frame, or None before any sample."""
+        n = np.linalg.norm(self._sum)
+        if not self._samples or n < 1e-6:
+            return None
+        return self._sum / n
