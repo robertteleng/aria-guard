@@ -1,15 +1,11 @@
 """
-Test rápido de Aria streaming para diagnosticar segfaults.
-Ejecutar dentro del Docker container:
+Test rápido de Aria streaming para diagnosticar segfaults del SDK (heap corruption).
 
-  # Test normal (sin fix):
-  docker compose -f docker/docker-compose.yml run --rm aria-guard python scripts/test_aria_streaming.py
+  uv run python scripts/test_aria_streaming.py                                  # sin fix
+  MALLOC_CHECK_=0 uv run python scripts/test_aria_streaming.py                  # glibc sin chequeo
+  LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2 uv run python scripts/test_aria_streaming.py
 
-  # Test con MALLOC_CHECK_=0:
-  docker compose -f docker/docker-compose.yml run --rm -e MALLOC_CHECK_=0 aria-guard python scripts/test_aria_streaming.py
-
-  # Test con tcmalloc (si está instalado en imagen):
-  docker compose -f docker/docker-compose.yml run --rm -e LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.so.4 aria-guard python scripts/test_aria_streaming.py
+scripts/test_aria_streaming.sh ejecuta todas las variantes.
 """
 import os
 import sys

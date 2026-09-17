@@ -1,227 +1,55 @@
-# ARIA Guard - Jetson Deployment
+# Jetson Orin Nano
 
-Documentación para desplegar ARIA Guard en NVIDIA Jetson con Intel RealSense D435 y BNO086 IMU.
+What was verified on 2026-09-17: the replay benchmark on a Jetson Orin Nano
+Super (JetPack 6.2, L4T R36.5.2, TensorRT 10.3, MAXN_SUPER power mode). Live
+streaming from the glasses on the Jetson with the native aarch64
+`projectaria-client-sdk` 2.5.0 has **not** been validated yet.
 
-## Hardware Target
+## Environment
 
-```mermaid
-graph LR
-    subgraph Jetson["NVIDIA Jetson"]
-        direction TB
-        J1[Orin NX/Nano]
-        J2[JetPack 6.x]
-        J3[TensorRT 10.x]
-    end
-
-    subgraph Sensors["Sensores"]
-        RS[Intel RealSense D435<br/>RGB + Depth HW]
-        IMU[BNO086 IMU<br/>Orientación 9-DOF]
-    end
-
-    subgraph Output["Salida"]
-        SPK[Speaker/Bone Conduction]
-        WEB[Dashboard Web]
-    end
-
-    RS -->|USB 3.0| Jetson
-    IMU -->|I2C/SPI| Jetson
-    Jetson --> SPK
-    Jetson --> WEB
-```
-
-## Arquitectura Simplificada
-
-Sin Aria SDK = Sin conflictos CUDA = Proceso único posible
-
-```mermaid
-flowchart LR
-    subgraph Input["Entrada"]
-        RS[RealSense D435]
-        IMU[BNO086]
-    end
-
-    subgraph Process["Proceso Único"]
-        OBS[RealSenseObserver]
-        DET[YOLO TensorRT]
-        TRK[SimpleTracker]
-        ALERT[AlertEngine]
-        TTS[espeak-ng]
-    end
-
-    subgraph Output["Salida"]
-        AUDIO[Audio Espacial]
-        WEB[Flask MJPEG]
-    end
-
-    RS --> OBS
-    IMU --> OBS
-    OBS --> DET
-    DET --> TRK
-    TRK --> ALERT
-    ALERT --> TTS
-    TTS --> AUDIO
-    OBS --> WEB
-```
-
-## Ventajas vs x86 + Aria
-
-| Aspecto | x86 + Aria | Jetson + RealSense |
-|---------|------------|-------------------|
-| Modelos GPU | 3 (YOLO + Depth + Gaze) | 1 (solo YOLO) |
-| Depth | IA (Depth Anything) | Hardware (IR stereo) |
-| Eye Tracking | Sí (Aria cameras) | No con RealSense — **Sí vía `aria:bridge`** |
-| Procesos | 3 (main + detector + TTS) | 1 (single process) |
-| CPU overhead | ~185% | ~50% estimado |
-| Portabilidad | Requiere PC | Standalone |
-
-> Desde 2026-06-17 las gafas Aria **también funcionan en el Jetson** vía el bridge (ver abajo),
-> así que la columna "Jetson + RealSense" ya no es la única opción de entrada en Jetson.
-
-## Gafas Aria en Jetson vía bridge (`aria:bridge`)
-
-Las gafas Meta Aria funcionan en el Jetson sin SDK x86 nativo, usando el repo hermano
-[aria-arm64-bridge](https://github.com/robertteleng/aria-arm64-bridge): corre el SDK x86 bajo
-FEX-Emu y publica los frames (RGB + SLAM + sensores) por ZMQ. aria-guard los consume con la
-fuente `aria:bridge` (`AriaBridgeObserver`, ya integrado en `src/web/pipeline.py`).
+The Ultralytics JetPack 6 container provides PyTorch, TensorRT and OpenCV built
+for the device; only the Aria tools are added, without touching its numpy:
 
 ```bash
-# 1. Arrancar el bridge (en aria-arm64-bridge, gafas conectadas, profile12)
-#    Publica frames ARI2 en tcp://127.0.0.1:5555
-# 2. Arrancar aria-guard con la fuente bridge:
-./run.sh aria:bridge
+mkdir -p ~/bench/pydeps
+docker run --rm --runtime nvidia -u $(id -u):$(id -g) -e HOME=/tmp -v ~/bench:/bench \
+    ultralytics/ultralytics:8.4.14-jetson-jetpack6 \
+    pip install --no-deps --target /bench/pydeps projectaria-tools==2.3.0 easydict
 ```
 
-- RGB + SLAM a 10/10/10 FPS con profile12 (enlace USB-NCM sano; ver el README del bridge si SLAM cae).
-- Con el bridge SÍ hay eye tracking y SLAM en Jetson (a diferencia del setup RealSense puro).
+Run as your user (`-u`) so the files it creates stay yours, and set
+`--hostname` so replay records carry the machine name instead of the container id.
 
-## Componentes
+## Engines
 
-### Intel RealSense D435
-
-- **RGB**: 1920x1080 @ 30fps
-- **Depth**: 1280x720 @ 30fps (hardware)
-- **Rango**: 0.2m - 10m
-- **FOV**: 87° x 58°
-
-**Instalación Jetson:**
-```bash
-# librealsense para Jetson
-git clone https://github.com/IntelRealSense/librealsense
-cd librealsense
-mkdir build && cd build
-cmake .. -DFORCE_RSUSB_BACKEND=ON -DBUILD_PYTHON_BINDINGS=ON
-make -j$(nproc)
-sudo make install
-```
-
-### BNO086 IMU
-
-- **9-DOF**: Acelerómetro + Giroscopio + Magnetómetro
-- **Sensor Fusion**: Quaternion de orientación
-- **Interfaz**: I2C (0x4A/0x4B) o SPI
-- **Frecuencia**: Hasta 400Hz
-
-**Uso potencial:**
-- Detectar dirección de movimiento del usuario
-- Compensar movimiento de cámara
-- Alertas basadas en orientación ("coche a tu espalda")
-
-**Instalación:**
-```bash
-pip install adafruit-circuitpython-bno08x
-```
-
-**Ejemplo básico:**
-```python
-import board
-import adafruit_bno08x
-from adafruit_bno08x.i2c import BNO08X_I2C
-
-i2c = board.I2C()
-bno = BNO08X_I2C(i2c)
-bno.enable_feature(adafruit_bno08x.BNO_REPORT_ROTATION_VECTOR)
-
-# En el loop
-quat = bno.quaternion  # (w, x, y, z)
-```
-
-## Build y Ejecución
-
-Ver [Dockerfile.jetson](../Dockerfile.jetson) y [docker-compose.jetson.yml](../docker-compose.jetson.yml).
+Build every engine on the Jetson; engines from another GPU or TensorRT version
+do not load. The ONNX files can come from any machine.
 
 ```bash
-# Build
-docker compose -f docker-compose.jetson.yml build
-
-# Run
-docker compose -f docker-compose.jetson.yml up
-
-# O directamente
-docker build -f Dockerfile.jetson -t aria-guard:jetson .
-docker run --runtime nvidia -it --rm \
-    --privileged \
-    -v /dev/bus/usb:/dev/bus/usb \
-    --device /dev/i2c-1 \
-    -p 5000:5000 \
-    aria-guard:jetson
+python3 scripts/build_trt_engine.py models/gaze.onnx models/gaze.engine
+python3 scripts/build_trt_engine.py models/depth_anything_v2_vits.onnx \
+    models/depth_anything_v2_vits.engine --shape pixel_values:1x3x518x518
+yolo export model=models/yolo26n_nav.pt format=engine half=True imgsz=640
 ```
 
-## Modo Single-Process
+## Replay benchmark
 
-Para RealSense sin conflicto CUDA, podemos eliminar multiprocessing:
-
-```python
-# src/core/detector_lite.py (futuro)
-class DetectorLite:
-    """Detector sin multiprocessing para Jetson + RealSense."""
-
-    def __init__(self):
-        # Todo en el mismo proceso
-        self.yolo = YOLO("yolo26s.engine")
-        # Sin Depth Anything (RealSense tiene HW depth)
-        # Sin Eye Gaze (RealSense no tiene eye cameras)
-
-    def detect(self, rgb, depth_hw):
-        # Inferencia directa, sin queues
-        results = self.yolo(rgb)
-        # Usar depth de hardware directamente
-        return self._process_results(results, depth_hw)
+```bash
+docker run --rm --runtime nvidia --ipc=host --hostname jetson-orin -u $(id -u):$(id -g) \
+    -e HOME=/tmp -e PYTHON=python3 -e JETSON_POWER_MODE=MAXN_SUPER \
+    -e PYTHONPATH=/bench/pydeps:/bench/projectaria_eyetracking \
+    -v ~/bench:/bench -v ~/Datasets/aria/ritw:/data:ro -w /bench/aria-guard \
+    ultralytics/ultralytics:8.4.14-jetson-jetpack6 \
+    bash -c "ARIA_DEPTH_ASYNC=1 PACES=realtime TAG=async ./scripts/replay_benchmark.sh /data benchmarks/replay"
 ```
 
-## DeepStream (Opcional)
+## What limits it (measured)
 
-Si el rendimiento no es suficiente con Python, considerar DeepStream:
-
-```
-realsrc → nvvidconv → nvinfer(YOLO) → nvdsosd → appsink
-```
-
-**Ventajas:**
-- Pipeline 100% GPU
-- ~30% menos CPU que Python
-- Plugins YOLO oficiales
-
-**Desventajas:**
-- Requiere C++ o Python-GStreamer
-- Más complejo de mantener
-- ~2 semanas de migración
-
-## Rendimiento Esperado
-
-| Métrica | Jetson Orin NX | Jetson Orin Nano |
-|---------|----------------|------------------|
-| YOLO FPS | ~45 | ~25 |
-| CPU | ~50% | ~70% |
-| VRAM | ~0.6 GB | ~0.6 GB |
-| Potencia | 15W | 7W |
-
-## TODO
-
-- [x] Crear Dockerfile.jetson
-- [x] Crear docker-compose.jetson.yml
-- [x] Añadir BNO086 IMU al Dockerfile
-- [ ] Integrar BNO086 en RealSenseObserver (código Python)
-- [ ] Implementar DetectorLite (single-process)
-- [ ] Probar TTS en Jetson (espeak-ng vs Piper)
-- [ ] Benchmarks reales en hardware
-- [ ] Evaluar DeepStream si Python no es suficiente
+- **CPU, not GPU.** Decoding 1408x1408 JPEG takes ~39 ms per frame on the CPU.
+- **`import ultralytics` makes OpenCV single-threaded.** A 1408->640 resize goes
+  from 1.2 to 6.6 ms. The detector restores the threads (`ARIA_CV2_THREADS`).
+- **GPU frequency scaling.** Without `sudo jetson_clocks`, an idle GPU between
+  frames runs the YOLO engine in 11.3 ms instead of 6.7 ms and depth in 71 ms
+  instead of 43 ms.
+- **Depth is the slowest model.** `ARIA_DEPTH_ASYNC=1` runs it on its own thread
+  so no frame waits for it.

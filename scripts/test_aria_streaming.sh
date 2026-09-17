@@ -9,7 +9,6 @@
 #   4. Host con LD_PRELOAD jemalloc - reemplaza allocator
 #
 # Uso:
-#   ./scripts/test_aria_streaming.sh docker    # Test en Docker
 #   ./scripts/test_aria_streaming.sh host      # Test directo en host
 #   ./scripts/test_aria_streaming.sh malloc0   # Host + MALLOC_CHECK_=0
 #   ./scripts/test_aria_streaming.sh tcmalloc  # Host + tcmalloc
@@ -48,30 +47,6 @@ show_system() {
     fi
     echo "============================================="
     echo ""
-}
-
-# Test 1: Docker container (glibc 2.35)
-test_docker() {
-    info "=== Test: Docker (Ubuntu 22.04, glibc 2.35) ==="
-
-    if ! docker image inspect aria-guard:tensorrt &>/dev/null; then
-        fail "Image aria-guard:tensorrt not found. Build with: docker/docker-build.sh all"
-        return 1
-    fi
-
-    info "Running test_aria_only.py inside Docker..."
-    docker compose -f docker/docker-compose.yml run --rm \
-        -v "$PROJECT_ROOT/tests:/app/tests:ro" \
-        aria-guard \
-        python tests/test_aria_only.py 2>&1 | tee /tmp/aria_test_docker.log
-
-    if [ ${PIPESTATUS[0]} -eq 0 ]; then
-        ok "Docker test PASSED"
-        return 0
-    else
-        fail "Docker test FAILED"
-        return 1
-    fi
 }
 
 # Test 2: Host direct
@@ -186,7 +161,7 @@ test_all() {
     local failed=0
     local results=()
 
-    for test_name in docker host malloc_check tcmalloc jemalloc; do
+    for test_name in host malloc_check tcmalloc jemalloc; do
         echo ""
         echo "---------------------------------------------"
         if "test_$test_name"; then
@@ -212,14 +187,13 @@ test_all() {
 }
 
 case "${1:-all}" in
-    docker)     show_system; test_docker ;;
     host)       show_system; test_host ;;
     malloc0)    show_system; test_malloc_check ;;
     tcmalloc)   show_system; test_tcmalloc ;;
     jemalloc)   show_system; test_jemalloc ;;
     all)        test_all ;;
     *)
-        echo "Usage: $0 {docker|host|malloc0|tcmalloc|jemalloc|all}"
+        echo "Usage: $0 {host|malloc0|tcmalloc|jemalloc|all}"
         exit 1
         ;;
 esac

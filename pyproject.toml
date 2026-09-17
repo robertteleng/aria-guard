@@ -1,8 +1,10 @@
 [project]
 name = "aria-guard"
 version = "1.0.0"
-description = "L1 Critical Reactive Layer — Real-time collision detection for visually impaired"
+description = "Real-time collision alerts for blind and low-vision pedestrians on Meta Project Aria glasses"
 requires-python = ">=3.11"
+license = "AGPL-3.0-only"
+authors = [{ name = "Roberto Rojo" }]
 
 dependencies = [
     # Core

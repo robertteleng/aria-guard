@@ -31,7 +31,17 @@ versions loosely.
   state; width, FOV and per-frame motion state are now parameters.
 - Gaze ONNX export on torch >= 2.6 (`weights_only` default).
 
+### Removed
+- **Docker setup** (`docker/`, `docs/deploy/DOCKER.md`, `scripts/validate-docker.sh`): the images
+  needed a proprietary NVIDIA SDK archive or files no longer in the repo, and none was verified.
+  `docs/deploy/JETSON.md` now documents the container path actually used for the Jetson benchmark.
+- `docs/project/IMPLEMENTATION_PLAN.md` (stale roadmap).
+
 ### Changed
+- **Metric in-path threat model adopted** (`src/input/metric_inpath.py`): alert precision 14.6 % ->
+  37.6 %, episode recall 15.7 % -> 33.1 % against the wearer's real path (docs/ALERT_EVALUATION.md).
+- **Jetson performance**: YOLO engine called directly, depth normalized on the GPU and optionally
+  asynchronous, OpenCV threads restored after `import ultralytics`.
 - **Depth map kept at model resolution (518x518), normalized on the GPU**: it was
   upscaled to the full frame on the CPU only to be sampled inside bboxes.
   Identical detections on 300 frames, depth stage 9.8 -> 3.4 ms on the RTX.

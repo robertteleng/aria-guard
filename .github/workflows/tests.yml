@@ -1,0 +1,24 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+      # The full project pulls CUDA PyTorch, TensorRT and NeMo. The tests need
+      # none of them: GPU-dependent tests skip when torch is absent.
+      - name: Test (hardware-free)
+        run: >
+          uv run --isolated --no-project --python 3.12
+          --with pytest --with numpy --with opencv-python-headless
+          --with pandas --with scipy --with flask
+          python -m pytest -q

@@ -1,6 +1,9 @@
 # ADR-0001 — Migrar la plataforma de Jetson (ARM+FEX) a x86 + GPU discreta
 
-- **Estado:** Aceptado
+- **Estado:** Aceptado; **revisión pendiente** (2026-09-17). Su causa principal, emular con FEX un SDK
+  solo x86_64, ya no existe: `projectaria-client-sdk` 2.5.0 publica wheels nativas aarch64. El replay
+  benchmark medido después (`docs/REPLAY_BENCHMARK.md`) muestra el Jetson a ~19 FPS sin emulación, con
+  la CPU como cuello; la decisión se revisará con una sesión en vivo con SDK nativo.
 - **Fecha:** 2026-06-30
 - **Afecta a:** `aria-guard` (producto) y `aria-arm64-bridge` (queda obsoleto)
 - **Decisores:** Robert (+ análisis de esta sesión, con medidas en device)

@@ -4,9 +4,7 @@
 > **Decisión central:** profundidad métrica vía **VIO mono-inercial (escala IMU) + DepthAnything anclado**, NO estéreo.
 > **Hardware sin Orin esta sesión:** los benchmarks de FPS en Orin quedan como TODO en hardware real.
 
-Documentos prompt asociados:
-- [PROMPT_stereo-slam-aria-gen1.md](PROMPT_stereo-slam-aria-gen1.md) — research del problema estéreo SLAM-SLAM.
-- [PROMPT_gpt-validate-vio-architecture.md](PROMPT_gpt-validate-vio-architecture.md) — validación cruzada con GPT.
+La investigación de apoyo (problema estéreo SLAM-SLAM y validación cruzada de la arquitectura VIO) no se publica.
 
 ---
 
