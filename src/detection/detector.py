@@ -113,6 +113,8 @@ class ParallelDetector:
         """Carga YOLO26s con TensorRT si está disponible."""
         try:
             from ultralytics import YOLO
+            from src.detection.opencv_threads import restore_opencv_threads
+            restore_opencv_threads()  # ultralytics just set OpenCV to one thread
 
             # ARIA_YOLO_MODEL permite A/B (yolo26n vs yolo26s) sin tocar codigo;
             # en el Orin el tamano del modelo gobierna la contencion del bus de

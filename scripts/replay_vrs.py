@@ -281,6 +281,11 @@ def environment() -> dict:
         # nvpmodel is not available inside containers: the launcher passes it
         "nvpmodel": _run(["nvpmodel", "-q"]) or os.environ.get("JETSON_POWER_MODE"),
     }
+    try:
+        import cv2
+        env["cv2_threads"] = cv2.getNumThreads()
+    except Exception:
+        env["cv2_threads"] = None
     for mod, dist in (("torch", "torch"), ("tensorrt", "tensorrt"), ("ultralytics", "ultralytics"),
                       ("cv2", "opencv-python"), ("projectaria_tools", "projectaria-tools")):
         env[mod] = package_version(mod, dist)
