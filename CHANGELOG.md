@@ -7,6 +7,11 @@ versions loosely.
 ## [Unreleased]
 
 ### Added
+- **Wearer-body filter** (`is_wearer_body` in `src/domain/ground_projection.py`,
+  on in the live metric model): a `person` box that reaches the bottom edge with
+  its top at least 15° below horizontal is the wearer's own hand or arm and gets
+  no threat. Pre-registered as candidate change 2; precision 20.4 → 24.0 %,
+  unjustified alerts 6.89 → 5.67 per minute, recall unchanged.
 - **VRS replay benchmark** (`scripts/replay_vrs.py`, `replay_benchmark.sh`,
   `replay_table.py`): real Aria recordings through the full pipeline (detector,
   depth, gaze, IMU motion state, tracker, arbiter). Realtime pacing decodes on
@@ -17,6 +22,10 @@ versions loosely.
   from ONNX (external weights, static shapes for dynamic inputs).
 
 ### Fixed
+- **Alert evaluation counted the wearer's hands as obstacles.** The reference now
+  uses MPS hand tracking: `person` detections containing a tracked wrist get no
+  ground position. The published candidate-1 numbers (37.6 % precision, 33.1 %
+  recall) were inflated; corrected they are 20.4 % and 29.1 %.
 - **Time-to-collision was inverted**: TTC divided proximity (`depth_value`, 1 =
   close) by the approach speed as if it were distance, so a person almost at the
   camera scored WARNING and the same person far away DANGER. TTC and the looming

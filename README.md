@@ -15,14 +15,20 @@ object that was in that path; a red ring is an alert about one that never was.*
 > tested with blind users, not a medical device. A live session with the
 > glasses is the next validation step.
 
+> **Correction, 2026-09-17.** The first published evaluation counted the
+> wearer's own hands, which the detector labels `person`, as obstacles in the
+> path. That inflated alert precision to 38 %. The numbers below are recomputed
+> with Meta's hand tracking as reference; how the error was found and fixed is
+> in [docs/ALERT_EVALUATION.md](docs/ALERT_EVALUATION.md#amendment-2026-09-17-the-wearers-own-body-error-found-before-recomputing).
+
 ## Results at a glance
 
 | Question | Answer (six recordings, 36.9 min) |
 |---|---|
 | Does it run in real time on a desktop GPU? | Yes: 30 FPS on 6 of 6 recordings on an RTX 5060 Ti, capture → detections p50 20.9 ms |
 | On a Jetson Orin Nano? | Partly: 24.5 FPS after optimization (13 before), but capture → detections p95 is 136 ms against a 100 ms target set beforehand; CPU JPEG decoding (39 ms) is the bottleneck |
-| Are the alerts about obstacles in the wearer's path? | Mostly not with the original logic (**15 %** precision); **38 %** with the metric in-path model adopted here |
-| Does it warn when an obstacle is in the path? | For **33 %** of hazard episodes (was 16 %), often late: median lead time 1–3 s |
+| Are the alerts about obstacles in the wearer's path? | Mostly not: **10 %** with the original logic, **24 %** with the metric in-path model and wearer-body filter adopted here |
+| Does it warn when an obstacle is in the path? | For **30 %** of hazard episodes (was 17 %), often late: median lead time 0.7–2.8 s |
 
 ![Same 40 s of walking, two threat models](docs/media/before-after.png)
 
@@ -56,17 +62,26 @@ images: points land on car outlines, curbs and a fire hydrant.
   path.
 - **Metric in-path threat, adopted.** The bbox bottom ray, gravity from the
   accelerometer and a fixed 1.6 m eye height give each object's forward and
-  lateral distance in metres. Precision rose from 14.6 % to 37.6 %, episode
-  recall from 15.7 % to 33.1 %, and unjustified alerts per minute fell from 8.6
-  to 5.4, better on 6 of 6 recordings.
+  lateral distance in metres. Precision rose from 9.7 % to 20.4 %, episode
+  recall from 17.2 % to 29.1 %, and unjustified alerts per minute fell from 9.1
+  to 6.9, with precision better on 6 of 6 recordings.
+- **The detector sees the wearer's own hands as a person.** Recordings where
+  people hold a phone produced DANGER alerts about their own hand, and the first
+  evaluation even scored them as justified. Meta's hand tracking now marks those
+  detections in the reference. A live filter drops a `person` box that reaches
+  the bottom edge with its top at least 15° below eye level: precision 20.4 →
+  24.0 %, recall 29.1 → 29.5 %, unjustified alerts 6.9 → 5.7 per minute, better
+  precision on 6 of 6 recordings. It removes about half of the hand detections,
+  and in a sample it also suppressed one real passer-by.
 - **Time-to-collision was inverted.** It divided proximity by speed as if it
   were distance. The fix is correct but did not change alert quality measurably.
 - **Recorded playback was upside down.** It rotated frames the opposite way to
   live streaming; both paths now share one transform.
 - **Known limits, stated in the evaluation doc.** The reference and the model
   both use the bbox bottom, so independence is partial. Distances come out
-  shorter than the reference (eye height differs per wearer). DANGER dominates
-  the adopted model's alerts.
+  shorter than the reference (eye height differs per wearer). The reference
+  removes hands only, so the wearer's legs or torso seen when looking down can
+  still count as obstacles. DANGER dominates the adopted model's alerts.
 
 ## Performance
 
@@ -160,13 +175,13 @@ PYTHON="uv run python" ./scripts/replay_benchmark.sh ~/Datasets/aria/ritw benchm
 python scripts/replay_table.py benchmarks/replay/*.json
 
 # alert evaluation against MPS (needs the recordings' mps/ folder)
-python scripts/evaluate_alerts.py --variants ttc_fix metric_inpath \
+python scripts/evaluate_alerts.py --variants ttc_fix metric_inpath metric_inpath_selfbody \
     --detections benchmarks/replay/detections/<run>.json \
     --recording ~/Datasets/aria/ritw/<recording> --out benchmarks/alerts/<run>.json
-python scripts/alert_table.py benchmarks/alerts/candidate1/*.json --variants ttc_fix metric_inpath
+python scripts/alert_table.py benchmarks/alerts/candidate2/*.json --variants metric_inpath metric_inpath_selfbody
 ```
 
-Tests: `uv run pytest` (198 tests, no hardware needed; GPU tests skip).
+Tests: `uv run pytest` (209 tests, no hardware needed; GPU tests skip).
 
 ## Limitations and next steps
 
@@ -176,6 +191,7 @@ What this version does not do, and what would come next, one change at a time:
 |---|---|---|
 | Obstacles that do not touch the ground in front of the wearer (branches, awnings, signs at head height) are missed or placed too far | The adopted threat model locates each object by where its box meets the ground | Metric monocular depth (e.g. Depth Anything V2 Metric Small), evaluated against the MPS point cloud before adoption |
 | Very close objects whose bottom edge leaves the image | Same ground-contact assumption | Same as above |
+| The wearer's own hands still trigger alerts about half the time, and the filter can hide a passer-by at the image corners | The filter uses only box position and gravity | Hand keypoints or a wearer-body class in the detector, registered and tested on new recordings |
 | Capture → detections p95 is 136 ms on the Jetson, above the 100 ms target | CPU JPEG decoding (39 ms) and decoding sharing the detector's Python process | Decoding in a separate process; GPU at fixed frequency (`jetson_clocks`) |
 | Eye height fixed at 1.6 m | No per-wearer calibration | Estimate it from the IMU and SLAM at start-up |
 | Not tested live with the glasses on the Jetson, nor with blind or low-vision users | Offline evaluation only | Live session with the native ARM64 Aria SDK, same metrics as the replay |
