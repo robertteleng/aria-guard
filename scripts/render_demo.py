@@ -30,24 +30,33 @@ from scripts.replay_vrs import VrsRecording  # noqa: E402
 
 W, H = 1280, 720
 CAM = 560                 # camera panel side
-BEV = 560                 # top-down panel side
+BEV_W, BEV = W - CAM, 560  # top-down panel
 TL_H = H - CAM            # timeline height
-PX_PER_M = 32.0
+PX_PER_M = 36.0
+DEVICE_Y = BEV - 70       # device position in the top-down panel
+MIN_WALK_MPS = 0.5
 LEVEL_COLOR = {"ATTENTION": (0, 200, 255), "WARNING": (0, 140, 255), "DANGER": (40, 40, 230)}
 OK, BAD, PATH_C, GREY = (90, 200, 90), (70, 70, 230), (255, 190, 90), (150, 150, 150)
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 
 
-def pick_window(episodes, duration_s, length_s):
-    """Start of the window with the most episode starts (earliest on ties)."""
+def walking_speed(frames, t0, length_s):
+    """Mean speed (m/s) over [t0, t0+length] from each frame's 3 s future path."""
+    speeds = [np.linalg.norm(f["path"][-1] - f["path"][0]) / ev.HORIZON_S
+              for f in frames if t0 <= f["t"] <= t0 + length_s]
+    return float(np.mean(speeds)) if speeds else 0.0
+
+
+def pick_window(episodes, frames, duration_s, length_s):
+    """Window with the most episode starts among those where the wearer walks
+    (mean speed >= MIN_WALK_MPS); earliest on ties. Falls back to all windows."""
     starts = sorted(e["start"] for e in episodes)
-    best, best_t = -1, 0.0
-    for t in [0.0] + starts:
-        t0 = max(0.0, min(t - 2.0, duration_s - length_s))
-        n = sum(t0 <= s < t0 + length_s for s in starts)
-        if n > best:
-            best, best_t = n, t0
-    return best_t
+    candidates = sorted({max(0.0, min(t - 2.0, duration_s - length_s)) for t in [0.0] + starts})
+    scored = [(sum(t0 <= s < t0 + length_s for s in starts), walking_speed(frames, t0, length_s), t0)
+              for t0 in candidates]
+    walking = [c for c in scored if c[1] >= MIN_WALK_MPS] or scored
+    best = max(walking, key=lambda c: (c[0], -c[2]))
+    return best[2], best[1]
 
 
 def text(img, s, org, scale=0.5, color=(235, 235, 235), thick=1):
@@ -61,47 +70,49 @@ def world_to_bev(xy, origin, heading):
     right = np.array([h[1], -h[0]])
     d = np.atleast_2d(xy)[:, :2] - origin[:2]
     fwd, lat = d @ h, d @ right
-    return np.stack([BEV / 2 + lat * PX_PER_M, BEV - 60 - fwd * PX_PER_M], axis=1)
+    return np.stack([BEV_W / 2 + lat * PX_PER_M, DEVICE_Y - fwd * PX_PER_M], axis=1)
 
 
 def draw_bev(fd, traj, cam, points_xyz, ground, t_ns, alerts_now):
-    img = np.full((BEV, BEV, 3), 22, np.uint8)
+    img = np.full((BEV, BEV_W, 3), 18, np.uint8)
     R_wd, pos = traj.pose(t_ns)
-    fwd = (R_wd @ cam.R_dc @ np.array([0, 0, 1.0]))[:2]
     origin = pos[:2]
-    # 1 m grid
-    for m in range(-10, 20):
-        y = int(BEV - 60 - m * PX_PER_M)
-        cv2.line(img, (0, y), (BEV, y), (34, 34, 34), 1)
-        x = int(BEV / 2 + m * PX_PER_M)
-        cv2.line(img, (x, 0), (x, BEV), (34, 34, 34), 1)
-    # static structure from MPS points (0.2-2 m above ground), within 12 m
-    near = points_xyz[np.hypot(*(points_xyz[:, :2] - origin).T) < 12]
-    near = near[(near[:, 2] > ground + 0.2) & (near[:, 2] < ground + 2.0)]
-    for u, v in world_to_bev(near, origin, fwd).astype(int)[::3]:
-        if 0 <= u < BEV and 0 <= v < BEV:
-            img[v, u] = (110, 110, 110)
-    # past trajectory (8 s) and future corridor (3 s)
-    past = np.array([traj.position(t_ns - int(s * 1e9))[:2] for s in np.arange(0, 8, 0.2)])
-    cv2.polylines(img, [world_to_bev(past, origin, fwd).astype(np.int32)], False, GREY, 1, cv2.LINE_AA)
-    fut = world_to_bev(fd["path"], origin, fwd).astype(np.int32)
+    walk = fd["path"][min(10, len(fd["path"]) - 1)] - fd["path"][0]   # next 1 s
+    heading = walk if np.linalg.norm(walk) > 0.3 else (R_wd @ cam.R_dc @ np.array([0, 0, 1.0]))[:2]
+    for m in range(-20, 20):  # 1 m grid
+        y = int(DEVICE_Y - m * PX_PER_M)
+        cv2.line(img, (0, y), (BEV_W, y), (28, 28, 28), 1)
+        x = int(BEV_W / 2 + m * PX_PER_M)
+        cv2.line(img, (x, 0), (x, BEV), (28, 28, 28), 1)
+    # obstacles' height band from the MPS points, faint, for context only
+    near = points_xyz[np.hypot(*(points_xyz[:, :2] - origin).T) < 11]
+    near = near[(near[:, 2] > ground + 0.4) & (near[:, 2] < ground + 1.6)][::6]
+    for u, v in world_to_bev(near, origin, heading).astype(int):
+        if 0 <= u < BEV_W and 0 <= v < BEV:
+            img[v, u] = (72, 72, 72)
+    past = np.array([traj.position(t_ns - int(s * 1e9))[:2] for s in np.arange(0, 10, 0.2)])
+    cv2.polylines(img, [world_to_bev(past, origin, heading).astype(np.int32)], False, GREY, 2, cv2.LINE_AA)
+    fut = world_to_bev(fd["path"], origin, heading).astype(np.int32)
     overlay = img.copy()
     cv2.polylines(overlay, [fut], False, PATH_C, int(2 * ev.CORRIDOR_M * PX_PER_M), cv2.LINE_AA)
-    img = cv2.addWeighted(overlay, 0.25, img, 0.75, 0)
+    cv2.circle(overlay, tuple(fut[0]), int(ev.CORRIDOR_M * PX_PER_M), PATH_C, -1, cv2.LINE_AA)
+    img = cv2.addWeighted(overlay, 0.28, img, 0.72, 0)
     cv2.polylines(img, [fut], False, PATH_C, 2, cv2.LINE_AA)
-    # objects
     alerted = {a["track_id"]: a for a in alerts_now}
     for tr in fd["tracks"]:
-        u, v = world_to_bev(tr["ground_xy"], origin, fwd)[0].astype(int)
-        color = (60, 60, 240) if tr["in_path"] else (200, 200, 200)
+        u, v = world_to_bev(tr["ground_xy"], origin, heading)[0].astype(int)
+        if not (-20 <= u < BEV_W + 20 and -20 <= v < BEV + 20):
+            continue
+        color = (60, 60, 240) if tr["in_path"] else (190, 190, 190)
         cv2.circle(img, (u, v), 7, color, -1, cv2.LINE_AA)
-        text(img, tr["name"], (u + 9, v + 4), 0.4, color)
+        text(img, tr["name"], (u + 10, v + 5), 0.45, color)
         if tr["id"] in alerted:
             a = alerted[tr["id"]]
-            cv2.circle(img, (u, v), 14, OK if a["justified"] else BAD, 2, cv2.LINE_AA)
-    cv2.circle(img, (BEV // 2, BEV - 60), 8, (255, 255, 255), -1, cv2.LINE_AA)
-    text(img, "Truth: wearer's real path (Meta MPS SLAM), metres", (10, 22), 0.5, PATH_C)
-    text(img, "red = object in the 3 s path corridor", (10, 44), 0.45, (60, 60, 240))
+            cv2.circle(img, (u, v), 15, OK if a["justified"] else BAD, 3, cv2.LINE_AA)
+    cv2.circle(img, (BEV_W // 2, DEVICE_Y), 9, (255, 255, 255), -1, cv2.LINE_AA)
+    text(img, "Truth: where the wearer actually walked (Meta MPS SLAM, 1 m grid)", (12, 24), 0.55, PATH_C)
+    text(img, "blue band = next 3 s of path   red = object in that band   grey line = last 10 s", (12, 48), 0.45, (200, 200, 200))
+    text(img, "ring on an object = aria-guard alerted about it (green justified, red not)", (12, 70), 0.45, (200, 200, 200))
     return img
 
 
@@ -110,9 +121,12 @@ def draw_cam(rgb, fd, alerts_now, alert_banner):
     s = CAM / ev.RGB_SIZE
     for tr in fd["tracks"] if fd else []:
         x, y, w, h = [int(v * s) for v in tr["bbox"]]
-        color = LEVEL_COLOR.get(tr["threat"], (200, 200, 200))
+        if tr["threat"] == "NONE":
+            cv2.rectangle(img, (x, y), (x + w, y + h), (170, 170, 170), 1)
+            continue
+        color = LEVEL_COLOR[tr["threat"]]
         cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)
-        text(img, f'{tr["name"]} {tr["threat"].lower() if tr["threat"] != "NONE" else ""}', (x, max(14, y - 5)), 0.45, color)
+        text(img, f'{tr["name"]} {tr["threat"].lower()}', (x, max(14, y - 5)), 0.45, color)
     text(img, "aria-guard (yolo26n_nav + depth + tracker + arbiter)", (10, 22), 0.5)
     if alert_banner:
         a = alert_banner
@@ -151,7 +165,9 @@ def main():
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--variant", default="ttc_fix")
     ap.add_argument("--seconds", type=float, default=40.0)
-    ap.add_argument("--fps", type=float, default=15.0)
+    ap.add_argument("--fps", type=float, default=12.0)
+    ap.add_argument("--gif-seconds", type=float, default=10.0,
+                    help="Also write a GIF of the N seconds of the clip with the most alerts (0 = none)")
     args = ap.parse_args()
 
     import pickle
@@ -162,8 +178,8 @@ def main():
     pts = ev.Points(args.recording / "mps" / "slam" / "semidense_points.csv.gz")
     det = result["details"]
     duration = det["frames"][-1]["t"]
-    t0 = pick_window(det["episodes"], duration, args.seconds)
-    print(f"[DEMO] window {t0:.1f}-{t0 + args.seconds:.1f} s of {duration:.0f} s, "
+    t0, speed = pick_window(det["episodes"], det["frames"], duration, args.seconds)
+    print(f"[DEMO] window {t0:.1f}-{t0 + args.seconds:.1f} s of {duration:.0f} s (walking {speed:.2f} m/s), "
           f"precision {result['alert_precision']}, recall {result['episode_recall']}")
 
     rec = VrsRecording(str(args.recording / "recording.vrs"), 100)
@@ -171,6 +187,9 @@ def main():
     times = np.array([f["t"] for f in by_t])
     args.out.parent.mkdir(parents=True, exist_ok=True)
     writer = cv2.VideoWriter(str(args.out.with_suffix(".tmp.mp4")), cv2.VideoWriter_fourcc(*"mp4v"), args.fps, (W, H))
+    alert_times = [a["t"] - t0 for a in det["alerts"] if t0 <= a["t"] <= t0 + args.seconds]
+    gif_start = max(np.arange(0, max(0.0, args.seconds - args.gif_seconds) + 0.5, 0.5),
+                    key=lambda g: sum(g <= a < g + args.gif_seconds for a in alert_times)) if alert_times else 0.0
     banner, banner_until = None, -1.0
     for t in np.arange(t0, t0 + args.seconds, 1.0 / args.fps):
         fd = by_t[int(np.abs(times - t).argmin())]
@@ -186,14 +205,7 @@ def main():
         ground = pts.ground_z(R_wd @ cam.t_dc + pos) or (pos[2] - 1.5)
         canvas = np.zeros((H, W, 3), np.uint8)
         canvas[:CAM, :CAM] = draw_cam(rgb, fd, alerts_now, banner)
-        canvas[:CAM, CAM:CAM + BEV] = draw_bev(fd, traj, cam, pts.xyz, ground, t_ns, alerts_now)
-        canvas[:CAM, CAM + BEV:] = 12
-        side = canvas[:CAM, CAM + BEV:]
-        text(side, "Is each alert", (12, 40), 0.6)
-        text(side, "about something", (12, 66), 0.6)
-        text(side, "in the path the", (12, 92), 0.6)
-        text(side, "wearer walked?", (12, 118), 0.6)
-        text(side, f"t = {fd['t']:.1f} s", (12, 170), 0.55, GREY)
+        canvas[:CAM, CAM:] = draw_bev(fd, traj, cam, pts.xyz, ground, t_ns, alerts_now)
         canvas[CAM:, :] = draw_timeline(fd["t"], t0, args.seconds, det["episodes"], det["alerts"], result)
         writer.write(canvas)
     writer.release()
@@ -201,8 +213,15 @@ def main():
     # H.264 for browsers and GitHub; keep mp4v if ffmpeg is missing
     try:
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(tmp), "-c:v", "libx264", "-pix_fmt", "yuv420p",
-                        "-crf", "23", "-movflags", "+faststart", str(args.out)], check=True)
+                        "-crf", "30", "-preset", "slow", "-movflags", "+faststart", str(args.out)], check=True)
         tmp.unlink()
+        if args.gif_seconds > 0:
+            gif = args.out.with_suffix(".gif")
+            vf = ("fps=6,scale=800:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=48:stats_mode=diff[p];"
+                  "[b][p]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle")
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{gif_start:.1f}", "-t", str(args.gif_seconds),
+                            "-i", str(args.out), "-vf", vf, str(gif)], check=True)
+            print(f"[DEMO] {gif}")
     except (OSError, subprocess.CalledProcessError):
         tmp.rename(args.out)
     print(f"[DEMO] {args.out}")

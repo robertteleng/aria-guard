@@ -109,3 +109,17 @@ def test_crosscheck_summary_excludes_tree_from_headline_but_reports_it():
     assert s["by_class"]["Tree"]["median_signed_diff_m"] == pytest.approx(-3.25)
     assert len(s["rows"]) == 4 and s["headline_excludes"] == ["Tree"]
     assert ev.summarize_crosscheck([]) == {"n": 0}
+
+
+def test_demo_window_prefers_walking_segments():
+    cv2 = pytest.importorskip("cv2")
+    from scripts.render_demo import pick_window
+    frames = []
+    for i in range(0, 1200):
+        t = i / 10
+        moving = t >= 60                      # stands for 60 s, then walks at 1 m/s
+        path = np.array([[0, 0], [3.0 if moving else 0.0, 0]])
+        frames.append({"t": t, "path": path})
+    episodes = [{"start": s} for s in (5, 6, 7, 8, 70, 75)]   # more episodes while standing
+    t0, speed = pick_window(episodes, frames, 120.0, 40.0)
+    assert t0 >= 60 - 2 and speed >= 0.5
