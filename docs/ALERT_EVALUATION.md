@@ -303,3 +303,35 @@ corners of the image.
   candidate for a new registration with independent recordings.
 - Previous limits of candidate 1 (partial independence, fixed eye height,
   DANGER share, late warnings) still apply.
+
+## Exploratory error analysis (2026-09-17, no decision taken)
+
+Where the adopted model's wrong and missing alerts come from, on the corrected
+evaluation. Categories were defined while writing the script, so this section
+suggests what to register next; it is not a result.
+`python scripts/alert_error_analysis.py --details <details>/c2_*.pkl`.
+
+**Unjustified alerts (209 of 275).**
+
+| What the reference says about the object | Share |
+|---|---|
+| Away from the path, more than 1.5 m (median 4.0 m): trees 43, cars 12, fire hydrants 11; mostly ATTENTION (50) and WARNING (25) | 38 % |
+| The wearer's body left by the filter (`person` box at the bottom edge) | 26 % |
+| The reference cannot place it within 0.5 s (no ground contact, beyond 15 m, or a hand-tracked hand) | 24 % |
+| Beside the path, 0.75–1.5 m | 11 % |
+
+Precision by level: DANGER 34 %, WARNING 19 %, ATTENTION 13 %.
+
+**Missed hazard episodes (167 of 237).** 160 of the 237 episodes last less
+than 0.3 s, and 126 of the misses are among them: an object's ground point
+brushing the 0.75 m corridor for a few frames. On episodes of 0.3 s or more the
+model warns 36 of 77 (47 %). Of the 41 longer misses, 20 had the object rated
+a threat while the single alert went to another object, 16 were never rated a
+threat and 5 were held back by cooldown or level. Stairs have the lowest recall
+(16 of 77 episodes).
+
+**What this suggests, to be registered one at a time:** a minimum episode
+duration in the reference (recall is dominated by sub-0.3 s episodes); why
+trees, cars and hydrants several metres away are placed in the path (fixed eye
+height, box bottom of partly occluded objects); a better wearer-body detector;
+and the arbiter choosing one object when several are threats.
