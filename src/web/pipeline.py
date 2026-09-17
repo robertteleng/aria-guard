@@ -15,12 +15,19 @@ from src.detection import DetectorProcess
 from src.domain import SimpleTracker, AlertArbiter
 from src.output import Dashboard, AudioFeedback
 
-# AriaBridgeObserver for Jetson ARM64 (frames via ZMQ from FEX-Emu receiver)
+# AriaBridgeObserver for Jetson ARM64: frames over ZMQ from the aria-arm64-bridge
+# receiver (https://github.com/robertteleng/aria-arm64-bridge). Optional: use the
+# installed package, or a checkout pointed to by ARIA_BRIDGE_SRC. If a checkout is
+# configured but fails to import, that is a real error and it is not swallowed.
 try:
-    sys.path.insert(0, str(Path.home() / "Projects" / "aria-arm64-bridge" / "src" / "bridge"))
-    from aria_bridge_observer import AriaBridgeObserver
+    from aria_arm64_bridge.observer import AriaBridgeObserver
 except ImportError:
-    AriaBridgeObserver = None
+    _bridge_src = os.environ.get("ARIA_BRIDGE_SRC")
+    if _bridge_src and Path(_bridge_src).is_dir():
+        sys.path.insert(0, _bridge_src)
+        from aria_arm64_bridge.observer import AriaBridgeObserver
+    else:
+        AriaBridgeObserver = None
 
 
 def process_loop(source: str, mode: str = "all", enable_audio: bool = True, state: dict = None):

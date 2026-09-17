@@ -80,7 +80,7 @@ Aplicar (requiere sudo una vez):
 sudo systemctl daemon-reload
 sudo systemctl restart bluetooth
 sleep 3
-bluetoothctl connect <BT_MAC>
+bluetoothctl connect <headset-mac>
 sleep 5
 pactl set-card-profile bluez_card.A8_F5_E1_CB_06_21 a2dp_sink
 pactl set-default-sink bluez_sink.A8_F5_E1_CB_06_21.a2dp_sink
@@ -156,7 +156,7 @@ emparejado al dongle), nunca desde `aria_camera.get_audio_samples` (la vía que 
 2. (Opcional, recomendado) bloquear el BT Realtek onboard para que el casco use solo el dongle:
    `sudo rfkill block <idx-realtek>` o `hciconfig hci0 down`.
 3. Emparejar el Shokz al dongle: `bluetoothctl` → `select <BD_ADDR-dongle>` → `scan on` →
-   `pair`/`connect <BT_MAC>`.
+   `pair`/`connect <headset-mac>`.
 4. Verificar: `./scripts/bt-audio.sh mic 5` hablando → `rms` debe subir a >1000 y el `SCO RX delta`
    a decenas de miles. A2DP estéreo sigue por el dongle (el fix del plugin a2dp es global, ya aplicado).
 5. Ojo con clones CSR falsos: si el `mic` sigue dando silencio, probar otro dongle (CSR8510 genuino).

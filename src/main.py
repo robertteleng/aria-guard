@@ -96,8 +96,12 @@ if __name__ == '__main__':
                         source = "aria:usb"
                         break
                     elif aria_choice == "b":
-                        ip = input("  IP de Aria (Enter = <ARIA_IP>): ").strip()
-                        ip = ip if ip else "<ARIA_IP>"
+                        default_ip = os.environ.get("ARIA_IP", "")
+                        hint = f" (Enter = {default_ip})" if default_ip else ""
+                        ip = input(f"  IP de Aria{hint}: ").strip() or default_ip
+                        if not ip:
+                            print("  Hace falta la IP de las gafas (o define ARIA_IP).")
+                            continue
                         source = f"aria:wifi:{ip}"
                         break
                     else:

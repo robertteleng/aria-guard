@@ -51,7 +51,7 @@ uv sync --extra aria                  # + Aria SDK
 ./run.sh realsense indoor                    # RealSense D435
 ./run.sh data/video.mp4 all                  # Video file
 ./run.sh aria:usb                            # Aria glasses USB
-./run.sh aria:wifi:<ARIA_IP>             # Aria WiFi
+./run.sh aria:wifi:<glasses-ip>             # Aria WiFi
 ```
 
 ### Docker

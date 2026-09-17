@@ -2,6 +2,7 @@
 Observers para Meta Aria glasses: live streaming y dataset playback.
 """
 
+import os
 import threading
 import time
 from typing import Optional, Dict, Any
@@ -10,6 +11,17 @@ import cv2
 import numpy as np
 
 from .observer import BaseObserver
+
+
+def resolve_wifi_ip(ip_address: Optional[str] = None) -> str:
+    """IP of the glasses for WiFi streaming: the argument, else $ARIA_IP.
+
+    There is no hard-coded default: the address depends on the local network.
+    """
+    ip = (ip_address or os.environ.get("ARIA_IP", "")).strip()
+    if not ip:
+        raise ValueError("WiFi streaming needs the glasses' IP: pass ip_address or set ARIA_IP")
+    return ip
 
 
 class AriaDemoObserver(BaseObserver):
@@ -72,8 +84,7 @@ class AriaDemoObserver(BaseObserver):
         self._device_client = aria.DeviceClient()
 
         if interface.lower() == "wifi":
-            if not ip_address:
-                ip_address = "<ARIA_IP>"
+            ip_address = resolve_wifi_ip(ip_address)
             client_config = aria.DeviceClientConfig()
             client_config.ip_v4_address = ip_address
             self._device_client.set_client_config(client_config)

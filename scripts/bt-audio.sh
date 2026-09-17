@@ -15,7 +15,7 @@
 # Ver docs/research/bluetooth-a2dp-jetson-shokz.md.
 set -euo pipefail
 
-DEV="${ARIA_BT_DEV:-<BT_MAC>}"
+DEV="${ARIA_BT_DEV:?set ARIA_BT_DEV to the Bluetooth MAC of the headset (e.g. AA:BB:CC:DD:EE:FF)}"
 CARD="bluez_card.${DEV//:/_}"
 SINK_A2DP="bluez_sink.${DEV//:/_}.a2dp_sink"
 SRC_HFP="bluez_source.${DEV//:/_}.handsfree_head_unit"

@@ -6,7 +6,7 @@
 #
 # Cambia a HFP, mide el nivel mientras hablas, y vuelve a A2DP estéreo al salir.
 set -uo pipefail
-DEV="${ARIA_BT_DEV:-<BT_MAC>}"
+DEV="${ARIA_BT_DEV:?set ARIA_BT_DEV to the Bluetooth MAC of the headset (e.g. AA:BB:CC:DD:EE:FF)}"
 CARD="bluez_card.${DEV//:/_}"
 SRC="bluez_source.${DEV//:/_}.handsfree_head_unit"
 SINK_A2DP="bluez_sink.${DEV//:/_}.a2dp_sink"
