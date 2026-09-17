@@ -28,6 +28,20 @@ def eye_to_bgr(image: np.ndarray) -> np.ndarray:
     return rotated
 
 
+def upright_to_raw_pixel(x: float, y: float, size: int):
+    """Pixel in the upright frame (np.rot90(raw, -1)) -> pixel in the raw sensor image.
+
+    For a square image of side N, upright[r, c] = raw[N-1-c, r]; with x = column
+    and y = row: raw_x = y, raw_y = N - 1 - x.
+    """
+    return y, size - 1 - x
+
+
+def raw_to_upright_pixel(x: float, y: float, size: int):
+    """Inverse of upright_to_raw_pixel."""
+    return size - 1 - y, x
+
+
 def nearest_index(timestamps: Sequence[int], target: int) -> int:
     """Index of the timestamp closest to target; timestamps must be sorted."""
     if len(timestamps) == 0:

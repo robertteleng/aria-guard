@@ -117,33 +117,30 @@ class ImuUp:
         self.R_di = T[:3, :3]
         self.window_ns = int(window_s * 1e9)
 
-    def up_device(self, t_ns: int):
+    def up_imu(self, t_ns: int):
+        """Unit up vector in the IMU frame over the window ending at t_ns (same as GravityEstimator)."""
         hi = int(np.searchsorted(self.t_ns, t_ns, side="right"))
         lo = int(np.searchsorted(self.t_ns, t_ns - self.window_ns, side="left"))
         if hi <= lo:
             return None
         mean = (self._cum[hi] - self._cum[lo]) / (hi - lo)
         n = np.linalg.norm(mean)
-        return None if n < 1e-6 else self.R_di @ (mean / n)
+        return None if n < 1e-6 else mean / n
 
 
 def live_metric_threats(frames: List[dict], cam: "RgbCamera", imu: ImuUp) -> Dict:
-    """(frame_idx, det_index) -> {threat, forward_m, lateral_m} from live-available data only."""
-    from src.domain.ground_projection import ground_contact, horizontal_basis, metric_threat
-    cam_forward = cam.R_dc @ np.array([0.0, 0.0, 1.0])
+    """(frame_idx, det_index) -> {threat, forward_m, lateral_m}, using the live
+    MetricInPath class with the VRS accelerometer (live-available data only)."""
+    from types import SimpleNamespace
+    from src.input.metric_inpath import MetricInPath
+    model = MetricInPath(cam.calib, imu.R_di)
     out = {}
     for fr in frames:
-        up = imu.up_device(int(cam.rgb_ts[fr["frame_idx"]]))
-        basis = horizontal_basis(up, cam_forward) if up is not None else None
-        for k, d in enumerate(fr["detections"]):
-            contact = None
-            if basis is not None:
-                x, y, w, h = d["bbox"]
-                ray = cam.R_dc @ cam.ray_upright(x + w / 2, y + h)
-                contact = ground_contact(ray, up, *basis)
-            out[(fr["frame_idx"], k)] = {"threat": metric_threat(contact),
-                                         "forward_m": contact[0] if contact else None,
-                                         "lateral_m": contact[1] if contact else None}
+        up_imu = imu.up_imu(int(cam.rgb_ts[fr["frame_idx"]]))
+        dets = [SimpleNamespace(bbox=d["bbox"]) for d in fr["detections"]]
+        model.annotate(dets, up_imu)
+        for k, d in enumerate(dets):
+            out[(fr["frame_idx"], k)] = {"threat": d.metric_threat, "forward_m": d.forward_m, "lateral_m": d.lateral_m}
     return out
 
 

@@ -10,7 +10,7 @@ from typing import Optional, Dict, Any
 import cv2
 import numpy as np
 
-from .aria_frames import MotionClassifier, eye_to_bgr, nearest_index, rgb_to_bgr_upright
+from .aria_frames import GravityEstimator, MotionClassifier, eye_to_bgr, nearest_index, rgb_to_bgr_upright
 from .observer import BaseObserver
 
 
@@ -73,6 +73,8 @@ class AriaDemoObserver(BaseObserver):
         # IMU data
         self._motion = MotionClassifier()
         self._motion_state = "unknown"
+        self._gravity = GravityEstimator(window_s=1.0)
+        self._metric_inpath = None
 
         # Calibraciones
         self._rgb_calib = None
@@ -118,6 +120,12 @@ class AriaDemoObserver(BaseObserver):
             self._slam1_calib = sensors_calib.get_camera_calib("camera-slam-left")
             self._slam2_calib = sensors_calib.get_camera_calib("camera-slam-right")
             print("[OBSERVER] Calibraciones obtenidas")
+            try:
+                from .metric_inpath import MetricInPath
+                R_di = sensors_calib.get_imu_calib("imu-right").get_transform_device_imu().to_matrix()[:3, :3]
+                self._metric_inpath = MetricInPath(self._rgb_calib, R_di)
+            except Exception as e:
+                print(f"[OBSERVER WARN] Metric in-path unavailable, heuristic threat model: {e}")
         except Exception as e:
             print(f"[OBSERVER WARN] No se pudieron obtener calibraciones: {e}")
 
@@ -209,8 +217,10 @@ class AriaDemoObserver(BaseObserver):
         if not samples or imu_idx != 0:
             return
 
+        sample = samples[0]
         with self._lock:
-            self._motion_state = self._motion.update(samples[0].accel_msec2)
+            self._motion_state = self._motion.update(sample.accel_msec2)
+            self._gravity.update(sample.capture_timestamp_ns, sample.accel_msec2)
 
     def on_streaming_client_failure(self, reason, message: str) -> None:
         """Callback de error del SDK."""
@@ -221,6 +231,14 @@ class AriaDemoObserver(BaseObserver):
         with self._lock:
             frame = self._frames.get(camera)
             return frame.copy() if frame is not None else None
+
+    def metric_inpath_inputs(self):
+        """(MetricInPath, up vector in the IMU frame) when calibration and IMU are available."""
+        with self._lock:
+            up = self._gravity.up()
+        if self._metric_inpath is None or up is None:
+            return None
+        return self._metric_inpath, up
 
     def get_motion_state(self) -> str:
         """Obtiene estado de movimiento estimado del IMU."""

@@ -20,6 +20,9 @@ class Detection:
     depth_value: float  # 0.0 - 1.0 (normalizado)
     is_gazed: bool = False  # True if user is looking at this object
     traffic_light_state: Optional[str] = None  # "red", "green", "yellow", None
+    metric_threat: Optional[str] = None  # metric in-path level (src/input/metric_inpath.py)
+    forward_m: Optional[float] = None    # ground contact ahead of the camera, metres
+    lateral_m: Optional[float] = None    # ground contact to the right (+) / left (-), metres
 
 
 # YOLO26s Nav model classes (24):

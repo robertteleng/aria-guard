@@ -10,19 +10,7 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
-
-def upright_to_raw_pixel(x: float, y: float, size: int) -> Tuple[float, float]:
-    """Pixel in the upright frame (np.rot90(raw, -1)) -> pixel in the raw sensor image.
-
-    For a square image of side N, upright[r, c] = raw[N-1-c, r]; with x = column
-    and y = row: raw_x = y, raw_y = N - 1 - x.
-    """
-    return y, size - 1 - x
-
-
-def raw_to_upright_pixel(x: float, y: float, size: int) -> Tuple[float, float]:
-    """Inverse of upright_to_raw_pixel."""
-    return size - 1 - y, x
+from src.input.aria_frames import raw_to_upright_pixel, upright_to_raw_pixel  # noqa: F401 (re-export)
 
 
 def quat_to_matrix(qx: float, qy: float, qz: float, qw: float) -> np.ndarray:

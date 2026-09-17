@@ -129,6 +129,9 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True, stat
 
     print("[PIPELINE] Iniciando procesamiento...")
 
+    threat_model = os.environ.get("ARIA_THREAT_MODEL", "metric").lower()
+    print(f"[PIPELINE] Threat model: {threat_model}")
+
     frame_count = 0
     start_time = time.time()
     fps = 0
@@ -188,6 +191,12 @@ def process_loop(source: str, mode: str = "all", enable_audio: bool = True, stat
         # Update tracker — feed ego-motion so a static object ahead doesn't read
         # as "approaching" just because the user is walking toward it.
         frame_w = rgb.shape[1] if rgb is not None else 1280
+        # Metric in-path threat (docs/ALERT_EVALUATION.md, candidate change 1) when
+        # the source has calibration + IMU; ARIA_THREAT_MODEL=heuristic forces the old score
+        if detections and threat_model == "metric" and hasattr(observer, "metric_inpath_inputs"):
+            inputs = observer.metric_inpath_inputs()
+            if inputs is not None:
+                inputs[0].annotate(detections, inputs[1])
         motion_state = observer.get_motion_state() if hasattr(observer, "get_motion_state") else "unknown"
         tracked = tracker.update(detections, frame_width=frame_w, fov_h=observer.fov_h,
                                  motion_state=motion_state)

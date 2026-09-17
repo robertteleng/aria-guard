@@ -109,3 +109,46 @@ def test_tracker_without_metric_threat_keeps_heuristic():
               confidence=0.9, is_gazed=True)
     t = tracker.update([det], frame_width=1408, fov_h=1.919)[0]
     assert t.metric_threat is None and t.threat_level == "ATTENTION"   # same as the existing scenario
+
+
+class PinholeCalib:
+    """Raw-image pinhole camera: z forward, x right, y down; device frame = camera frame."""
+
+    def __init__(self, f=500.0, c=703.5):
+        self.f, self.c = f, c
+
+    def unproject_no_checks(self, p):
+        return np.array([(p[0] - self.c) / self.f, (p[1] - self.c) / self.f, 1.0])
+
+    def get_transform_device_camera(self):
+        class T:
+            @staticmethod
+            def to_matrix():
+                return np.eye(4)
+        return T()
+
+
+def test_metric_inpath_matches_hand_computed_distance():
+    from types import SimpleNamespace
+    from src.input.aria_frames import raw_to_upright_pixel
+    from src.input.metric_inpath import MetricInPath
+    calib = PinholeCalib()
+    model = MetricInPath(calib, R_device_imu=np.eye(3), image_size=1408)
+    up_imu = np.array([0.0, -1.0, 0.0])              # camera y points down
+    d = 200.0                                          # 200 px below the principal point, raw image
+    x, y = raw_to_upright_pixel(calib.c, calib.c + d, 1408)
+    bbox = (x - 20, y - 60, 40, 60)                    # bottom-centre at (x, y)
+    det = SimpleNamespace(bbox=bbox)
+    model.annotate([det], up_imu)
+    assert det.forward_m == pytest.approx(1.6 * calib.f / d)   # 4.0 m
+    assert det.lateral_m == pytest.approx(0.0, abs=1e-9)
+    assert det.metric_threat == "ATTENTION"
+
+
+def test_metric_inpath_without_gravity_is_none():
+    from types import SimpleNamespace
+    from src.input.metric_inpath import MetricInPath
+    model = MetricInPath(PinholeCalib(), R_device_imu=np.eye(3))
+    det = SimpleNamespace(bbox=(600, 600, 40, 60))
+    model.annotate([det], None)
+    assert det.metric_threat == "NONE" and det.forward_m is None

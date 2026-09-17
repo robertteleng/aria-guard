@@ -174,3 +174,37 @@ and the reference distance is reported next to the metrics.
 alerts per minute must not rise more than 10 %, or recall +5 points with at
 most +20 %). A candidate that passes also has to show precision up in at least
 4 of the 6 recordings, so that a pooled gain is not driven by one recording.
+
+## Result: candidate change 1 (2026-09-17)
+
+Six recordings, same NUC replay detections, records in
+`benchmarks/alerts/candidate1/` (commit `417b1b9`). Tables:
+`python scripts/alert_table.py benchmarks/alerts/candidate1/*.json --variants ttc_fix metric_inpath`.
+
+| Variant | Channel-A alerts | Alert precision | Hazard episodes | Episode recall | Unjustified alerts/min |
+|---|---|---|---|---|---|
+| ttc_fix (heuristic) | 370 | 14.6 % (54) | 383 | 15.7 % (60) | 8.57 |
+| metric_inpath | 319 | **37.6 %** (120) | 381 | **33.1 %** (126) | **5.40** |
+
+Per recording, metric_inpath raised precision in 6 of 6, raised recall in 6 of
+6 and lowered unjustified alerts per minute in 6 of 6.
+
+**Decision: adopted.** It passes the registered rule and the 4-of-6 condition.
+The live pipeline uses it when the source provides RGB calibration and IMU
+(`ARIA_THREAT_MODEL=heuristic` restores the previous score). Offline evaluation
+and the live pipeline share one implementation, `src/input/metric_inpath.py`;
+the refactor reproduced the recorded results exactly.
+
+**What this does not settle:**
+- **Independence is partial.** The candidate's forward distance agrees only
+  loosely with the reference (median absolute difference 0.58–3.00 m per
+  recording) and is systematically shorter (median signed −0.39 to −2.94 m),
+  consistent with the wearers' eye height differing from the fixed 1.6 m. Both
+  use the bbox bottom, so part of the gain may come from that shared choice. A
+  live session is the independent check.
+- **DANGER dominates.** 197 of the 319 alerts are DANGER, a level that bypasses
+  the arbiter's rate limit. Median lead time per recording is 1.1–2.8 s with a
+  10th percentile down to 0.08 s: many warnings come late.
+- Next candidates, to be registered the same way: per-wearer eye-height
+  estimate, a distance-aware DANGER threshold with ego speed, and lead time as a
+  registered metric.
