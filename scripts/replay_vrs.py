@@ -400,6 +400,7 @@ def replay(args) -> dict:
         },
         "model": {
             "yolo": model_name,
+            "yolo_backend": getattr(detector, "_yolo_backend", None),
             "file": model_file.name if model_file else None,
             "sha256": sha256(model_file) if model_file else None,
             "depth": "tensorrt" if getattr(detector, "_depth_tensorrt", False) else

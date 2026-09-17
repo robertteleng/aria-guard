@@ -49,6 +49,7 @@ class ParallelDetector:
         self._fov_h = fov_h
         self.filter_classes = CLASS_FILTERS.get(mode, None)
         self._yolo_class_ids = None  # Set after YOLO loads (for direct filtering)
+        self._yolo_backend = "ultralytics"  # "tensorrt" once the direct engine loads
         if self.filter_classes:
             print(f"[DETECTOR] Modo {mode}: filtrando a {len(self.filter_classes)} clases")
         # Detectar dispositivo
@@ -111,12 +112,29 @@ class ParallelDetector:
             engine_path = MODELS_DIR / f"{model_name}.engine"
             pt_path = MODELS_DIR / f"{model_name}.pt"
 
+            # ARIA_YOLO_BACKEND: "tensorrt" (default with an engine) runs the engine
+            # directly; "ultralytics" keeps the Ultralytics predictor for A/B checks
+            backend = os.environ.get("ARIA_YOLO_BACKEND", "tensorrt").lower()
+            self._yolo_backend = "ultralytics"
+
             # Try TensorRT first (NeMo now runs in separate process)
-            if self.device == "cuda" and engine_path.exists():
+            if self.device == "cuda" and engine_path.exists() and backend == "tensorrt":
+                try:
+                    from src.detection.trt_yolo import TrtYolo
+                    self.yolo = TrtYolo(engine_path)
+                    self._yolo_tensorrt = True
+                    self._yolo_backend = "tensorrt"
+                    print(f"[DETECTOR] {model_name} cargado (TensorRT directo)")
+                except Exception as e:
+                    print(f"[DETECTOR WARN] TensorRT directo failed: {e}")
+                    self.yolo = YOLO(str(engine_path), task="detect")
+                    self._yolo_tensorrt = True
+                    print(f"[DETECTOR] {model_name} cargado (TensorRT via Ultralytics)")
+            elif self.device == "cuda" and engine_path.exists():
                 try:
                     self.yolo = YOLO(str(engine_path), task="detect")
                     self._yolo_tensorrt = True
-                    print(f"[DETECTOR] {model_name} cargado (TensorRT)")
+                    print(f"[DETECTOR] {model_name} cargado (TensorRT via Ultralytics)")
                 except Exception as e:
                     print(f"[DETECTOR WARN] TensorRT failed: {e}")
                     self.yolo = YOLO(str(pt_path), task="detect")
@@ -380,7 +398,7 @@ class ParallelDetector:
         depth_map = self._cached_depth
 
         # Combinar YOLO + Depth para crear detecciones con distancia
-        if yolo_results:
+        if yolo_results is not None and len(yolo_results):
             detections = self._create_detections(yolo_results, depth_map, frame.shape, self._hardware_depth_mode, frame=frame)
 
         # Marcar objetos que el usuario está mirando
@@ -390,16 +408,20 @@ class ParallelDetector:
 
         return detections, depth_map, gaze_point
 
-    def _run_yolo(self, frame: np.ndarray):
-        """Ejecuta YOLO con FP16."""
+    def _run_yolo(self, frame: np.ndarray) -> Optional[np.ndarray]:
+        """YOLO on the frame -> (N, 6) array x1, y1, x2, y2, conf, cls in frame pixels."""
         if self.yolo is None:
             return None
         try:
+            if self._yolo_backend == "tensorrt":
+                return self.yolo(frame, conf=0.4, max_det=20, classes=self._yolo_class_ids or None)
             kwargs = {"verbose": False, "half": (self.device == "cuda"), "conf": 0.4, "max_det": 20}
             if self._yolo_class_ids:
                 kwargs["classes"] = self._yolo_class_ids
             results = self.yolo(frame, **kwargs)
-            return results[0] if results else None
+            if not results or results[0].boxes is None:
+                return np.zeros((0, 6), dtype=np.float32)
+            return results[0].boxes.data.float().cpu().numpy()
         except Exception as e:
             print(f"[DETECTOR ERROR] YOLO: {e}")
             return None
@@ -528,15 +550,10 @@ class ParallelDetector:
         detections = []
         h, w = frame_shape[:2]
 
-        if yolo_result.boxes is None:
-            return detections
-
-        for box in yolo_result.boxes:
-            # Extraer info del bbox
-            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-            conf = float(box.conf[0])
-            cls_id = int(box.cls[0])
-            name = yolo_result.names[cls_id]
+        names = self.yolo.names
+        for x1, y1, x2, y2, conf, cls in yolo_result:
+            conf = float(conf)
+            name = names[int(cls)]
 
             # Filtrar por clase si hay filtro activo
             if self.filter_classes and name not in self.filter_classes:
