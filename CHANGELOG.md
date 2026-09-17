@@ -7,6 +7,37 @@ versions loosely.
 ## [Unreleased]
 
 ### Added
+- **VRS replay benchmark** (`scripts/replay_vrs.py`, `replay_benchmark.sh`,
+  `replay_table.py`): real Aria recordings through the full pipeline (detector,
+  depth, gaze, IMU motion state, tracker, arbiter). Realtime pacing decodes on
+  its own thread at capture time and drops what the pipeline cannot keep up
+  with; `all` pacing gives per-stage cost. One JSON record per run with
+  environment, commit and model hash. Methodology: `docs/REPLAY_BENCHMARK.md`.
+- **`scripts/build_trt_engine.py`**: builds each TensorRT engine on its device
+  from ONNX (external weights, static shapes for dynamic inputs).
+
+### Fixed
+- **Time-to-collision was inverted**: TTC divided proximity (`depth_value`, 1 =
+  close) by the approach speed as if it were distance, so a person almost at the
+  camera scored WARNING and the same person far away DANGER. TTC and the looming
+  conversion now use the remaining gap `1 - depth_value`. On the six replay
+  recordings (RTX, same detections) DANGER alerts go from 9 to 18 and WARNING
+  from 56 to 88; all alert criteria still pass.
+- **Dataset playback orientation**: `AriaDatasetObserver` rotated RGB the
+  opposite way to live streaming and left the eye image unrotated. Frame and IMU
+  transforms are now shared (`src/input/aria_frames.py`); VRS timestamps are read
+  from the index instead of decoding every image at start-up.
+- **Offline benchmark** assumed 1920 px frames and never passed the ego-motion
+  state; width, FOV and per-frame motion state are now parameters.
+- Gaze ONNX export on torch >= 2.6 (`weights_only` default).
+
+### Changed
+- **Depth map kept at model resolution (518x518), normalized on the GPU**: it was
+  upscaled to the full frame on the CPU only to be sampled inside bboxes.
+  Identical detections on 300 frames, depth stage 9.8 -> 3.4 ms on the RTX.
+- Glasses IP, headset MAC and bridge path come from the environment (`ARIA_IP`,
+  `ARIA_BT_DEV`, `ARIA_BRIDGE_SRC`), no network-specific defaults in code.
+
 - **Ego-motion compensation + bbox-height looming (fewer false DANGER alerts)**:
   while the user walks, every object ahead "approaches" (depth grows) even when
   static — the dominant source of "alertas mediocres". The tracker now subtracts
@@ -14,7 +45,7 @@ versions loosely.
   when `motion_state == "walking"`, so static obstacles don't read as collisions
   while genuinely fast approachers still trigger DANGER. A complementary,
   depth-model-independent **looming** cue from bbox-height growth
-  (`(Δheight/height)·depth_value`, fused via `max`) survives the relative-depth
+  (`(Δheight/height)·(1 - depth_value)` since the TTC fix, fused via `max`) survives the relative-depth
   (`NORM_MINMAX`) noise; it stays in depth-slope units so TTC is unchanged.
   Motion state comes from IMU accel variance (`AriaDemoObserver` and, on Jetson,
   `AriaBridgeObserver.get_motion_state`). Tests: `tests/test_ego_motion.py`
