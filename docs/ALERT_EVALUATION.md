@@ -250,3 +250,56 @@ alerts per minute must not rise more than 10 % (or recall +5 points with at most
 +20 %); precision up in at least 4 of 6 recordings. The comparison is
 `metric_inpath_selfbody` against `metric_inpath`, both under the corrected
 reference. The README is updated with the corrected numbers whatever the result.
+
+## Result: wearer-body amendment and candidate change 2 (2026-09-17)
+
+Six recordings, same NUC replay detections, records in
+`benchmarks/alerts/candidate2/` (commit `0b70e6b`, reference with MPS hand
+tracking). Tables:
+`python scripts/alert_table.py benchmarks/alerts/candidate2/*.json --variants metric_inpath metric_inpath_selfbody`.
+
+| Variant | Channel-A alerts | Alert precision | Hazard episodes | Episode recall | Unjustified alerts/min |
+|---|---|---|---|---|---|
+| ttc_fix (heuristic) | 370 | 9.7 % (36) | 238 | 17.2 % (41) | 9.06 |
+| metric_inpath (candidate 1) | 319 | 20.4 % (65) | 237 | 29.1 % (69) | 6.89 |
+| metric_inpath_selfbody (candidate 2) | 275 | **24.0 %** (66) | 237 | **29.5 %** (70) | **5.67** |
+
+**Candidate 1, corrected.** The reference had counted 3,271 detections of the
+wearer's own hands as objects; 144 of the 381 hazard episodes reported for candidate 1 came from
+them. Against the heuristic, candidate 1 still raises precision in 6 of 6
+recordings, recall in 5 of 6 (equal in 1) and lowers unjustified alerts in 6 of
+6, but the gain is about half of what was published: precision 9.7 → 20.4 %
+(published 14.6 → 37.6 %), recall 17.2 → 29.1 % (published 15.7 → 33.1 %).
+
+**Candidate 2: adopted.** Against candidate 1, recall does not drop (29.1 →
+29.5 %; per recording up in 1, down in 2, equal in 3), unjustified alerts per
+minute fall 6.89 → 5.67 (down in 6 of 6) and precision rises in 6 of 6. It
+passes the registered rule and the 4-of-6 condition. The live pipeline applies
+the filter when the metric model is active.
+
+**The filter against hand tracking** (pooled):
+
+| Top of box below horizontal | Detections removed | Hand-tracked wearer detections removed | Removed but not hand-tracked |
+|---|---|---|---|
+| 10° (sensitivity) | 2,738 | 75 % (2,467 of 3,271) | 272 |
+| **15° (registered)** | 1,803 | **47 %** (1,540 of 3,271) | 263 |
+| 20° (sensitivity) | 1,101 | 27 % (889 of 3,271) | 212 |
+
+Fifteen of the 263 "removed but not hand-tracked" detections were inspected
+(random, four recordings): 13 are the wearer's own body that hand tracking does
+not cover (legs, feet, torso when looking down, untracked hands), 1 is a false
+`person` on a hedge, and **1 is a real person** walking past at the image edge.
+The filter can suppress a bystander close to the wearer; the rule keeps people
+whose head is near eye level, so the risk concerns people at the bottom-edge
+corners of the image.
+
+**What this does not settle:**
+- **The corrected reference only removes hands.** Legs, feet and torso seen when
+  the wearer looks down can still form hazard episodes, so all three variants
+  are still scored against a reference that includes some of the wearer's body.
+- The filter removes about half of the hand-tracked detections at the
+  registered angle; 10° removes three quarters with a similar number of other
+  removals. Choosing 10° now would be tuning on the test data; it is a
+  candidate for a new registration with independent recordings.
+- Previous limits of candidate 1 (partial independence, fixed eye height,
+  DANGER share, late warnings) still apply.

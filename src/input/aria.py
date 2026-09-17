@@ -123,7 +123,7 @@ class AriaDemoObserver(BaseObserver):
             try:
                 from .metric_inpath import MetricInPath
                 R_di = sensors_calib.get_imu_calib("imu-right").get_transform_device_imu().to_matrix()[:3, :3]
-                self._metric_inpath = MetricInPath(self._rgb_calib, R_di)
+                self._metric_inpath = MetricInPath(self._rgb_calib, R_di, wearer_body_filter=True)
             except Exception as e:
                 print(f"[OBSERVER WARN] Metric in-path unavailable, heuristic threat model: {e}")
         except Exception as e:

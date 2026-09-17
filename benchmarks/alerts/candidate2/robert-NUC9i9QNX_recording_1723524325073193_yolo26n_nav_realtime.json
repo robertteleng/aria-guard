@@ -1,0 +1,2017 @@
+{
+  "schema": "aria-guard/alert-eval/2",
+  "wearer_body_reference": true,
+  "commit": "0b70e6b",
+  "recording": "recording_1723524325073193",
+  "detections": "robert-NUC9i9QNX_recording_1723524325073193_yolo26n_nav_realtime.json",
+  "parameters": {
+    "HORIZON_S": 3.0,
+    "CORRIDOR_M": 0.75,
+    "NEAR_M": 1.0,
+    "NEAR_BEARING_DEG": 30.0,
+    "EPISODE_GAP_S": 0.5,
+    "GROUND_RADIUS_M": 5.0,
+    "GROUND_PERCENTILE": 5,
+    "GROUND_MIN_POINTS": 200,
+    "MAX_GROUND_RANGE_M": 15.0,
+    "POINT_STD_MAX_M": 0.2,
+    "CROSSCHECK_EVERY": 10,
+    "PATH_STEP_S": 0.1,
+    "RGB_SIZE": 1408,
+    "FOV_H": 1.919,
+    "HAND_CONFIDENCE_MIN": 0.5,
+    "HAND_MAX_DT_S": 0.06,
+    "WEARER_BOX_MARGIN": 0.1
+  },
+  "reference": {
+    "frames_outside_trajectory": 33,
+    "detections": 8370,
+    "wearer_body": 577,
+    "no_ground_contact": 4579,
+    "crosscheck": {
+      "headline": {
+        "n": 156,
+        "median_abs_diff_m": 0.964,
+        "median_signed_diff_m": -0.818,
+        "share_within_25pct": 0.385
+      },
+      "headline_excludes": [
+        "Tree"
+      ],
+      "by_class": {
+        "Door": {
+          "n": 18,
+          "median_abs_diff_m": 1.193,
+          "median_signed_diff_m": 1.193,
+          "share_within_25pct": 0.889
+        },
+        "Stairs": {
+          "n": 94,
+          "median_abs_diff_m": 0.799,
+          "median_signed_diff_m": -0.727,
+          "share_within_25pct": 0.287
+        },
+        "Traffic sign": {
+          "n": 9,
+          "median_abs_diff_m": 1.929,
+          "median_signed_diff_m": -1.929,
+          "share_within_25pct": 0.0
+        },
+        "Tree": {
+          "n": 194,
+          "median_abs_diff_m": 2.368,
+          "median_signed_diff_m": -0.15,
+          "share_within_25pct": 0.479
+        },
+        "car": {
+          "n": 35,
+          "median_abs_diff_m": 2.449,
+          "median_signed_diff_m": -2.35,
+          "share_within_25pct": 0.486
+        }
+      },
+      "rows": [
+        [
+          "Tree",
+          9.093,
+          12.344
+        ],
+        [
+          "Tree",
+          9.249,
+          12.376
+        ],
+        [
+          "Tree",
+          8.609,
+          12.442
+        ],
+        [
+          "car",
+          13.679,
+          17.13
+        ],
+        [
+          "car",
+          14.627,
+          15.187
+        ],
+        [
+          "car",
+          14.499,
+          15.295
+        ],
+        [
+          "Tree",
+          11.808,
+          6.551
+        ],
+        [
+          "Tree",
+          8.641,
+          13.19
+        ],
+        [
+          "Tree",
+          14.567,
+          13.516
+        ],
+        [
+          "Tree",
+          8.152,
+          13.285
+        ],
+        [
+          "Tree",
+          8.105,
+          13.281
+        ],
+        [
+          "Tree",
+          7.632,
+          13.143
+        ],
+        [
+          "Tree",
+          7.518,
+          12.866
+        ],
+        [
+          "Tree",
+          6.755,
+          12.427
+        ],
+        [
+          "car",
+          12.932,
+          14.242
+        ],
+        [
+          "Tree",
+          2.452,
+          8.811
+        ],
+        [
+          "Tree",
+          2.292,
+          12.943
+        ],
+        [
+          "Tree",
+          3.226,
+          11.605
+        ],
+        [
+          "Tree",
+          5.915,
+          11.498
+        ],
+        [
+          "Tree",
+          3.028,
+          10.486
+        ],
+        [
+          "Tree",
+          5.367,
+          11.323
+        ],
+        [
+          "Tree",
+          1.826,
+          5.726
+        ],
+        [
+          "Tree",
+          5.51,
+          11.216
+        ],
+        [
+          "Tree",
+          2.077,
+          6.288
+        ],
+        [
+          "Tree",
+          12.776,
+          11.39
+        ],
+        [
+          "Tree",
+          6.199,
+          16.667
+        ],
+        [
+          "Tree",
+          3.07,
+          3.767
+        ],
+        [
+          "Tree",
+          2.653,
+          4.431
+        ],
+        [
+          "Tree",
+          7.403,
+          2.501
+        ],
+        [
+          "Tree",
+          2.211,
+          6.634
+        ],
+        [
+          "Tree",
+          3.113,
+          10.167
+        ],
+        [
+          "Tree",
+          5.883,
+          9.965
+        ],
+        [
+          "Tree",
+          12.34,
+          12.513
+        ],
+        [
+          "Tree",
+          12.342,
+          12.756
+        ],
+        [
+          "Tree",
+          12.972,
+          12.829
+        ],
+        [
+          "Tree",
+          11.785,
+          10.946
+        ],
+        [
+          "Tree",
+          11.996,
+          12.375
+        ],
+        [
+          "Tree",
+          11.523,
+          8.764
+        ],
+        [
+          "Tree",
+          9.935,
+          8.468
+        ],
+        [
+          "Tree",
+          11.418,
+          13.753
+        ],
+        [
+          "Tree",
+          11.598,
+          9.666
+        ],
+        [
+          "car",
+          1.468,
+          2.581
+        ],
+        [
+          "car",
+          1.602,
+          2.519
+        ],
+        [
+          "Tree",
+          9.298,
+          8.366
+        ],
+        [
+          "Stairs",
+          6.459,
+          6.203
+        ],
+        [
+          "Tree",
+          11.487,
+          7.797
+        ],
+        [
+          "Tree",
+          11.3,
+          7.478
+        ],
+        [
+          "Stairs",
+          5.386,
+          5.449
+        ],
+        [
+          "Tree",
+          3.048,
+          5.541
+        ],
+        [
+          "Stairs",
+          4.837,
+          5.081
+        ],
+        [
+          "Stairs",
+          4.296,
+          4.773
+        ],
+        [
+          "Stairs",
+          3.667,
+          4.324
+        ],
+        [
+          "Stairs",
+          3.121,
+          3.936
+        ],
+        [
+          "Stairs",
+          2.338,
+          3.485
+        ],
+        [
+          "Tree",
+          6.07,
+          6.288
+        ],
+        [
+          "Stairs",
+          1.896,
+          2.954
+        ],
+        [
+          "Stairs",
+          1.422,
+          2.465
+        ],
+        [
+          "Stairs",
+          0.894,
+          2.053
+        ],
+        [
+          "Stairs",
+          0.511,
+          1.649
+        ],
+        [
+          "Stairs",
+          0.09,
+          1.224
+        ],
+        [
+          "Stairs",
+          0.161,
+          1.147
+        ],
+        [
+          "Stairs",
+          0.592,
+          1.064
+        ],
+        [
+          "Stairs",
+          0.948,
+          1.126
+        ],
+        [
+          "Stairs",
+          1.022,
+          1.413
+        ],
+        [
+          "Stairs",
+          9.861,
+          10.151
+        ],
+        [
+          "Tree",
+          11.058,
+          4.474
+        ],
+        [
+          "Tree",
+          11.247,
+          5.281
+        ],
+        [
+          "Tree",
+          5.968,
+          5.994
+        ],
+        [
+          "Tree",
+          3.591,
+          4.594
+        ],
+        [
+          "Tree",
+          14.146,
+          15.14
+        ],
+        [
+          "Tree",
+          14.694,
+          14.016
+        ],
+        [
+          "Tree",
+          14.484,
+          13.661
+        ],
+        [
+          "Tree",
+          14.746,
+          13.157
+        ],
+        [
+          "Tree",
+          12.004,
+          6.88
+        ],
+        [
+          "Tree",
+          13.551,
+          12.313
+        ],
+        [
+          "Tree",
+          11.192,
+          6.846
+        ],
+        [
+          "Tree",
+          12.953,
+          11.924
+        ],
+        [
+          "car",
+          11.878,
+          13.173
+        ],
+        [
+          "Tree",
+          7.135,
+          9.588
+        ],
+        [
+          "Tree",
+          8.887,
+          10.028
+        ],
+        [
+          "Tree",
+          9.417,
+          9.864
+        ],
+        [
+          "Tree",
+          7.675,
+          9.384
+        ],
+        [
+          "Tree",
+          9.868,
+          8.786
+        ],
+        [
+          "Tree",
+          12.014,
+          9.35
+        ],
+        [
+          "Tree",
+          11.219,
+          8.185
+        ],
+        [
+          "Tree",
+          10.119,
+          7.662
+        ],
+        [
+          "Stairs",
+          6.722,
+          6.523
+        ],
+        [
+          "Tree",
+          3.302,
+          2.46
+        ],
+        [
+          "Stairs",
+          3.367,
+          4.178
+        ],
+        [
+          "Tree",
+          12.546,
+          4.759
+        ],
+        [
+          "Stairs",
+          2.842,
+          3.812
+        ],
+        [
+          "Stairs",
+          2.315,
+          3.324
+        ],
+        [
+          "Stairs",
+          1.906,
+          2.956
+        ],
+        [
+          "Stairs",
+          1.566,
+          2.569
+        ],
+        [
+          "Stairs",
+          1.174,
+          2.141
+        ],
+        [
+          "Stairs",
+          0.727,
+          1.722
+        ],
+        [
+          "Stairs",
+          0.063,
+          1.255
+        ],
+        [
+          "Stairs",
+          0.305,
+          1.147
+        ],
+        [
+          "Stairs",
+          0.228,
+          1.244
+        ],
+        [
+          "Stairs",
+          0.489,
+          1.311
+        ],
+        [
+          "Stairs",
+          0.419,
+          1.126
+        ],
+        [
+          "Stairs",
+          0.408,
+          1.138
+        ],
+        [
+          "Tree",
+          2.494,
+          2.427
+        ],
+        [
+          "Tree",
+          2.295,
+          2.295
+        ],
+        [
+          "Tree",
+          2.376,
+          2.459
+        ],
+        [
+          "Tree",
+          6.113,
+          3.746
+        ],
+        [
+          "Tree",
+          9.412,
+          6.649
+        ],
+        [
+          "Tree",
+          13.136,
+          6.952
+        ],
+        [
+          "Tree",
+          8.26,
+          6.983
+        ],
+        [
+          "Tree",
+          8.877,
+          7.94
+        ],
+        [
+          "Stairs",
+          1.554,
+          0.721
+        ],
+        [
+          "Stairs",
+          1.501,
+          0.653
+        ],
+        [
+          "Stairs",
+          1.308,
+          0.725
+        ],
+        [
+          "Stairs",
+          0.875,
+          0.547
+        ],
+        [
+          "Stairs",
+          0.731,
+          0.45
+        ],
+        [
+          "Stairs",
+          0.425,
+          0.331
+        ],
+        [
+          "Tree",
+          13.886,
+          16.392
+        ],
+        [
+          "Tree",
+          12.672,
+          5.759
+        ],
+        [
+          "Tree",
+          13.258,
+          19.556
+        ],
+        [
+          "Tree",
+          9.779,
+          7.881
+        ],
+        [
+          "Tree",
+          13.456,
+          15.826
+        ],
+        [
+          "Tree",
+          13.958,
+          19.557
+        ],
+        [
+          "Tree",
+          10.16,
+          7.968
+        ],
+        [
+          "Tree",
+          12.677,
+          16.249
+        ],
+        [
+          "Tree",
+          14.625,
+          3.524
+        ],
+        [
+          "Tree",
+          13.67,
+          3.336
+        ],
+        [
+          "Tree",
+          11.283,
+          14.9
+        ],
+        [
+          "Tree",
+          12.368,
+          7.563
+        ],
+        [
+          "Tree",
+          11.753,
+          15.037
+        ],
+        [
+          "Tree",
+          13.114,
+          17.755
+        ],
+        [
+          "Tree",
+          12.981,
+          15.64
+        ],
+        [
+          "Tree",
+          13.24,
+          15.312
+        ],
+        [
+          "Tree",
+          14.387,
+          17.643
+        ],
+        [
+          "Tree",
+          13.68,
+          16.278
+        ],
+        [
+          "Tree",
+          13.454,
+          14.811
+        ],
+        [
+          "Tree",
+          12.275,
+          14.604
+        ],
+        [
+          "Tree",
+          12.893,
+          15.086
+        ],
+        [
+          "Tree",
+          13.038,
+          14.563
+        ],
+        [
+          "Tree",
+          11.263,
+          13.221
+        ],
+        [
+          "Tree",
+          13.015,
+          16.098
+        ],
+        [
+          "Tree",
+          10.431,
+          12.824
+        ],
+        [
+          "Tree",
+          10.591,
+          12.451
+        ],
+        [
+          "Tree",
+          12.102,
+          14.852
+        ],
+        [
+          "Tree",
+          9.813,
+          11.55
+        ],
+        [
+          "Tree",
+          9.053,
+          12.185
+        ],
+        [
+          "Tree",
+          10.632,
+          11.836
+        ],
+        [
+          "Tree",
+          7.845,
+          11.751
+        ],
+        [
+          "Tree",
+          3.952,
+          7.535
+        ],
+        [
+          "Tree",
+          12.342,
+          6.515
+        ],
+        [
+          "Tree",
+          4.254,
+          6.342
+        ],
+        [
+          "Tree",
+          13.246,
+          6.22
+        ],
+        [
+          "Tree",
+          13.663,
+          8.22
+        ],
+        [
+          "Tree",
+          13.886,
+          7.469
+        ],
+        [
+          "Tree",
+          14.371,
+          5.706
+        ],
+        [
+          "Tree",
+          12.056,
+          5.499
+        ],
+        [
+          "Tree",
+          13.798,
+          6.907
+        ],
+        [
+          "Tree",
+          8.401,
+          5.132
+        ],
+        [
+          "Stairs",
+          0.502,
+          0.595
+        ],
+        [
+          "Stairs",
+          0.342,
+          0.661
+        ],
+        [
+          "car",
+          2.188,
+          4.538
+        ],
+        [
+          "car",
+          11.07,
+          14.371
+        ],
+        [
+          "Tree",
+          2.098,
+          3.312
+        ],
+        [
+          "Traffic sign",
+          0.41,
+          1.75
+        ],
+        [
+          "Tree",
+          6.843,
+          14.217
+        ],
+        [
+          "Traffic sign",
+          3.014,
+          4.944
+        ],
+        [
+          "Tree",
+          13.227,
+          9.619
+        ],
+        [
+          "Door",
+          10.881,
+          9.462
+        ],
+        [
+          "Tree",
+          4.258,
+          3.851
+        ],
+        [
+          "Tree",
+          3.626,
+          3.473
+        ],
+        [
+          "Door",
+          9.264,
+          8.337
+        ],
+        [
+          "Tree",
+          2.947,
+          3.33
+        ],
+        [
+          "Tree",
+          3.066,
+          5.111
+        ],
+        [
+          "Tree",
+          2.667,
+          4.566
+        ],
+        [
+          "Tree",
+          2.361,
+          5.121
+        ],
+        [
+          "Tree",
+          2.025,
+          5.555
+        ],
+        [
+          "Tree",
+          2.363,
+          5.833
+        ],
+        [
+          "Door",
+          8.809,
+          7.425
+        ],
+        [
+          "Door",
+          6.291,
+          5.442
+        ],
+        [
+          "car",
+          14.204,
+          14.264
+        ],
+        [
+          "Traffic sign",
+          0.684,
+          2.16
+        ],
+        [
+          "Tree",
+          7.277,
+          6.997
+        ],
+        [
+          "Tree",
+          7.808,
+          6.971
+        ],
+        [
+          "Tree",
+          9.242,
+          7.034
+        ],
+        [
+          "Tree",
+          11.46,
+          13.446
+        ],
+        [
+          "Traffic sign",
+          0.841,
+          3.314
+        ],
+        [
+          "Traffic sign",
+          0.767,
+          3.106
+        ],
+        [
+          "Tree",
+          13.205,
+          12.857
+        ],
+        [
+          "Tree",
+          13.201,
+          12.598
+        ],
+        [
+          "Tree",
+          7.628,
+          6.448
+        ],
+        [
+          "Tree",
+          11.947,
+          12.492
+        ],
+        [
+          "Tree",
+          13.228,
+          10.806
+        ],
+        [
+          "Tree",
+          13.09,
+          7.98
+        ],
+        [
+          "Tree",
+          5.025,
+          7.085
+        ],
+        [
+          "Tree",
+          8.52,
+          8.602
+        ],
+        [
+          "Stairs",
+          6.697,
+          6.437
+        ],
+        [
+          "Tree",
+          3.563,
+          6.543
+        ],
+        [
+          "Tree",
+          11.634,
+          8.172
+        ],
+        [
+          "Stairs",
+          6.099,
+          6.054
+        ],
+        [
+          "Stairs",
+          5.264,
+          5.517
+        ],
+        [
+          "Stairs",
+          2.591,
+          3.516
+        ],
+        [
+          "Tree",
+          5.778,
+          5.668
+        ],
+        [
+          "Stairs",
+          2.187,
+          3.165
+        ],
+        [
+          "Stairs",
+          1.618,
+          2.694
+        ],
+        [
+          "Stairs",
+          1.383,
+          2.322
+        ],
+        [
+          "Stairs",
+          0.994,
+          1.935
+        ],
+        [
+          "Stairs",
+          0.64,
+          1.707
+        ],
+        [
+          "Stairs",
+          0.051,
+          1.262
+        ],
+        [
+          "Stairs",
+          0.111,
+          1.087
+        ],
+        [
+          "Stairs",
+          0.136,
+          1.064
+        ],
+        [
+          "Stairs",
+          0.053,
+          0.929
+        ],
+        [
+          "Stairs",
+          0.124,
+          0.949
+        ],
+        [
+          "Stairs",
+          0.431,
+          1.444
+        ],
+        [
+          "car",
+          4.902,
+          8.04
+        ],
+        [
+          "Tree",
+          5.309,
+          6.856
+        ],
+        [
+          "Tree",
+          14.01,
+          5.558
+        ],
+        [
+          "Stairs",
+          0.482,
+          1.205
+        ],
+        [
+          "Stairs",
+          0.54,
+          0.996
+        ],
+        [
+          "car",
+          4.077,
+          7.597
+        ],
+        [
+          "Stairs",
+          0.551,
+          0.935
+        ],
+        [
+          "car",
+          4.159,
+          7.456
+        ],
+        [
+          "Stairs",
+          0.873,
+          0.813
+        ],
+        [
+          "Stairs",
+          0.928,
+          0.595
+        ],
+        [
+          "car",
+          3.91,
+          7.121
+        ],
+        [
+          "Stairs",
+          0.998,
+          0.404
+        ],
+        [
+          "car",
+          2.975,
+          4.252
+        ],
+        [
+          "car",
+          12.14,
+          14.445
+        ],
+        [
+          "car",
+          2.738,
+          5.69
+        ],
+        [
+          "car",
+          11.582,
+          14.331
+        ],
+        [
+          "car",
+          12.033,
+          15.521
+        ],
+        [
+          "car",
+          12.386,
+          14.835
+        ],
+        [
+          "car",
+          2.428,
+          5.715
+        ],
+        [
+          "car",
+          12.918,
+          16.697
+        ],
+        [
+          "car",
+          10.367,
+          3.883
+        ],
+        [
+          "car",
+          9.779,
+          13.341
+        ],
+        [
+          "car",
+          8.494,
+          11.759
+        ],
+        [
+          "car",
+          3.787,
+          4.225
+        ],
+        [
+          "car",
+          13.241,
+          11.311
+        ],
+        [
+          "Tree",
+          10.725,
+          9.227
+        ],
+        [
+          "Tree",
+          10.042,
+          8.612
+        ],
+        [
+          "Tree",
+          13.016,
+          8.894
+        ],
+        [
+          "Tree",
+          8.509,
+          6.779
+        ],
+        [
+          "Tree",
+          2.357,
+          6.848
+        ],
+        [
+          "Door",
+          9.76,
+          7.812
+        ],
+        [
+          "Door",
+          8.841,
+          7.761
+        ],
+        [
+          "Door",
+          8.711,
+          7.417
+        ],
+        [
+          "Door",
+          6.575,
+          6.051
+        ],
+        [
+          "Tree",
+          3.619,
+          4.738
+        ],
+        [
+          "Tree",
+          7.807,
+          6.208
+        ],
+        [
+          "Tree",
+          6.0,
+          6.265
+        ],
+        [
+          "Tree",
+          11.88,
+          12.684
+        ],
+        [
+          "Tree",
+          11.365,
+          12.743
+        ],
+        [
+          "Tree",
+          10.434,
+          9.488
+        ],
+        [
+          "Tree",
+          13.966,
+          10.661
+        ],
+        [
+          "car",
+          3.991,
+          4.299
+        ],
+        [
+          "car",
+          3.627,
+          4.05
+        ],
+        [
+          "car",
+          1.45,
+          2.767
+        ],
+        [
+          "Tree",
+          6.833,
+          6.788
+        ],
+        [
+          "car",
+          1.123,
+          1.715
+        ],
+        [
+          "Stairs",
+          6.657,
+          6.392
+        ],
+        [
+          "Stairs",
+          5.882,
+          5.923
+        ],
+        [
+          "Stairs",
+          5.24,
+          5.506
+        ],
+        [
+          "Tree",
+          7.85,
+          7.578
+        ],
+        [
+          "Tree",
+          8.605,
+          7.286
+        ],
+        [
+          "Stairs",
+          4.702,
+          5.067
+        ],
+        [
+          "Tree",
+          9.091,
+          6.997
+        ],
+        [
+          "Stairs",
+          3.409,
+          4.238
+        ],
+        [
+          "Tree",
+          8.315,
+          6.661
+        ],
+        [
+          "Stairs",
+          2.869,
+          3.771
+        ],
+        [
+          "Tree",
+          7.933,
+          6.312
+        ],
+        [
+          "Tree",
+          7.006,
+          6.029
+        ],
+        [
+          "Stairs",
+          2.534,
+          3.32
+        ],
+        [
+          "Stairs",
+          1.922,
+          2.856
+        ],
+        [
+          "Stairs",
+          1.213,
+          2.245
+        ],
+        [
+          "Stairs",
+          0.82,
+          1.793
+        ],
+        [
+          "Stairs",
+          0.247,
+          1.312
+        ],
+        [
+          "Stairs",
+          0.038,
+          1.099
+        ],
+        [
+          "Stairs",
+          0.21,
+          1.046
+        ],
+        [
+          "Stairs",
+          0.191,
+          0.832
+        ],
+        [
+          "Stairs",
+          0.048,
+          1.125
+        ],
+        [
+          "Stairs",
+          0.367,
+          1.077
+        ],
+        [
+          "Tree",
+          12.99,
+          4.209
+        ],
+        [
+          "Tree",
+          7.525,
+          2.381
+        ],
+        [
+          "Tree",
+          12.121,
+          6.329
+        ],
+        [
+          "Tree",
+          14.874,
+          7.571
+        ],
+        [
+          "Tree",
+          3.207,
+          5.637
+        ],
+        [
+          "Stairs",
+          1.32,
+          2.044
+        ],
+        [
+          "Tree",
+          14.93,
+          5.135
+        ],
+        [
+          "Stairs",
+          0.58,
+          0.988
+        ],
+        [
+          "Stairs",
+          0.998,
+          0.789
+        ],
+        [
+          "car",
+          3.79,
+          7.063
+        ],
+        [
+          "Stairs",
+          0.879,
+          0.521
+        ],
+        [
+          "car",
+          2.439,
+          4.914
+        ],
+        [
+          "Tree",
+          2.28,
+          3.229
+        ],
+        [
+          "Tree",
+          12.209,
+          12.774
+        ],
+        [
+          "Tree",
+          13.181,
+          9.439
+        ],
+        [
+          "Door",
+          10.727,
+          9.56
+        ],
+        [
+          "Tree",
+          4.105,
+          3.863
+        ],
+        [
+          "Door",
+          10.004,
+          9.021
+        ],
+        [
+          "Tree",
+          3.746,
+          5.552
+        ],
+        [
+          "Tree",
+          3.343,
+          3.471
+        ],
+        [
+          "Door",
+          9.893,
+          8.634
+        ],
+        [
+          "Tree",
+          2.743,
+          3.386
+        ],
+        [
+          "Tree",
+          2.661,
+          5.026
+        ],
+        [
+          "Door",
+          9.441,
+          7.269
+        ],
+        [
+          "Door",
+          8.751,
+          8.046
+        ],
+        [
+          "Door",
+          8.412,
+          7.761
+        ],
+        [
+          "Door",
+          9.783,
+          6.626
+        ],
+        [
+          "Door",
+          8.497,
+          7.442
+        ],
+        [
+          "Door",
+          8.311,
+          7.023
+        ],
+        [
+          "Door",
+          6.76,
+          5.542
+        ],
+        [
+          "Traffic sign",
+          0.251,
+          1.535
+        ],
+        [
+          "Traffic sign",
+          0.293,
+          2.314
+        ],
+        [
+          "Tree",
+          7.551,
+          7.244
+        ],
+        [
+          "Tree",
+          7.619,
+          6.815
+        ],
+        [
+          "Tree",
+          7.417,
+          6.618
+        ],
+        [
+          "Tree",
+          8.086,
+          10.596
+        ],
+        [
+          "Tree",
+          5.881,
+          6.347
+        ],
+        [
+          "Tree",
+          12.853,
+          13.369
+        ],
+        [
+          "Traffic sign",
+          0.877,
+          3.151
+        ],
+        [
+          "Traffic sign",
+          0.992,
+          2.711
+        ],
+        [
+          "Tree",
+          14.09,
+          12.795
+        ],
+        [
+          "Tree",
+          14.84,
+          12.388
+        ],
+        [
+          "Tree",
+          9.776,
+          10.993
+        ],
+        [
+          "Tree",
+          7.608,
+          9.606
+        ],
+        [
+          "Tree",
+          10.251,
+          7.316
+        ],
+        [
+          "Tree",
+          2.554,
+          9.844
+        ],
+        [
+          "Tree",
+          9.772,
+          8.49
+        ],
+        [
+          "Stairs",
+          6.047,
+          6.236
+        ],
+        [
+          "car",
+          14.92,
+          18.665
+        ],
+        [
+          "car",
+          4.082,
+          6.315
+        ],
+        [
+          "Stairs",
+          1.357,
+          2.436
+        ],
+        [
+          "Stairs",
+          0.863,
+          1.942
+        ],
+        [
+          "Stairs",
+          0.506,
+          1.467
+        ],
+        [
+          "Stairs",
+          0.164,
+          1.231
+        ],
+        [
+          "Stairs",
+          0.6,
+          1.172
+        ],
+        [
+          "Stairs",
+          0.711,
+          1.325
+        ],
+        [
+          "Stairs",
+          0.837,
+          1.46
+        ],
+        [
+          "Tree",
+          7.403,
+          4.6
+        ],
+        [
+          "Stairs",
+          6.985,
+          7.829
+        ],
+        [
+          "Tree",
+          14.731,
+          16.227
+        ],
+        [
+          "Tree",
+          4.434,
+          16.31
+        ],
+        [
+          "Tree",
+          14.67,
+          7.478
+        ],
+        [
+          "Tree",
+          4.112,
+          9.206
+        ],
+        [
+          "Tree",
+          14.559,
+          5.785
+        ],
+        [
+          "Stairs",
+          0.397,
+          1.043
+        ],
+        [
+          "Stairs",
+          0.8,
+          0.921
+        ],
+        [
+          "Stairs",
+          0.813,
+          0.834
+        ],
+        [
+          "Stairs",
+          0.729,
+          0.639
+        ],
+        [
+          "Stairs",
+          0.664,
+          0.393
+        ],
+        [
+          "Tree",
+          2.035,
+          3.952
+        ]
+      ]
+    }
+  },
+  "results": [
+    {
+      "variant": "ttc_fix",
+      "alerts": 58,
+      "justified_alerts": 7,
+      "alert_precision": 0.121,
+      "episodes": 43,
+      "warned_episodes": 3,
+      "episode_recall": 0.07,
+      "lead_time_s": {
+        "median": 0.58,
+        "p10": 0.37
+      },
+      "unjustified_alerts_per_min": 8.43,
+      "by_level": {
+        "ATTENTION": {
+          "alerts": 48,
+          "justified": 6,
+          "precision": 0.125,
+          "first_alert_of_warned_episodes": 2
+        },
+        "WARNING": {
+          "alerts": 7,
+          "justified": 0,
+          "precision": 0.0,
+          "first_alert_of_warned_episodes": 0
+        },
+        "DANGER": {
+          "alerts": 3,
+          "justified": 1,
+          "precision": 0.333,
+          "first_alert_of_warned_episodes": 1
+        }
+      },
+      "alert_benchmark": {
+        "video_path": "",
+        "total_frames": 10893,
+        "total_seconds": 363.1,
+        "fps": 30.0,
+        "total_alerts": 58,
+        "danger_count": 3,
+        "warning_count": 7,
+        "attention_count": 48,
+        "channel_b_count": 0,
+        "alerts_per_min": 9.6,
+        "silent_ratio": 0.84,
+        "min_gap_s": 2.03,
+        "max_gap_s": 15.59,
+        "max_concurrent": 1,
+        "pass_silent_ratio": true,
+        "pass_alerts_per_min": true,
+        "pass_min_gap": true,
+        "pass_max_concurrent": true
+      }
+    },
+    {
+      "variant": "metric_inpath",
+      "alerts": 55,
+      "justified_alerts": 14,
+      "alert_precision": 0.255,
+      "episodes": 42,
+      "warned_episodes": 13,
+      "episode_recall": 0.31,
+      "lead_time_s": {
+        "median": 0.71,
+        "p10": 0.18
+      },
+      "unjustified_alerts_per_min": 6.77,
+      "by_level": {
+        "ATTENTION": {
+          "alerts": 15,
+          "justified": 2,
+          "precision": 0.133,
+          "first_alert_of_warned_episodes": 2
+        },
+        "WARNING": {
+          "alerts": 3,
+          "justified": 0,
+          "precision": 0.0,
+          "first_alert_of_warned_episodes": 0
+        },
+        "DANGER": {
+          "alerts": 37,
+          "justified": 12,
+          "precision": 0.324,
+          "first_alert_of_warned_episodes": 11
+        }
+      },
+      "alert_benchmark": {
+        "video_path": "",
+        "total_frames": 10893,
+        "total_seconds": 363.1,
+        "fps": 30.0,
+        "total_alerts": 55,
+        "danger_count": 37,
+        "warning_count": 3,
+        "attention_count": 15,
+        "channel_b_count": 0,
+        "alerts_per_min": 9.1,
+        "silent_ratio": 0.848,
+        "min_gap_s": 2.03,
+        "max_gap_s": 17.09,
+        "max_concurrent": 1,
+        "pass_silent_ratio": true,
+        "pass_alerts_per_min": true,
+        "pass_min_gap": true,
+        "pass_max_concurrent": true
+      }
+    },
+    {
+      "variant": "metric_inpath_selfbody",
+      "alerts": 48,
+      "justified_alerts": 14,
+      "alert_precision": 0.292,
+      "episodes": 42,
+      "warned_episodes": 13,
+      "episode_recall": 0.31,
+      "lead_time_s": {
+        "median": 0.71,
+        "p10": 0.18
+      },
+      "unjustified_alerts_per_min": 5.62,
+      "by_level": {
+        "ATTENTION": {
+          "alerts": 15,
+          "justified": 2,
+          "precision": 0.133,
+          "first_alert_of_warned_episodes": 2
+        },
+        "WARNING": {
+          "alerts": 3,
+          "justified": 0,
+          "precision": 0.0,
+          "first_alert_of_warned_episodes": 0
+        },
+        "DANGER": {
+          "alerts": 30,
+          "justified": 12,
+          "precision": 0.4,
+          "first_alert_of_warned_episodes": 11
+        }
+      },
+      "alert_benchmark": {
+        "video_path": "",
+        "total_frames": 10893,
+        "total_seconds": 363.1,
+        "fps": 30.0,
+        "total_alerts": 48,
+        "danger_count": 30,
+        "warning_count": 3,
+        "attention_count": 15,
+        "channel_b_count": 0,
+        "alerts_per_min": 7.9,
+        "silent_ratio": 0.868,
+        "min_gap_s": 2.03,
+        "max_gap_s": 42.67,
+        "max_concurrent": 1,
+        "pass_silent_ratio": true,
+        "pass_alerts_per_min": true,
+        "pass_min_gap": true,
+        "pass_max_concurrent": true
+      }
+    }
+  ],
+  "live_vs_reference_distance": {
+    "n": 3048,
+    "median_abs_diff_m": 1.797,
+    "median_signed_diff_m": -1.539,
+    "share_within_25pct": 0.299,
+    "live_only": 2165,
+    "reference_only": 743
+  },
+  "wearer_filter_vs_hand_tracking": {
+    "reference_wearer_detections": 578,
+    "15deg": {
+      "flagged": 302,
+      "share_of_reference_removed": 0.505,
+      "flagged_not_in_reference": 10
+    },
+    "10deg": {
+      "flagged": 399,
+      "share_of_reference_removed": 0.673,
+      "flagged_not_in_reference": 10
+    },
+    "20deg": {
+      "flagged": 125,
+      "share_of_reference_removed": 0.201,
+      "flagged_not_in_reference": 9
+    }
+  }
+}
