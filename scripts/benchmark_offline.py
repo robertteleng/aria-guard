@@ -166,12 +166,15 @@ def process_video(video_path: str, mode: str = "all", skip_frames: int = 1) -> L
 
 def run_benchmark(frame_results: List[FrameResult], video_fps: float = 30.0,
                   frame_width: int = 1920, fov_h: float = 1.15,
-                  step_ms: Optional[List[float]] = None) -> BenchmarkMetrics:
+                  step_ms: Optional[List[float]] = None,
+                  frame_log: Optional[List[dict]] = None) -> BenchmarkMetrics:
     """Run tracker + arbiter on frame results and compute metrics.
 
     frame_width and fov_h must match the source (Aria RGB: 1408 px, 1.919 rad):
     the tracker turns pixel positions into bearings with them. If step_ms is
-    given, the tracker + arbiter time of each frame is appended to it.
+    given, the tracker + arbiter time of each frame is appended to it. If
+    frame_log is given, one entry per frame records the visible tracks and the
+    alerts with the object they are about (used by scripts/evaluate_alerts.py).
     """
     tracker = SimpleTracker()
     arbiter = AlertArbiter()
@@ -218,6 +221,22 @@ def run_benchmark(frame_results: List[FrameResult], video_fps: float = 30.0,
             concurrent += 1
 
         concurrent_counts.append(concurrent)
+
+        if frame_log is not None:
+            alerts = []
+            for channel, decision in (("A", channel_a), ("B", channel_b)):
+                if decision and decision.should_alert:
+                    obj = decision.object
+                    alerts.append({"channel": channel, "level": decision.threat_level,
+                                   "track_id": obj.id if obj else None,
+                                   "name": obj.name if obj else None,
+                                   "bbox": list(obj.bbox) if obj else None})
+            frame_log.append({
+                "frame_idx": fr.frame_idx, "timestamp": fr.timestamp,
+                "tracks": [{"id": t.id, "name": t.name, "bbox": list(t.bbox), "threat": t.threat_level}
+                           for t in tracked if t.frames_missing == 0],
+                "alerts": alerts,
+            })
 
     # Compute metrics
     total_alerts = len(alert_timestamps)

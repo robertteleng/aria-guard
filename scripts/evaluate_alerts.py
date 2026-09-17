@@ -1,0 +1,323 @@
+#!/usr/bin/env python3
+"""
+Evaluate aria-guard alerts against the wearer's real path (docs/ALERT_EVALUATION.md).
+
+Inputs per recording: the replay detections (scripts/replay_vrs.py
+--save-detections), the VRS (timestamps and RGB calibration) and Meta's MPS
+output (trajectory and semidense points). No manual labels.
+
+Usage:
+    python scripts/evaluate_alerts.py \\
+        --detections benchmarks/replay/detections/<run>.json \\
+        --recording ~/Datasets/aria/ritw/recording_XXXX --out benchmarks/alerts/<run>.json
+"""
+import argparse
+import json
+import sys
+from collections import Counter, defaultdict
+from contextlib import contextmanager
+from dataclasses import asdict
+from pathlib import Path
+from typing import Dict, List
+
+import numpy as np
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.benchmark_offline import FrameResult, run_benchmark  # noqa: E402
+from src.evaluation.geometry import (bearing_deg, merge_episodes, point_to_polyline_2d,  # noqa: E402
+                                     quat_to_matrix, ray_ground_intersection, upright_to_raw_pixel)
+
+# --- pre-registered parameters (docs/ALERT_EVALUATION.md) -------------------------
+HORIZON_S = 3.0
+CORRIDOR_M = 0.75
+NEAR_M = 1.0
+NEAR_BEARING_DEG = 30.0
+EPISODE_GAP_S = 0.5
+GROUND_RADIUS_M = 5.0
+GROUND_PERCENTILE = 5
+GROUND_MIN_POINTS = 200
+MAX_GROUND_RANGE_M = 15.0
+POINT_STD_MAX_M = 0.2
+CROSSCHECK_EVERY = 10
+PATH_STEP_S = 0.1
+STATIC_CLASSES = {"car", "truck", "bus", "bench", "fire hydrant", "stop sign", "traffic light",
+                  "potted plant", "Door", "Stairs", "Street light", "Traffic sign", "Tree"}
+RGB_SIZE = 1408
+FOV_H = 1.919
+
+
+# --- MPS / VRS loading --------------------------------------------------------------
+
+class Trajectory:
+    def __init__(self, csv_path: Path):
+        import pandas as pd
+        cols = ["tracking_timestamp_us", "tx_world_device", "ty_world_device", "tz_world_device",
+                "qx_world_device", "qy_world_device", "qz_world_device", "qw_world_device"]
+        df = pd.read_csv(csv_path, usecols=cols)
+        self.t_ns = df["tracking_timestamp_us"].to_numpy(np.int64) * 1000
+        self.pos = df[cols[1:4]].to_numpy(np.float64)
+        self.quat = df[cols[4:8]].to_numpy(np.float64)
+
+    def index(self, t_ns: int) -> int:
+        i = int(np.searchsorted(self.t_ns, t_ns))
+        if i >= len(self.t_ns):
+            return len(self.t_ns) - 1
+        if i > 0 and abs(self.t_ns[i - 1] - t_ns) < abs(self.t_ns[i] - t_ns):
+            return i - 1
+        return i
+
+    def covers(self, t_ns: int) -> bool:
+        return self.t_ns[0] <= t_ns <= self.t_ns[-1]
+
+    def pose(self, t_ns: int):
+        i = self.index(t_ns)
+        return quat_to_matrix(*self.quat[i]), self.pos[i]
+
+    def position(self, t_ns: int) -> np.ndarray:
+        return self.pos[self.index(t_ns)]
+
+
+class Points:
+    def __init__(self, csv_gz: Path):
+        import pandas as pd
+        from scipy.spatial import cKDTree
+        df = pd.read_csv(csv_gz, usecols=["px_world", "py_world", "pz_world", "dist_std"])
+        df = df[df["dist_std"] <= POINT_STD_MAX_M]
+        self.xyz = df[["px_world", "py_world", "pz_world"]].to_numpy(np.float64)
+        self.tree = cKDTree(self.xyz[:, :2])
+
+    def ground_z(self, xy: np.ndarray):
+        idx = self.tree.query_ball_point(xy[:2], GROUND_RADIUS_M)
+        if len(idx) < GROUND_MIN_POINTS:
+            return None
+        return float(np.percentile(self.xyz[idx, 2], GROUND_PERCENTILE))
+
+    def near(self, xy: np.ndarray, radius: float) -> np.ndarray:
+        return self.xyz[self.tree.query_ball_point(xy[:2], radius)]
+
+
+class RgbCamera:
+    def __init__(self, vrs_path: Path):
+        from projectaria_tools.core import data_provider
+        from projectaria_tools.core.sensor_data import TimeDomain
+        from projectaria_tools.core.stream_id import StreamId
+        provider = data_provider.create_vrs_data_provider(str(vrs_path))
+        stream = StreamId("214-1")
+        self.rgb_ts = np.asarray(provider.get_timestamps_ns(stream, TimeDomain.DEVICE_TIME), dtype=np.int64)
+        self.calib = provider.get_device_calibration().get_camera_calib("camera-rgb")
+        T = self.calib.get_transform_device_camera().to_matrix()
+        self.R_dc, self.t_dc = T[:3, :3], T[:3, 3]
+
+    def ray_upright(self, x: float, y: float) -> np.ndarray:
+        """Unit ray in the camera frame for an upright-frame pixel."""
+        rx, ry = upright_to_raw_pixel(x, y, RGB_SIZE)
+        v = np.asarray(self.calib.unproject_no_checks(np.array([rx, ry], dtype=np.float64)), dtype=np.float64)
+        return v / np.linalg.norm(v)
+
+
+# --- reference geometry per detection --------------------------------------------------
+
+def reference_geometry(frames: List[dict], cam: RgbCamera, traj: Trajectory, pts: Points) -> Dict:
+    """World ground position of every detection bottom-centre, plus the static cross-check."""
+    geo = {}  # (frame_idx, det_index) -> dict
+    stats = Counter()
+    crosscheck = []
+    static_frames_seen = 0
+    for fr in frames:
+        fi = fr["frame_idx"]
+        t_ns = int(cam.rgb_ts[fi])
+        if not traj.covers(t_ns):
+            stats["frames_outside_trajectory"] += 1
+            continue
+        R_wd, t_wd = traj.pose(t_ns)
+        cam_center = R_wd @ cam.t_dc + t_wd
+        R_wc = R_wd @ cam.R_dc
+        ground = pts.ground_z(cam_center)
+        if ground is None:
+            stats["frames_without_ground"] += 1
+            continue
+        do_cross = False
+        if any(d["name"] in STATIC_CLASSES for d in fr["detections"]):
+            do_cross = static_frames_seen % CROSSCHECK_EVERY == 0
+            static_frames_seen += 1
+        near_pts = pts.near(cam_center, 20.0) if do_cross else None
+        for k, d in enumerate(fr["detections"]):
+            x, y, w, h = d["bbox"]
+            ray_w = R_wc @ cam.ray_upright(x + w / 2, y + h)
+            hit = ray_ground_intersection(cam_center, ray_w, ground, MAX_GROUND_RANGE_M)
+            stats["detections"] += 1
+            if hit is None:
+                stats["no_ground_contact"] += 1
+                continue
+            geo[(fi, k)] = {"ground_xy": hit[:2], "distance": float(np.hypot(*(hit[:2] - cam_center[:2])))}
+            if do_cross and d["name"] in STATIC_CLASSES and len(near_pts):
+                sd = semidense_distance(near_pts, cam_center, R_wc, cam, d["bbox"])
+                if sd is not None:
+                    crosscheck.append((d["name"], geo[(fi, k)]["distance"], sd))
+    return {"geo": geo, "stats": stats, "crosscheck": crosscheck}
+
+
+def semidense_distance(points_w, cam_center, R_wc, cam, bbox):
+    """Median horizontal distance of converged points inside the central half of the bbox."""
+    x, y, w, h = bbox
+    corners = [(x + w / 4, y + h / 4), (x + 3 * w / 4, y + h / 4), (x + w / 4, y + 3 * h / 4), (x + 3 * w / 4, y + 3 * h / 4)]
+    rays = np.array([cam.ray_upright(cx, cy) for cx, cy in corners])
+    if (rays[:, 2] <= 0.05).any():
+        return None
+    nx, ny = rays[:, 0] / rays[:, 2], rays[:, 1] / rays[:, 2]
+    p_cam = (points_w - cam_center) @ R_wc  # rows: R_wc^T (p - c)
+    front = p_cam[:, 2] > 0.3
+    if not front.any():
+        return None
+    p_cam, p_w = p_cam[front], points_w[front]
+    px, py = p_cam[:, 0] / p_cam[:, 2], p_cam[:, 1] / p_cam[:, 2]
+    inside = (px >= nx.min()) & (px <= nx.max()) & (py >= ny.min()) & (py <= ny.max())
+    if inside.sum() < 5:
+        return None
+    return float(np.median(np.hypot(*(p_w[inside, :2] - cam_center[:2]).T)))
+
+
+# --- tracker variants -----------------------------------------------------------------
+
+@contextmanager
+def tracker_variant(name: str):
+    """'ttc_fix' = current code; 'pre_ttc' = proximity used as distance (before 3c56e50)."""
+    import src.domain.tracker as tracker_mod
+    original = tracker_mod.remaining_gap
+    if name == "pre_ttc":
+        tracker_mod.remaining_gap = lambda proximity: proximity
+    elif name != "ttc_fix":
+        raise ValueError(name)
+    try:
+        yield
+    finally:
+        tracker_mod.remaining_gap = original
+
+
+# --- evaluation ------------------------------------------------------------------------
+
+def evaluate(frames: List[dict], geo: Dict, cam: RgbCamera, traj: Trajectory, variant: str) -> dict:
+    frame_results = [FrameResult(**{k: f[k] for k in ("frame_idx", "timestamp", "detections", "motion_state")})
+                     for f in frames]
+    log: List[dict] = []
+    with tracker_variant(variant):
+        metrics = run_benchmark(frame_results, video_fps=30.0, frame_width=RGB_SIZE, fov_h=FOV_H, frame_log=log)
+
+    t0_ns = int(cam.rgb_ts[frames[0]["frame_idx"]])
+    samples = []                               # (track_id, t, in_path, dist, t_closest)
+    in_path_times = defaultdict(list)          # track_id -> [t]
+    by_frame_dets = {f["frame_idx"]: f["detections"] for f in frames}
+    for entry in log:
+        fi = entry["frame_idx"]
+        t_ns = int(cam.rgb_ts[fi])
+        if not traj.covers(t_ns + int(HORIZON_S * 1e9)):
+            continue
+        t = (t_ns - t0_ns) / 1e9
+        steps = np.arange(0.0, HORIZON_S + 1e-9, PATH_STEP_S)
+        path = np.array([traj.position(t_ns + int(s * 1e9))[:2] for s in steps])
+        here = path[0]
+        heading = traj.position(t_ns + int(0.5e9))[:2] - here
+        dets = by_frame_dets[fi]
+        for tr in entry["tracks"]:
+            k = next((i for i, d in enumerate(dets) if d["bbox"] == tr["bbox"] and d["name"] == tr["name"]), None)
+            g = geo.get((fi, k)) if k is not None else None
+            if g is None:
+                continue
+            dist, seg, frac = point_to_polyline_2d(g["ground_xy"], path)
+            t_closest = t + (seg + frac) * PATH_STEP_S
+            near = (np.linalg.norm(g["ground_xy"] - here) <= NEAR_M
+                    and bearing_deg(here, heading, g["ground_xy"]) <= NEAR_BEARING_DEG)
+            in_path = dist <= CORRIDOR_M or near
+            samples.append((tr["id"], t, in_path, dist, t_closest))
+            if in_path:
+                in_path_times[tr["id"]].append(t)
+
+    episodes = merge_episodes(samples, EPISODE_GAP_S)
+    alerts = [(((int(cam.rgb_ts[e["frame_idx"]]) - t0_ns) / 1e9), a) for e in log for a in e["alerts"]
+              if a["channel"] == "A"]
+
+    def justified(t, a):
+        ts = in_path_times.get(a["track_id"], [])
+        return any(t <= s <= t + HORIZON_S for s in ts)
+
+    level_total, level_just = Counter(), Counter()
+    for t, a in alerts:
+        level_total[a["level"]] += 1
+        level_just[a["level"]] += justified(t, a)
+
+    warned, leads, ep_level = 0, [], Counter()
+    for ep in episodes:
+        first = [(t, a) for t, a in alerts
+                 if a["track_id"] == ep.track_id and ep.start - HORIZON_S <= t <= ep.closest_time]
+        if first:
+            warned += 1
+            leads.append(ep.closest_time - first[0][0])
+            ep_level[first[0][1]["level"]] += 1
+
+    minutes = metrics.total_seconds / 60 if metrics.total_seconds else 0
+    n_alerts = len(alerts)
+    n_just = sum(level_just.values())
+    return {
+        "variant": variant,
+        "alerts": n_alerts,
+        "justified_alerts": n_just,
+        "alert_precision": round(n_just / n_alerts, 3) if n_alerts else None,
+        "episodes": len(episodes),
+        "warned_episodes": warned,
+        "episode_recall": round(warned / len(episodes), 3) if episodes else None,
+        "lead_time_s": {"median": round(float(np.median(leads)), 2) if leads else None,
+                        "p10": round(float(np.percentile(leads, 10)), 2) if leads else None},
+        "unjustified_alerts_per_min": round((n_alerts - n_just) / minutes, 2) if minutes else None,
+        "by_level": {lvl: {"alerts": level_total[lvl], "justified": level_just[lvl],
+                           "precision": round(level_just[lvl] / level_total[lvl], 3) if level_total[lvl] else None,
+                           "first_alert_of_warned_episodes": ep_level[lvl]}
+                     for lvl in ("ATTENTION", "WARNING", "DANGER")},
+        "alert_benchmark": asdict(metrics),
+    }
+
+
+def summarize_crosscheck(rows) -> dict:
+    if not rows:
+        return {"n": 0}
+    g = np.array([r[1] for r in rows]); s = np.array([r[2] for r in rows])
+    rel = np.abs(g - s) / np.maximum(s, 1e-6)
+    return {"n": len(rows),
+            "median_abs_diff_m": round(float(np.median(np.abs(g - s))), 3),
+            "share_within_25pct": round(float((rel <= 0.25).mean()), 3),
+            "by_class": dict(Counter(r[0] for r in rows).most_common())}
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Evaluate alerts against the wearer's real path (MPS)")
+    ap.add_argument("--detections", required=True, type=Path)
+    ap.add_argument("--recording", required=True, type=Path, help="folder with recording.vrs and mps/")
+    ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--variants", nargs="+", default=["pre_ttc", "ttc_fix"])
+    args = ap.parse_args()
+
+    frames = json.loads(args.detections.read_text())["frames"]
+    cam = RgbCamera(args.recording / "recording.vrs")
+    traj = Trajectory(args.recording / "mps" / "slam" / "closed_loop_trajectory.csv")
+    pts = Points(args.recording / "mps" / "slam" / "semidense_points.csv.gz")
+    ref = reference_geometry(frames, cam, traj, pts)
+    record = {
+        "schema": "aria-guard/alert-eval/1",
+        "recording": args.recording.name,
+        "detections": args.detections.name,
+        "parameters": {k: v for k, v in globals().items() if k.isupper() and not k.startswith("_")
+                       and isinstance(v, (int, float))},
+        "reference": {**dict(ref["stats"]), "crosscheck": summarize_crosscheck(ref["crosscheck"])},
+        "results": [evaluate(frames, ref["geo"], cam, traj, v) for v in args.variants],
+    }
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(record, indent=2))
+    print(json.dumps({"reference": record["reference"],
+                      "results": [{k: r[k] for k in ("variant", "alerts", "alert_precision", "episodes",
+                                                     "episode_recall", "lead_time_s", "unjustified_alerts_per_min")}
+                                  for r in record["results"]]}, indent=1))
+
+
+if __name__ == "__main__":
+    main()
