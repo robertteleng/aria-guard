@@ -100,3 +100,12 @@ def test_variants_are_restored():
     with pytest.raises(ValueError):
         with ev.tracker_variant("nope"):
             pass
+
+
+def test_crosscheck_summary_excludes_tree_from_headline_but_reports_it():
+    rows = [("car", 5.0, 5.2), ("car", 8.0, 8.4), ("Tree", 4.0, 7.5), ("Tree", 6.0, 9.0)]
+    s = ev.summarize_crosscheck(rows)
+    assert s["headline"]["n"] == 2 and s["headline"]["share_within_25pct"] == 1.0
+    assert s["by_class"]["Tree"]["median_signed_diff_m"] == pytest.approx(-3.25)
+    assert len(s["rows"]) == 4 and s["headline_excludes"] == ["Tree"]
+    assert ev.summarize_crosscheck([]) == {"n": 0}

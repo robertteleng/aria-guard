@@ -298,15 +298,31 @@ def evaluate(frames: List[dict], geo: Dict, cam: RgbCamera, traj: Trajectory, va
     }
 
 
+CROSSCHECK_EXCLUDED_FROM_HEADLINE = {"Tree"}  # bbox centre is canopy/background (amendment)
+
+
+def _agreement(g: np.ndarray, s: np.ndarray) -> dict:
+    rel = np.abs(g - s) / np.maximum(s, 1e-6)
+    return {"n": int(len(g)),
+            "median_abs_diff_m": round(float(np.median(np.abs(g - s))), 3),
+            "median_signed_diff_m": round(float(np.median(g - s)), 3),
+            "share_within_25pct": round(float((rel <= 0.25).mean()), 3)}
+
+
 def summarize_crosscheck(rows) -> dict:
+    """Ground-contact vs semidense distance: headline without excluded classes, plus per class."""
     if not rows:
         return {"n": 0}
-    g = np.array([r[1] for r in rows]); s = np.array([r[2] for r in rows])
-    rel = np.abs(g - s) / np.maximum(s, 1e-6)
-    return {"n": len(rows),
-            "median_abs_diff_m": round(float(np.median(np.abs(g - s))), 3),
-            "share_within_25pct": round(float((rel <= 0.25).mean()), 3),
-            "by_class": dict(Counter(r[0] for r in rows).most_common())}
+    names = np.array([r[0] for r in rows])
+    g = np.array([r[1] for r in rows], dtype=np.float64)
+    s = np.array([r[2] for r in rows], dtype=np.float64)
+    keep = ~np.isin(names, list(CROSSCHECK_EXCLUDED_FROM_HEADLINE))
+    return {
+        "headline": _agreement(g[keep], s[keep]) if keep.any() else {"n": 0},
+        "headline_excludes": sorted(CROSSCHECK_EXCLUDED_FROM_HEADLINE),
+        "by_class": {c: _agreement(g[names == c], s[names == c]) for c in sorted(set(names))},
+        "rows": [[str(n), round(float(a), 3), round(float(b), 3)] for n, a, b in rows],
+    }
 
 
 def main():

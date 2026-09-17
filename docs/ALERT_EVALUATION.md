@@ -113,3 +113,22 @@ Found while reading the MPS files, not from results:
    for regions this small.
 3. **Timestamps.** Detection frames map to the VRS RGB capture time (device
    clock); MPS `tracking_timestamp_us` uses the same clock.
+
+## Amendment 2026-09-17, after inspecting the cross-check (alert metrics unchanged)
+
+The cross-check disagreed strongly on some recordings (median absolute
+difference up to 4.5 m). Inspection before any decision on alert logic: in
+those recordings the static detections sampled were almost all **Tree**, and
+the semidense points inside the central half of a tree bbox are canopy and
+background behind it, so the cross-check distance was about 3 m **longer**
+than the ground contact at the trunk base (ground − semidense median −3.1 m).
+Eye height above the estimated ground stayed plausible (median 1.48 m and
+1.80 m on the two recordings checked), so the ground plane was not the cause.
+
+Therefore:
+1. The cross-check is reported **per class**, and its rows are stored in the
+   record so it can be re-summarized without recomputation.
+2. The headline agreement **excludes Tree**, whose bbox centre is canopy or
+   background by construction. Tree agreement is still reported.
+3. This changes only how the reference's error is reported. Hazard episodes,
+   alert matching and every alert metric are computed exactly as registered.
