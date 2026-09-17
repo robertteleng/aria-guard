@@ -132,3 +132,45 @@ Therefore:
    background by construction. Tree agreement is still reported.
 3. This changes only how the reference's error is reported. Hazard episodes,
    alert matching and every alert metric are computed exactly as registered.
+
+## Candidate change 1: metric in-path threat (pre-registered 2026-09-17)
+
+Registered after the baseline results above and **before writing its code**.
+Parameters are fixed here and are not tuned on the evaluation recordings.
+
+**Motivation from the baseline.** Pooled alert precision was 13–15 % and
+episode recall 15–16 %; with a 5 m corridor (sensitivity) precision was still
+~35 %. aria-guard decides "in the path" from image thirds (left / centre /
+right) and a relative depth renormalized every frame, so it cannot tell a car
+parked 4 m to the side from one ahead.
+
+**Change.** Each detection gets a metric position computed only from data
+available live on the glasses:
+- the ray through the bottom-centre of the bbox (RGB calibration);
+- the gravity direction from the accelerometer, averaged over the last 1.0 s;
+- a fixed eye height of **1.6 m** above flat ground;
+- forward = the camera's optical axis projected on the horizontal plane.
+
+This gives forward distance *F* and lateral offset *L* in metres. Channel-A
+threat becomes:
+
+| Level | Rule |
+|---|---|
+| DANGER | \|L\| ≤ 0.75 m and 0 < F ≤ 1.5 m |
+| WARNING | \|L\| ≤ 0.75 m and 1.5 < F ≤ 3.0 m |
+| ATTENTION | \|L\| ≤ 0.75 m and 3.0 < F ≤ 5.0 m |
+| NONE | otherwise, or no ground contact |
+
+Tracking, the arbiter (cooldowns, rate limit) and channel B are unchanged.
+
+**Evaluation.** Same six recordings, same detections, same reference and
+metrics, compared with `ttc_fix`. The reference uses the SLAM ground plane and
+the **future path actually walked**, while the candidate uses gravity, a fixed
+eye height and the **current camera heading**. They share the ground-contact
+idea, so independence is partial; the agreement between the candidate's *F*
+and the reference distance is reported next to the metrics.
+
+**Decision.** The registered rule applies (recall must not drop; unjustified
+alerts per minute must not rise more than 10 %, or recall +5 points with at
+most +20 %). A candidate that passes also has to show precision up in at least
+4 of the 6 recordings, so that a pooled gain is not driven by one recording.
