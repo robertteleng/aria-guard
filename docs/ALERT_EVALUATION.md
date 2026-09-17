@@ -327,8 +327,8 @@ than 0.3 s, and 126 of the misses are among them: an object's ground point
 brushing the 0.75 m corridor for a few frames. On episodes of 0.3 s or more the
 model warns 36 of 77 (47 %). Of the 41 longer misses, 20 had the object rated
 a threat while the single alert went to another object, 16 were never rated a
-threat and 5 were held back by cooldown or level. Stairs have the lowest recall
-(16 of 77 episodes).
+threat and 5 were held back by cooldown or level. Stairs are warned in 16 of
+their 77 episodes (21 %).
 
 **What this suggests, to be registered one at a time:** a minimum episode
 duration in the reference (recall is dominated by sub-0.3 s episodes); why
