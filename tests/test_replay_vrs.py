@@ -8,7 +8,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts.benchmark_offline import FrameResult, run_benchmark
 from scripts.replay_vrs import (detections_to_dicts, imu_decimation, latency_summary,
-                                next_realtime_index, wait_before_frame_ns, wrap_stage)
+                                next_realtime_index, package_version, parse_l4t_release,
+                                wait_before_frame_ns, wrap_stage)
 from src.domain.types import Detection
 
 
@@ -153,3 +154,14 @@ def test_live_feed_respects_n_frames_limit():
     feed = LiveFeed(rec, n_frames=5)
     assert _drain(feed)[-1] == 4
     assert max(rec.reads) == 4
+
+
+def test_parse_l4t_release():
+    text = "# R36 (release), REVISION: 5.2, GCID: 46426093, BOARD: generic, EABI: aarch64"
+    assert parse_l4t_release(text) == "R36.5.2"
+    assert parse_l4t_release("garbage") is None
+
+
+def test_package_version_prefers_metadata_and_handles_missing():
+    assert package_version("pytest", "pytest") == pytest.__version__
+    assert package_version("definitely_not_a_module_xyz", "definitely-not-a-dist-xyz") is None

@@ -248,6 +248,26 @@ def sha256(path: Path) -> Optional[str]:
     return h.hexdigest()
 
 
+def parse_l4t_release(text: str) -> Optional[str]:
+    """'# R36 (release), REVISION: 5.2, ...' -> 'R36.5.2'."""
+    import re
+    m = re.search(r"R(\d+)\s*\(release\),\s*REVISION:\s*([\d.]+)", text)
+    return f"R{m.group(1)}.{m.group(2)}" if m else None
+
+
+def package_version(module: str, distribution: str) -> Optional[str]:
+    """Installed version: package metadata first, then module.__version__."""
+    from importlib import metadata
+    try:
+        return metadata.version(distribution)
+    except metadata.PackageNotFoundError:
+        pass
+    try:
+        return getattr(__import__(module), "__version__", None)
+    except Exception:
+        return None
+
+
 def environment() -> dict:
     env = {
         "host": platform.node(),
@@ -256,16 +276,14 @@ def environment() -> dict:
         "commit": _run(["git", "-C", str(PROJECT_ROOT), "rev-parse", "--short", "HEAD"]),
         "dirty": bool(_run(["git", "-C", str(PROJECT_ROOT), "status", "--porcelain", "--untracked-files=no"])),
         "driver": _run(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"]),
-        "jetson_l4t": (Path("/etc/nv_tegra_release").read_text().split(",")[0].strip()
+        "jetson_l4t": (parse_l4t_release(Path("/etc/nv_tegra_release").read_text())
                        if Path("/etc/nv_tegra_release").exists() else None),
-        "nvpmodel": _run(["nvpmodel", "-q"]),
+        # nvpmodel is not available inside containers: the launcher passes it
+        "nvpmodel": _run(["nvpmodel", "-q"]) or os.environ.get("JETSON_POWER_MODE"),
     }
-    for mod in ("torch", "tensorrt", "ultralytics", "cv2", "projectaria_tools"):
-        try:
-            m = __import__(mod)
-            env[mod] = getattr(m, "__version__", None)
-        except Exception:
-            env[mod] = None
+    for mod, dist in (("torch", "torch"), ("tensorrt", "tensorrt"), ("ultralytics", "ultralytics"),
+                      ("cv2", "opencv-python"), ("projectaria_tools", "projectaria-tools")):
+        env[mod] = package_version(mod, dist)
     try:
         import torch
         env["cuda"] = torch.version.cuda
