@@ -53,3 +53,17 @@ models/piper/*.onnx.json
 
 # Replay benchmark: per-frame detections are large (regenerate with scripts/replay_benchmark.sh)
 benchmarks/replay/detections/
+
+# Workspace tooling synced from a private template: never part of this public repo
+CLAUDE.md
+AGENTS.md
+.claude/
+PAIR_WORKFLOW.md
+NEXT_SESSION.md
+docs/teamwork/
+docs/design/
+docs/development/
+docs/workflows/
+docs/project/SHIP_READINESS_CHECKLIST.md
+docs/research/templates/
+scripts/architecture/
