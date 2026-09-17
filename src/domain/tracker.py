@@ -108,6 +108,16 @@ THREAT_THRESHOLDS = {
 # proxy for subtracting an IMU-estimated forward velocity.
 EGO_MOTION_WALKING_BIAS = 0.05
 
+# depth_value is PROXIMITY (0 = far, 1 = close). Time-to-collision divides the
+# gap still to close, 1 - proximity, by the approach speed. The floor keeps an
+# object already at the camera from dividing zero by its speed.
+MIN_REMAINING_GAP = 0.05
+
+
+def remaining_gap(proximity: float) -> float:
+    """Normalized distance left to close for a proximity value in [0, 1]."""
+    return max(1.0 - proximity, MIN_REMAINING_GAP)
+
 
 def _iou(box1: Tuple[int, int, int, int], box2: Tuple[int, int, int, int]) -> float:
     """Calculate Intersection over Union between two boxes (x, y, w, h)."""
@@ -279,8 +289,9 @@ class SimpleTracker:
           closing in. Independent of the depth model.
 
         Looming is expressed in the SAME units as the depth slope via
-        (Δheight/height)·depth_value, so the downstream TTC (depth/approach)
-        stays consistent and no arbitrary scale factor is introduced. The two
+        (Δheight/height)·remaining_gap, so the downstream TTC
+        (remaining_gap/approach) of a looming-only approach equals the
+        bbox time-to-contact height/Δheight, with no arbitrary scale factor. The two
         are fused with max() — either can flag an approach; when the bbox is
         static, looming is 0 and depth drives it (backwards-compatible).
 
@@ -308,7 +319,7 @@ class SimpleTracker:
             mean_h = sum(hrecent) / len(hrecent)
             if mean_h > 0:
                 h_rel_growth = np.polyfit(x, hrecent, 1)[0] / mean_h  # per frame
-                looming = h_rel_growth * track.depth_value
+                looming = h_rel_growth * remaining_gap(track.depth_value)
         track.looming_speed = float(looming)
 
         # Fuse: either cue can flag an approach.
@@ -364,10 +375,10 @@ class SimpleTracker:
         risk = 0.0
 
         # Factor 1: TTC proxy (50%)
-        # TTC = depth / approach_speed (in frames)
+        # TTC = remaining gap / approach_speed (in frames); depth_value is proximity
         # Normalize: TTC 0 = 1.0, TTC 150 frames (~5s @30fps) = 0.0
         if track.approach_speed > 0.01:
-            ttc_frames = track.depth_value / track.approach_speed
+            ttc_frames = remaining_gap(track.depth_value) / track.approach_speed
             ttc_factor = max(0.0, 1.0 - ttc_frames / 150.0)
         else:
             # Static object: use proximity as TTC proxy

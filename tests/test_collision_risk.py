@@ -118,3 +118,67 @@ class TestThresholdConsistency:
         assert THREAT_THRESHOLDS["DANGER"] > THREAT_THRESHOLDS["WARNING"]
         assert THREAT_THRESHOLDS["WARNING"] > THREAT_THRESHOLDS["ATTENTION"]
         assert THREAT_THRESHOLDS["ATTENTION"] > 0.0
+
+
+class TestTimeToCollisionUsesRemainingDistance:
+    """depth_value is PROXIMITY (0 = far, 1 = close): the gap left to close is
+    1 - depth_value. Dividing proximity itself by the approach speed made a
+    nearly-touching object look further in time than a distant one."""
+
+    @staticmethod
+    def approaching(start, step=0.02, name="person", zone="center"):
+        return [
+            [FakeDet(name=name, bbox=(600, 300, 50, 100), zone=zone, distance="medium",
+                     depth_value=start + i * step, confidence=0.8, is_gazed=False)]
+            for i in range(5)
+        ]
+
+    def test_closer_object_has_higher_risk_at_same_approach_speed(self):
+        near = run_scenario(self.approaching(0.80))
+        far = run_scenario(self.approaching(0.10))
+        assert near.approach_speed == pytest.approx(far.approach_speed)
+        assert near.collision_risk > far.collision_risk
+
+    def test_ttc_factor_matches_remaining_gap(self):
+        # proximity 0.88 closing 0.02/frame -> 0.12 left -> TTC 6 frames -> factor 0.96
+        t = run_scenario(self.approaching(0.80))
+        from src.domain.tracker import SimpleTracker
+        expected_ttc_factor = 1.0 - ((1.0 - t.depth_value) / t.approach_speed) / 150.0
+        assert expected_ttc_factor == pytest.approx(0.96, abs=1e-6)
+        # risk = ttc*0.5 + cbdr*0.25 + zone*0.15 + class*0.10, cbdr = 1 * min(1, 0.02/0.03)
+        from src.domain.tracker import CLASS_RISK
+        expected = 0.96 * 0.5 + (0.02 / 0.03) * 0.25 + 1.0 * 0.15 + CLASS_RISK["person"] * 0.10
+        assert t.collision_risk == pytest.approx(min(1.0, expected), abs=1e-6)
+
+    def test_looming_speed_gives_time_to_contact_of_bbox_growth(self):
+        # Constant proximity, bbox height growing 10 %/frame of its mean: the
+        # looming cue alone must yield TTC = 1 / relative growth = 10 frames.
+        tracker = SimpleTracker()
+        heights = [90, 100, 110]
+        for h in heights:
+            tracks = tracker.update([FakeDet(name="person", bbox=(600, 300, 50, h), zone="center",
+                                             distance="close", depth_value=0.6, confidence=0.8,
+                                             is_gazed=False)], frame_width=1280)
+        t = tracks[0]
+        assert t.looming_speed == pytest.approx(0.1 * (1.0 - 0.6))
+        assert (1.0 - t.depth_value) / t.looming_speed == pytest.approx(10.0)
+
+
+class TestRemainingGap:
+    def test_complement_of_proximity(self):
+        from src.domain.tracker import remaining_gap
+        assert remaining_gap(0.0) == 1.0
+        assert remaining_gap(0.7) == pytest.approx(0.3)
+
+    def test_floor_at_camera(self):
+        from src.domain.tracker import MIN_REMAINING_GAP, remaining_gap
+        assert remaining_gap(1.0) == MIN_REMAINING_GAP
+        assert remaining_gap(1.2) == MIN_REMAINING_GAP
+
+    def test_object_touching_and_approaching_is_danger(self):
+        dets = [
+            [FakeDet(name="person", bbox=(600, 300, 50, 100), zone="center", distance="very_close",
+                     depth_value=min(1.0, 0.92 + i * 0.03), confidence=0.8, is_gazed=False)]
+            for i in range(5)
+        ]
+        assert run_scenario(dets).threat_level == "DANGER"
