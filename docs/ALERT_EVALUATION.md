@@ -94,3 +94,22 @@ All metrics are computed for the tracker **before and after the TTC fix**
   detector, not of the whole system.
 - Moving objects (people, bicycles) have no semidense cross-check; their
   distance relies on ground contact alone.
+
+## Amendment 2026-09-17, before computing any result
+
+Found while reading the MPS files, not from results:
+
+1. **Ground height uses only converged points.** `semidense_points.csv.gz`
+   contains unconverged points thousands of metres away (e.g. a point at
+   z = 281 m with `dist_std` = 5,712 m). The ground height is therefore the 5th
+   percentile of z over points with `dist_std` ≤ 0.2 m within 5 m of the
+   device, the same filter as the cross-check.
+2. **Cross-check sampling and projection.** The cross-check runs on every 10th
+   frame that has a static-class detection, which bounds the cost; it
+   estimates the error of the reference, it does not feed the metrics. A point
+   counts as inside the central half of a bbox when its normalized camera
+   coordinates (x/z, y/z) fall inside those of the four unprojected corners of
+   that central half, an approximation of the fisheye footprint that is tight
+   for regions this small.
+3. **Timestamps.** Detection frames map to the VRS RGB capture time (device
+   clock); MPS `tracking_timestamp_us` uses the same clock.
