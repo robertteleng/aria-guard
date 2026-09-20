@@ -1,0 +1,1779 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cómo se construyó aria-guard</title>
+<meta name="description" content="Bitácora técnica de aria-guard: avisos de obstáculos en gafas Meta Project Aria, medidos en PC y Jetson Orin Nano, con código, cifras y límites. ES/EN.">
+<meta property="og:title" content="How aria-guard was built">
+<meta property="og:description" content="Obstacle warnings on Meta Project Aria glasses, measured on PC and Jetson Orin Nano: code, numbers and honest limits. ES/EN.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦯</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg: #f3f5f7;
+    --surface: #ffffff;
+    --surface-2: #e9edf1;
+    --line: #c3ccd4;
+    --line-soft: #d9dfe4;
+    --text: #1b232c;
+    --text-dim: #5b6773;
+    --text-faint: #8894a0;
+    --accent: #d9722c;
+    --accent-2: #b3591f;
+    --ok: #2f6f4f;
+    --ok-soft: #dbeee1;
+    --danger: #b3402c;
+    --danger-soft: #f3ddd5;
+    --warn: #3a5f8a;
+    --code-bg: #171b1f;
+    --code-text: #e6e6e0;
+    --display: 'Fraunces', Georgia, serif;
+    --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+    --sans: 'Inter', -apple-system, 'Segoe UI', sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg: #14181d;
+      --surface: #1b2128;
+      --surface-2: #222a32;
+      --line: #3a444e;
+      --line-soft: #2b333b;
+      --text: #e8edf2;
+      --text-dim: #9aa7b3;
+      --text-faint: #6b7885;
+      --accent: #e8975a;
+      --accent-2: #f0ac78;
+      --ok: #6bbf94;
+      --ok-soft: #1e2f26;
+      --danger: #d97a63;
+      --danger-soft: #35201a;
+      --warn: #7fa8d6;
+      --code-bg: #0d1013;
+      --code-text: #e6e6e0;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg: #14181d;
+    --surface: #1b2128;
+    --surface-2: #222a32;
+    --line: #3a444e;
+    --line-soft: #2b333b;
+    --text: #e8edf2;
+    --text-dim: #9aa7b3;
+    --text-faint: #6b7885;
+    --accent: #e8975a;
+    --accent-2: #f0ac78;
+    --ok: #6bbf94;
+    --ok-soft: #1e2f26;
+    --danger: #d97a63;
+    --danger-soft: #35201a;
+    --warn: #7fa8d6;
+    --code-bg: #0d1013;
+    --code-text: #e6e6e0;
+  }
+
+  *{ box-sizing: border-box; }
+  html{ scroll-behavior: smooth; }
+  body{
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ===== Shell layout ===== */
+  .shell{
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    min-height: 100vh;
+  }
+  @media (max-width: 860px){
+    .shell{ grid-template-columns: 1fr; }
+    .rail{ position: static; height: auto; border-right: none; border-bottom: 1px solid var(--line-soft); }
+  }
+
+  /* ===== Rail (timeline nav) ===== */
+  .rail{
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    border-right: 1px solid var(--line-soft);
+    padding: 28px 20px 28px 26px;
+    display: flex;
+    flex-direction: column;
+  }
+  .rail-head{ margin-bottom: 28px; }
+  .rail-eyebrow{
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 6px;
+  }
+  .rail-title{
+    font-family: var(--display);
+    font-size: 19px;
+    font-weight: 600;
+    margin: 0;
+    line-height: 1.25;
+  }
+
+  .steps{ list-style: none; margin: 0; padding: 0; position: relative; flex: 1; }
+  .steps::before{
+    content: "";
+    position: absolute;
+    left: 9px; top: 6px; bottom: 6px;
+    width: 1px;
+    background: var(--line);
+  }
+  .step-item{ position: relative; padding: 0 0 22px 30px; }
+  .step-item:last-child{ padding-bottom: 0; }
+  .step-dot{
+    position: absolute; left: 3px; top: 2px;
+    width: 13px; height: 13px; border-radius: 50%;
+    background: var(--surface);
+    border: 2px solid var(--line);
+    transition: border-color .2s ease, background .2s ease;
+  }
+  .step-btn{
+    all: unset;
+    cursor: pointer;
+    display: block;
+    width: 100%;
+  }
+  .step-num{
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.06em;
+  }
+  .step-label{
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 13.5px;
+    color: var(--text-dim);
+    line-height: 1.4;
+    margin-top: 2px;
+  }
+  .step-item.active .step-dot{ border-color: var(--accent); background: var(--accent); }
+  .step-item.active .step-label{ color: var(--text); }
+  .step-item.done .step-dot{ border-color: var(--ok); background: var(--ok); }
+  .step-item:hover .step-label{ color: var(--text); }
+
+  .rail-foot{
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line-soft);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    line-height: 1.6;
+  }
+
+  /* ===== Language toggle ===== */
+  .lang-toggle{
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    margin-top: 14px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--surface);
+    cursor: pointer;
+    padding: 0;
+    font-family: var(--mono);
+  }
+  .lang-toggle span{
+    padding: 4px 10px;
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+    transition: background .15s ease, color .15s ease;
+  }
+  .lang-toggle span.on{
+    background: var(--accent);
+    color: #fff9f2;
+    font-weight: 600;
+  }
+  .lang-toggle:hover{ border-color: var(--accent); }
+  .lang-toggle:focus-visible{ outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ===== Main stage ===== */
+  .stage{
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  .panels{ flex: 1; position: relative; }
+  .panel{
+    display: none;
+    padding: 56px 64px 40px;
+    max-width: 880px;
+    animation: rise .35s ease;
+  }
+  @media (max-width: 640px){ .panel{ padding: 36px 22px 28px; } }
+  .panel.active{ display: block; }
+  @keyframes rise{
+    from{ opacity: 0; transform: translateY(8px); }
+    to{ opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce){
+    .panel{ animation: none; }
+  }
+
+  .kicker{
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .kicker .date{ color: var(--text-faint); text-transform: none; letter-spacing: 0; }
+
+  h1.panel-title{
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(28px, 4vw, 40px);
+    line-height: 1.15;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  .panel-sub{
+    font-family: var(--sans);
+    font-size: 15px;
+    color: var(--text-dim);
+    max-width: 62ch;
+    margin: 0 0 32px;
+    line-height: 1.6;
+  }
+
+  .beat{
+    display: grid;
+    grid-template-columns: 108px 1fr;
+    gap: 20px;
+    padding: 18px 0;
+    border-top: 1px solid var(--line-soft);
+  }
+  .beat:first-of-type{ border-top: none; }
+  .beat-tag{
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding-top: 3px;
+  }
+  .beat-tag.problem{ color: var(--danger); }
+  .beat-tag.decision{ color: var(--accent); }
+  .beat-tag.result{ color: var(--ok); }
+  .beat-body h3{
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: 15px;
+    margin: 0 0 6px;
+  }
+  .beat-body p{
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--text-dim);
+    margin: 0 0 8px;
+  }
+  .beat-body p:last-child{ margin-bottom: 0; }
+  .beat-body code{
+    font-family: var(--mono);
+    font-size: 0.92em;
+    background: var(--surface-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--text);
+  }
+
+  .codeblock{
+    background: var(--code-bg);
+    color: var(--code-text);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.65;
+    overflow-x: auto;
+    margin: 10px 0 8px;
+    white-space: pre;
+  }
+  .codeblock .c1{ color: #8a8270; }
+  .codeblock .num{ color: var(--accent-2); }
+
+  .stat-row{
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin: 10px 0 8px;
+  }
+  .stat{
+    background: var(--surface);
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    padding: 10px 16px;
+    min-width: 120px;
+  }
+  .stat .num{
+    font-family: var(--mono);
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .stat .num .arrow{ color: var(--text-faint); font-weight: 400; font-size: 15px; padding: 0 4px; }
+  .stat .lbl{ font-size: 10.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
+  .stat.good .num{ color: var(--ok); }
+
+  .commit-chip{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    background: var(--surface-2);
+    border: 1px solid var(--line-soft);
+    border-radius: 5px;
+    padding: 3px 8px;
+    margin: 2px 4px 2px 0;
+  }
+  .commit-chip .hash{ color: var(--accent); }
+
+  .arch-mini{
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 18px 0 6px;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .arch-box{
+    flex: 1;
+    padding: 14px 12px;
+    text-align: center;
+    border-right: 1px solid var(--line-soft);
+  }
+  .arch-box:last-child{ border-right: none; }
+  .arch-box.nocuda{ background: var(--surface); }
+  .arch-box.cuda{ background: var(--surface-2); }
+  .arch-box .t{ font-family: var(--mono); font-size: 11.5px; font-weight: 600; }
+  .arch-box .d{ font-size: 10.5px; color: var(--text-faint); margin-top: 3px; }
+  .arch-box.nocuda .t{ color: #3a5f8a; }
+  .arch-box.cuda .t{ color: var(--ok); }
+
+  .threat-scale{ display: flex; gap: 8px; margin: 14px 0 6px; flex-wrap: wrap; }
+  .threat-pill{
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--line-soft);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .threat-pill .dot{ width: 7px; height: 7px; border-radius: 50%; }
+
+  /* ===== Nav footer ===== */
+  .stage-nav{
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 64px;
+    background: var(--bg);
+    border-top: 1px solid var(--line-soft);
+  }
+  @media (max-width: 640px){ .stage-nav{ padding: 14px 22px; } }
+  .nav-btn{
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 13px;
+    padding: 10px 18px;
+    border-radius: 7px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: border-color .15s ease, transform .1s ease;
+  }
+  .nav-btn:hover{ border-color: var(--accent); }
+  .nav-btn:active{ transform: scale(0.98); }
+  .nav-btn:disabled{ opacity: 0.35; cursor: default; }
+  .nav-btn:disabled:hover{ border-color: var(--line); }
+  .nav-btn.primary{ background: var(--accent); border-color: var(--accent); color: #fff9f2; }
+  .nav-btn.primary:hover{ border-color: var(--accent-2); background: var(--accent-2); }
+  .nav-btn:focus-visible{ outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .progress-text{
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-faint);
+  }
+
+  /* ===== Figures (diagrams) ===== */
+  figure.fig{ margin: 20px 0 8px; }
+  .fig-card{
+    background: var(--surface);
+    border: 1px solid var(--line-soft);
+    border-radius: 9px;
+    padding: 18px 18px 6px;
+    overflow-x: auto;
+  }
+  .fig-card svg{ display: block; max-width: 100%; height: auto; }
+  figcaption{
+    font-size: 12px;
+    color: var(--text-faint);
+    line-height: 1.55;
+    margin-top: 10px;
+    padding: 0 2px 2px;
+  }
+
+  /* ===== Deep-dive code panels ===== */
+  .code-panel{
+    margin: 12px 0 8px;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .code-panel-head{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .code-panel-head .fname{
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .code-panel-head .flabel{
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+  .code-panel .codeblock{
+    margin: 0;
+    border-radius: 0;
+  }
+  .codeblock .kw{ color: #d6ab5f; }
+  .codeblock .str{ color: #9fb98a; }
+  .codeblock .fn{ color: #8fb3d9; }
+
+  .explain-box{
+    background: var(--surface);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 7px 7px 0;
+    padding: 14px 18px;
+    margin: 10px 0 8px;
+  }
+  .explain-box h4{
+    font-family: var(--sans);
+    font-size: 12.5px;
+    font-weight: 700;
+    margin: 0 0 6px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 10.5px;
+  }
+  .explain-box p{
+    font-size: 13.5px;
+    line-height: 1.65;
+    color: var(--text-dim);
+    margin: 0 0 8px;
+  }
+  .explain-box p:last-child{ margin-bottom: 0; }
+  .explain-box code{
+    font-family: var(--mono);
+    font-size: 0.9em;
+    background: var(--surface-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--text);
+  }
+
+  /* ===== Q&A block (entrevista) ===== */
+  .qa-section{
+    margin-top: 34px;
+    padding-top: 22px;
+    border-top: 2px solid var(--line);
+  }
+  .qa-section-head{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .qa-section-head .icon{
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 2px 7px;
+    letter-spacing: 0.04em;
+  }
+  .qa-section-head h3{
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: 14px;
+    margin: 0;
+  }
+  .qa-item{
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    margin-bottom: 10px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .qa-q{
+    all: unset;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    width: 100%;
+    padding: 13px 16px;
+    cursor: pointer;
+    box-sizing: border-box;
+  }
+  .qa-q:focus-visible{ outline: 2px solid var(--accent); outline-offset: -2px; }
+  .qa-q .qmark{
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    flex-shrink: 0;
+    line-height: 1.5;
+  }
+  .qa-q .qtext{
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 13.5px;
+    color: var(--text);
+    line-height: 1.5;
+    flex: 1;
+  }
+  .qa-q .chev{
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    flex-shrink: 0;
+    transition: transform .15s ease;
+    line-height: 1.5;
+  }
+  .qa-item.open .qa-q .chev{ transform: rotate(90deg); }
+  .qa-a{
+    display: none;
+    padding: 0 16px 16px 40px;
+  }
+  .qa-item.open .qa-a{ display: block; }
+  .qa-a p{
+    font-size: 13.5px;
+    line-height: 1.65;
+    color: var(--text-dim);
+    margin: 0 0 8px;
+  }
+  .qa-a p:last-child{ margin-bottom: 0; }
+  .qa-a code{
+    font-family: var(--mono);
+    font-size: 0.9em;
+    background: var(--surface-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--text);
+  }
+
+  /* ===== Pólya beat tags ===== */
+  .beat-tag.entender{ color: var(--warn); }
+  .beat-tag.simular{ color: #7a5aa8; }
+  .beat-tag.escribir{ color: var(--accent); }
+  .beat-tag.medir{ color: var(--ok); }
+  .beat-tag.mirar{ color: var(--danger); }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .beat-tag.simular{ color:#b39ddb; } }
+  :root[data-theme="dark"] .beat-tag.simular{ color:#b39ddb; }
+  @media (max-width: 640px){
+    .beat{ grid-template-columns: 1fr; gap: 6px; }
+  }
+
+  .polya{ display:flex; flex-wrap:wrap; gap:6px; margin: 4px 0 22px; }
+  .polya span{ font-family: var(--mono); font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase;
+    border:1px solid var(--line-soft); border-radius: 999px; padding: 3px 10px; background: var(--surface); }
+  .polya .entender{ color: var(--warn); } .polya .simular{ color:#7a5aa8; } .polya .escribir{ color: var(--accent); }
+  .polya .medir{ color: var(--ok); } .polya .mirar{ color: var(--danger); }
+
+  /* ===== Tables ===== */
+  .tbl-wrap{ overflow-x:auto; margin: 10px 0 8px; border:1px solid var(--line-soft); border-radius: 8px; background: var(--surface); }
+  table.tbl{ border-collapse: collapse; width:100%; font-size: 13px; }
+  table.tbl th, table.tbl td{ padding: 7px 12px; text-align:left; border-bottom:1px solid var(--line-soft); white-space: nowrap; }
+  table.tbl th{ font-family: var(--mono); font-size: 10.5px; letter-spacing:.05em; text-transform: uppercase; color: var(--text-faint); background: var(--surface-2); }
+  table.tbl td{ color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  table.tbl td.n{ font-family: var(--mono); color: var(--text); }
+  table.tbl tr:last-child td{ border-bottom: none; }
+  table.tbl tr.weak td{ color: var(--danger); }
+
+  /* ===== Honesty box ===== */
+  .caveat{ background: var(--danger-soft); border-left: 3px solid var(--danger); border-radius: 0 7px 7px 0; padding: 12px 16px; margin: 10px 0 8px; }
+  .caveat h4{ margin:0 0 6px; font-size:10.5px; letter-spacing:.05em; text-transform:uppercase; color: var(--danger); font-weight:700; }
+  .caveat p{ margin:0 0 6px; font-size:13.5px; line-height:1.6; color: var(--text); }
+  .caveat p:last-child{ margin-bottom:0; }
+  .caveat code, .beat-body li code{ font-family: var(--mono); font-size:.9em; background: var(--surface-2); padding:1px 5px; border-radius:4px; }
+  .beat-body ul{ margin: 4px 0 8px; padding-left: 18px; color: var(--text-dim); font-size: 14px; line-height: 1.65; }
+
+  /* ===== Pitch (summary panel) ===== */
+  .pitch{ background: var(--surface); border:1px solid var(--line-soft); border-radius: 10px; padding: 18px 20px; margin: 0 0 24px; }
+  .pitch p{ margin: 0 0 10px; font-size: 15px; line-height: 1.7; color: var(--text); }
+  .pitch p:last-child{ margin-bottom: 0; }
+  .pitch .lbl{ font-family: var(--mono); font-size: 10.5px; letter-spacing:.08em; text-transform: uppercase; color: var(--accent); display:block; margin-bottom: 8px; }
+
+  /* ===== SVG text classes ===== */
+  .fig-card svg{ color: var(--text-dim); }
+  .s-box{ fill: var(--surface-2); stroke: var(--line); }
+  .s-box-ok{ fill: var(--ok-soft); stroke: var(--ok); }
+  .s-box-bad{ fill: var(--danger-soft); stroke: var(--danger); }
+  .s-t{ fill: var(--text); font-family: var(--mono); font-size: 12px; font-weight: 600; }
+  .s-d{ fill: var(--text-faint); font-family: var(--sans); font-size: 10.5px; }
+  .s-ok{ fill: var(--ok); font-family: var(--mono); font-size: 11px; }
+  .s-bad{ fill: var(--danger); font-family: var(--mono); font-size: 11px; }
+  .s-line{ stroke: currentColor; stroke-width: 1.4; fill: none; }
+
+  .rail-links{ margin-top: 10px; display:flex; flex-direction: column; gap: 4px; }
+  .rail-links a{ color: var(--text-dim); text-decoration: none; font-family: var(--mono); font-size: 10.5px; }
+  .rail-links a:hover{ color: var(--accent); }
+  .beat-body a, .pitch a, .explain-box a{ color: var(--accent-2); }
+
+  /* ===== Global map ===== */
+  .fig.map{ margin: 0 0 26px; }
+  .map-card{ padding: 10px 12px 4px; }
+  .map-card svg{ min-width: 640px; }
+  .map-node{ cursor: pointer; }
+  .map-node rect{ fill: var(--surface); stroke: var(--line-soft); stroke-width: 1; transition: stroke .15s ease; }
+  .map-node .mt{ font-family: var(--mono); font-size: 12px; font-weight: 600; fill: var(--text-faint); }
+  .map-node .md{ font-family: var(--sans); font-size: 10px; font-weight: 400; fill: var(--text-faint); }
+  .map-node.m-on rect{ fill: var(--surface-2); stroke: var(--accent); stroke-width: 2; }
+  .map-node.m-on .mt{ fill: var(--accent); }
+  .map-node.m-on .md{ fill: var(--text-dim); }
+  .map-node:hover rect, .map-node:focus-visible rect{ stroke: var(--accent-2); }
+  .map-node:focus{ outline: none; }
+
+  /* ===== Layout fixes + compact mobile rail ===== */
+  .shell{ grid-template-columns: 260px minmax(0, 1fr); }
+  .stage{ min-width: 0; }
+  @media (max-width: 860px){
+    .shell{ grid-template-columns: minmax(0, 1fr); }
+    .rail{ padding: 16px 16px 12px; }
+    .rail-head{ margin-bottom: 10px; }
+    .steps{ display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; flex: none; }
+    .steps::before{ display: none; }
+    .step-item{ padding: 0; flex: 0 0 auto; }
+    .step-dot{ display: none; }
+    .step-btn{ border: 1px solid var(--line-soft); border-radius: 8px; padding: 6px 10px; max-width: 190px; background: var(--surface); }
+    .step-item.active .step-btn{ border-color: var(--accent); }
+    .step-label{ font-size: 12.5px; }
+    .rail-foot{ margin-top: 10px; padding-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .rail-foot > span{ display: none; }
+    .rail-links{ margin-top: 0; }
+    .lang-toggle{ margin-top: 0; }
+    .stage-nav{ padding: 12px 16px; }
+  }
+  .beat{ grid-template-columns: 108px minmax(0, 1fr); }
+  .beat-body{ min-width: 0; }
+  @media (max-width: 640px){ .beat{ grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 860px){
+    .rail{ position: static; height: auto; overflow: visible; }
+    .stage{ min-height: auto; }
+  }
+  @media (max-width: 640px){
+    .fig-card svg{ min-width: 560px; }
+  }
+
+  /* ===== Wide screens: centered column, bigger figures ===== */
+  .panel{ max-width: 1160px; margin-inline: auto; padding: 56px 56px 40px; }
+  .panel-sub, .beat-body > p, .beat-body > ul, .explain-box p, .caveat p, .qa-a p, .pitch p{ max-width: 80ch; }
+  .stage-nav{ padding-inline: max(24px, calc((100% - 1160px) / 2 + 56px)); }
+  .fig-card{ position: relative; }
+  .fig-card svg{ width: 100%; }
+  .fig-zoom{ position: absolute; top: 8px; right: 8px; font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+    background: var(--surface); border: 1px solid var(--line-soft); border-radius: 6px; padding: 3px 8px; cursor: pointer; }
+  .fig-zoom:hover, .fig-zoom:focus-visible{ color: var(--accent); border-color: var(--accent); outline: none; }
+  .lightbox{ position: fixed; inset: 0; z-index: 50; background: color-mix(in srgb, var(--bg) 94%, transparent);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; gap: 14px; }
+  .lightbox[hidden]{ display: none !important; }
+  .lightbox .lb-card{ background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 24px;
+    width: min(96vw, 1700px); max-height: 82vh; overflow: auto; }
+  .lightbox .lb-card svg{ width: 100%; height: auto; min-width: 900px; display: block; color: var(--text-dim); }
+  .lightbox .lb-cap{ max-width: 90ch; color: var(--text-dim); font-size: 14px; line-height: 1.6; text-align: center; }
+  .lightbox .lb-close{ font-family: var(--sans); font-weight: 600; font-size: 13px; padding: 9px 16px; border-radius: 7px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--text); cursor: pointer; }
+  @media (max-width: 640px){ .panel{ padding: 32px 18px 28px; } .lightbox{ padding: 12px; } }
+  .lightbox{ background: var(--bg); }
+  .lightbox .lb-card svg{ max-height: 72vh; }
+
+  /* ===== Glossary ===== */
+  .c-count{ font-family: var(--mono); font-size: 12px; color: var(--accent); margin: -16px 0 18px; }
+  .c-group{ margin: 0 0 26px; }
+  .c-group h3{ font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-faint); margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line-soft); }
+  .concept{ display: grid; grid-template-columns: 130px minmax(0,1fr) auto; gap: 14px; align-items: start; padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--surface); margin-bottom: 8px; }
+  .concept.known{ border-color: var(--ok); }
+  .concept.pending{ opacity: .7; border-style: dashed; }
+  .c-body h4{ margin: 0 0 3px; font-size: 14px; font-weight: 700; color: var(--text); }
+  .c-body p{ margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--text-dim); }
+  .c-check{ display: flex; gap: 7px; align-items: center; font-family: var(--mono); font-size: 10.5px; color: var(--text-faint); cursor: pointer; padding-top: 2px; }
+  .c-check input{ accent-color: var(--ok); width: 15px; height: 15px; }
+  .concept.known .c-check{ color: var(--ok); }
+  .c-go{ font-family: var(--mono); font-size: 11px; color: var(--text-dim); background: none; border: 1px solid var(--line-soft); border-radius: 6px; padding: 4px 9px; cursor: pointer; white-space: nowrap; }
+  .c-go:hover, .c-go:focus-visible{ color: var(--accent); border-color: var(--accent); outline: none; }
+  @media (max-width: 640px){ .concept{ grid-template-columns: minmax(0,1fr); gap: 8px; } .c-go{ justify-self: start; } }
+
+</style>
+</head>
+<body>
+<noscript><p style="padding:24px">Esta página necesita JavaScript. / This page needs JavaScript.</p></noscript>
+<div class="shell">
+  <nav class="rail" id="rail">
+    <div class="rail-head">
+      <p class="rail-eyebrow" id="railEyebrow"></p>
+      <p class="rail-title" id="railTitle"></p>
+    </div>
+    <ol class="steps" id="steps"></ol>
+    <div class="rail-foot">
+      <span id="railFoot"></span>
+      <div class="rail-links" id="railLinks"></div>
+      <button class="lang-toggle" id="langToggle" aria-label="Cambiar idioma / Switch language">
+        <span id="langEs">ES</span><span id="langEn">EN</span>
+      </button>
+    </div>
+  </nav>
+  <main class="stage">
+    <div class="panels" id="panels"></div>
+    <div class="stage-nav">
+      <button class="nav-btn" id="prevBtn"></button>
+      <span class="progress-text" id="progressText"></span>
+      <button class="nav-btn primary" id="nextBtn"></button>
+    </div>
+  </main>
+</div>
+<div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true">
+  <div class="lb-card"></div>
+  <p class="lb-cap"></p>
+  <button class="lb-close" type="button"></button>
+</div>
+
+<script>
+/* ===== Content helpers ===== */
+let figCounter = 0;
+function fig(svgInner, viewBox, caption, ariaLabel){
+  figCounter++;
+  const mid = `arrow-fig-${figCounter}`;
+  const withIds = svgInner.replace(/url\(#arrow\)/g, `url(#${mid})`);
+  return `<figure class="fig"><div class="fig-card">
+      <svg viewBox="${viewBox}" role="img" aria-label="${ariaLabel}">
+        <defs><marker id="${mid}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+        ${withIds}
+      </svg></div><figcaption>${caption}</figcaption></figure>`;
+}
+function code(fname, label, body){
+  return `<div class="code-panel"><div class="code-panel-head"><span class="fname">${fname}</span><span class="flabel">${label}</span></div>
+    <div class="codeblock">${body}</div></div>`;
+}
+function explain(title, body){ return `<div class="explain-box"><h4>${title}</h4>${body}</div>`; }
+function caveat(title, body){ return `<div class="caveat"><h4>${title}</h4>${body}</div>`; }
+function table(head, rows, weakRows = []){
+  return `<div class="tbl-wrap"><table class="tbl"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map((r, i) => `<tr class="${weakRows.includes(i) ? 'weak' : ''}">${r.map((c, j) => `<td class="${j > 0 ? 'n' : ''}">${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+function stats(items){
+  return `<div class="stat-row">${items.map(s => `<div class="stat ${s.good ? 'good' : ''}"><div class="num">${s.num}</div><div class="lbl">${s.lbl}</div></div>`).join('')}</div>`;
+}
+/* Shared SVG figures (language-neutral parts) */
+function pipelineSvg(labels){
+  // labels: [[title, desc] x5]
+  return labels.map(([t, d], i) => {
+    const x = 20 + i * 196;
+    return `<rect class="s-box" x="${x}" y="24" width="168" height="62" rx="7"/>
+      <text class="s-t" x="${x + 84}" y="50" text-anchor="middle">${t}</text>
+      <text class="s-d" x="${x + 84}" y="70" text-anchor="middle">${d}</text>
+      ${i < labels.length - 1 ? `<line class="s-line" x1="${x + 168}" y1="55" x2="${x + 192}" y2="55" marker-end="url(#arrow)"/>` : ''}`;
+  }).join('');
+}
+
+/* ===== Glossary: what this repo taught me =====
+   Each concept: group, phase id where it shows up, ES/EN term + one-line definition. */
+const CONCEPT_GROUPS = {
+  datos:    {es:'Datos y grabaciones', en:'Data and recordings'},
+  vision:   {es:'Visión por computador', en:'Computer vision'},
+  medida:   {es:'Medir y evaluar',   en:'Measuring and evaluating'},
+  software: {es:'Software y edge',   en:'Software and edge'},
+  metodo:   {es:'Método',            en:'Method'}
+};
+
+const CONCEPTS = [
+  {id:'vrs', g:'datos', phase:'tuberia',
+   es:['VRS', 'El formato de grabación de las gafas Aria: guarda cada sensor (cámara RGB, cámaras de ojos, IMU) como un flujo con su propio reloj.'],
+   en:['VRS', 'The Aria glasses recording format: each sensor (RGB camera, eye cameras, IMU) is a stream with its own clock.']},
+  {id:'mps', g:'datos', phase:'alertas',
+   es:['MPS (referencia de Meta)', 'Lo que Meta calcula después de grabar: la trayectoria que recorriste de verdad, una nube de puntos 3D y la mirada. Lo uso para corregir, nunca como entrada.'],
+   en:['MPS (Meta reference)', 'What Meta computes after a recording: the trajectory you actually walked, a 3D point cloud and gaze. I use it to grade, never as input.']},
+  {id:'ritw', g:'datos', phase:'medir',
+   es:['Reading in the Wild', 'El conjunto público de grabaciones de Project Aria del que salen las seis de aquí: 36,9 minutos andando por la calle.'],
+   en:['Reading in the Wild', 'The public Project Aria recording set the six used here come from: 36.9 minutes walking outdoors.']},
+  {id:'deteccion', g:'vision', phase:'tuberia',
+   es:['Detección de objetos', 'La red devuelve una caja y una clase por objeto. Aquí un YOLO26 reentrenado con 24 clases útiles para andar.'],
+   en:['Object detection', 'The network returns a box and a class per object. Here a YOLO26 retrained on 24 classes useful for walking.']},
+  {id:'profundidad', g:'vision', phase:'tuberia',
+   es:['Profundidad monocular', 'Estimar a qué distancia está cada píxel con una sola cámara. Da valores relativos entre sí, no metros.'],
+   en:['Monocular depth', 'Estimating how far each pixel is with a single camera. It gives values relative to each other, not metres.']},
+  {id:'mirada', g:'vision', phase:'tuberia',
+   es:['Seguimiento de mirada', 'Las cámaras que apuntan a los ojos dicen hacia dónde mira quien lleva las gafas. Sirve para no avisar de lo que ya está mirando.'],
+   en:['Eye tracking', 'The inward-facing cameras tell where the wearer is looking. Useful so we do not warn about what they already see.']},
+  {id:'encamino', g:'vision', phase:'camino',
+   es:['“En mi camino”', 'Decidir si un objeto está en la trayectoria de quien anda. Primero se hizo por tercios de la imagen; luego midiendo dónde toca el suelo la caja.'],
+   en:['“In my path”', 'Deciding whether an object lies on the walker’s trajectory. First by image thirds; later by measuring where the box meets the ground.']},
+  {id:'ttc', g:'vision', phase:'alertas',
+   es:['Tiempo hasta el choque', 'Distancia dividida por la velocidad a la que te acercas. Es lo que separa un aviso de peligro de uno de atención.'],
+   en:['Time to collision', 'Distance divided by closing speed. It is what separates a danger warning from an attention one.']},
+  {id:'precision', g:'medida', phase:'alertas',
+   es:['Precisión de las alertas', 'De todo lo que avisé, qué parte era de verdad un obstáculo en mi camino. Aquí: 24 %.'],
+   en:['Alert precision', 'Of everything it warned about, how much really was an obstacle in my path. Here: 24 %.']},
+  {id:'exhaustividad', g:'medida', phase:'alertas',
+   es:['Exhaustividad', 'De los peligros que hubo, de cuántos avisé. Aquí: el 30 % de los episodios.'],
+   en:['Recall', 'Of the hazards that happened, how many it warned about. Here: 30 % of episodes.']},
+  {id:'antelacion', g:'medida', phase:'alertas',
+   es:['Antelación', 'Cuánto tiempo antes del peligro llega el aviso. Mediana de 0,7 a 2,8 s: sirve, pero va justo.'],
+   en:['Lead time', 'How long before the hazard the warning arrives. Median 0.7 to 2.8 s: useful, but tight.']},
+  {id:'sobrantes', g:'medida', phase:'camino',
+   es:['Avisos sobrantes por minuto', 'Los que no correspondían a nada en el camino. Importan tanto como los aciertos: de 9,1 a 5,7 por minuto.'],
+   en:['Spurious alerts per minute', 'Those matching nothing in the path. They matter as much as the hits: from 9.1 to 5.7 per minute.']},
+  {id:'p95', g:'medida', phase:'medir',
+   es:['p50 y p95', 'La mitad de los fotogramas tarda menos que el p50; solo 5 de cada 100 tardan más que el p95. El p95 es el que se nota al andar.'],
+   en:['p50 and p95', 'Half the frames take less than p50; only 5 in 100 take longer than p95. p95 is the one you feel while walking.']},
+  {id:'realtime', g:'medida', phase:'medir',
+   es:['Modo tiempo real', 'Reproducir la grabación al ritmo del reloj original y descartar lo que no da tiempo a procesar, en vez de procesarlo todo despacio y mentirse.'],
+   en:['Realtime mode', 'Replaying at the original clock and dropping what cannot be processed in time, instead of processing everything slowly and fooling yourself.']},
+  {id:'tensorrt', g:'software', phase:'jetson',
+   es:['TensorRT', 'Compila la red para una GPU concreta. El motor resultante solo sirve para esa arquitectura: no se copia entre máquinas.'],
+   en:['TensorRT', 'Compiles the network for one specific GPU. The resulting engine only works on that architecture: it does not copy across machines.']},
+  {id:'dvfs', g:'software', phase:'jetson',
+   es:['DVFS', 'La GPU baja su frecuencia cuando está ociosa. Con pausas entre fotogramas, el siguiente sale más lento aunque el modelo sea idéntico.'],
+   en:['DVFS', 'The GPU lowers its clock when idle. With pauses between frames the next one runs slower, even with an identical model.']},
+  {id:'hilos', g:'software', phase:'jetson',
+   es:['Configuración global compartida', 'Importar una librería puede cambiar los ajustes de otra. Aquí, importar ultralytics dejaba OpenCV en un solo hilo.'],
+   en:['Shared global configuration', 'Importing one library can change another’s settings. Here, importing ultralytics left OpenCV on a single thread.']},
+  {id:'cuello', g:'software', phase:'jetson',
+   es:['Cuello de botella', 'La etapa que marca el ritmo de todo. Aquí no era la red neuronal, sino descomprimir el JPEG en la CPU.'],
+   en:['Bottleneck', 'The stage that sets the pace. Here it was not the neural network but decoding JPEG on the CPU.']},
+  {id:'arbitro', g:'software', phase:'tuberia',
+   es:['Árbitro', 'La pieza que decide de qué avisar y cuándo callarse. Tiene un tope de 6 avisos cada 30 s para no saturar.'],
+   en:['Arbiter', 'The piece deciding what to warn about and when to stay quiet. Capped at 6 warnings per 30 s to avoid saturation.']},
+  {id:'fatiga', g:'metodo', phase:'alertas',
+   es:['Fatiga de alertas', 'Si avisas de todo, dejan de escucharte. Por eso un sistema que avisa mucho puede ser peor que uno que avisa poco.'],
+   en:['Alert fatigue', 'If you warn about everything, people stop listening. A system that warns a lot can be worse than one that warns little.']},
+  {id:'prerregistro', g:'metodo', phase:'alertas',
+   es:['Criterio escrito antes', 'Dejar por escrito qué contaría como éxito antes de calcular el resultado, para no elegir después la métrica que más favorece.'],
+   en:['Criterion written first', 'Writing down what would count as success before computing it, so you cannot pick the flattering metric afterwards.']},
+  {id:'independencia', g:'metodo', phase:'manos',
+   es:['Independencia de la referencia', 'Si lo que mide y lo medido comparten un error, el resultado se infla. Aquí compartían el mismo detector.'],
+   en:['Reference independence', 'If the yardstick and the thing measured share an error, the result inflates. Here they shared the same detector.']},
+  {id:'enmienda', g:'metodo', phase:'manos',
+   es:['Enmienda', 'Corregir por escrito un resultado ya publicado cuando aparece un error, en vez de borrarlo y rehacer la historia.'],
+   en:['Amendment', 'Correcting a published result in writing when an error shows up, instead of deleting it and rewriting history.']}
+];
+
+
+function conceptsHtml(lang){
+  const L = lang === 'es'
+    ? {intro:'Todo lo que me enseñó este repo, en una línea por concepto. Marca los que sabrías explicar sin mirar: la marca se guarda en este navegador.', known:'sé explicarlo', see:'ver fase', pending:'pendiente'}
+    : {intro:'Everything this repo taught me, one line per concept. Tick the ones you could explain without looking: ticks are saved in this browser.', known:'I can explain it', see:'see phase', pending:'pending'};
+  const groups = Object.keys(CONCEPT_GROUPS).map(g => {
+    const items = CONCEPTS.filter(c => c.g === g).map(c => {
+      const [t, d] = c[lang];
+      return `<div class="concept${c.pending ? ' pending' : ''}">
+        <label class="c-check"><input type="checkbox" data-concept="${c.id}" ${c.pending ? 'disabled' : ''}><span>${c.pending ? L.pending : L.known}</span></label>
+        <div class="c-body"><h4>${t}</h4><p>${d}</p></div>
+        <button class="c-go" type="button" data-go="${c.phase}">${L.see} →</button>
+      </div>`;
+    }).join('');
+    return `<section class="c-group"><h3>${CONCEPT_GROUPS[g][lang]}</h3>${items}</section>`;
+  }).join('');
+  return `<p class="panel-sub">${L.intro}</p>
+    <p class="c-count" data-count-tpl="${lang}"></p>
+    ${groups}`;
+}
+function conceptCountLabel(lang, a, b){ return lang === 'es' ? `${a} de ${b} que sé explicar` : `${a} of ${b} I can explain`; }
+
+/* ===== Language-neutral figures ===== */
+function latencyBarSvg(l){
+  // Jetson nano FP16, measured (benchmarks/results): total 22.89 ms
+  const segs = [[l.pre,'7.1','s-box'],[l.engine,'4.1','s-box-ok'],[l.wrap,'8.7','s-box'],[l.post,'2.1','s-box'],[l.other,'1.0','s-box']];
+  const widths = [7.07, 4.06, 8.74, 2.07, 0.95];
+  let x = 20;
+  return segs.map((s, i) => {
+    const w = widths[i] * 34;
+    const out = `<rect class="${s[2]}" x="${x}" y="30" width="${w}" height="46" rx="4"/>
+      <text class="s-t" x="${x + w/2}" y="58" text-anchor="middle">${s[1]}</text>
+      <text class="s-d" x="${x + w/2}" y="${i % 2 ? 100 : 20}" text-anchor="middle">${s[0]}</text>`;
+    x += w;
+    return out;
+  }).join('') + `<text class="s-d" x="${x + 8}" y="58">= 22.9 ms</text>`;
+}
+function stairsBarsSvg(arms){
+  // Stairs AP50 on the 120-image test set, measured. Axis starts at 0 (no truncation).
+  const vals = [0.464, 0.543, 0.590];
+  return vals.map((v, i) => {
+    const h = v * 240, x = 60 + i * 170, y = 160 - h;
+    return `<rect class="${i === 0 ? 's-box' : 's-box-ok'}" x="${x}" y="${y}" width="110" height="${h}" rx="4"/>
+      <text class="s-t" x="${x + 55}" y="${y - 6}" text-anchor="middle">${v.toFixed(3)}</text>
+      <text class="s-d" x="${x + 55}" y="178" text-anchor="middle">${arms[i]}</text>`;
+  }).join('') + '<line class="s-line" x1="40" y1="160" x2="580" y2="160"/>';
+}
+
+const PAGE = {
+  slug: 'aria-guard',
+  ui: {
+    es: {
+      docTitle: 'Cómo se construyó aria-guard',
+      railAria: 'Fases del proyecto', railEyebrow: 'aria-guard · bitácora', railTitle: 'Cómo se construyó',
+      railFoot: 'fuente: git log · benchmarks/ · docs/<br>jun 2026 → sep 2026 · 1 autor',
+      links: [{href:'https://github.com/robertteleng/aria-guard', label:'↗ código en GitHub'}],
+      prev: '← Anterior', next: 'Siguiente →', end: 'Fin ✓',
+      phase: 'Fase', summaryKicker: 'Resumen', progress: (a, b) => a === 0 ? `Resumen · ${b} fases` : `Fase ${a} de ${b}`,
+      qaHeading: 'Preguntas que me hago, con respuesta',
+      tags: {entender:'Entender', simular:'Simular', escribir:'Escribir', medir:'Medir', mirar:'Mirar atrás'},
+      mapLabel: 'Mapa global del sistema con la parte de esta fase resaltada',
+      zoom: 'ampliar', close: 'Cerrar (Esc)',
+      langLabel: 'Idioma', conceptsCheck: 'sé explicarlo', conceptsPending: 'pendiente',
+      mapCaption: 'en naranja, la parte del sistema que cubre esta fase. Pulsa una caja para saltar a su fase.'
+    },
+    en: {
+      docTitle: 'How aria-guard was built',
+      railAria: 'Project phases', railEyebrow: 'aria-guard · logbook', railTitle: 'How it was built',
+      railFoot: 'source: git log · benchmarks/ · docs/<br>Jun 2026 → Sep 2026 · 1 author',
+      links: [{href:'https://github.com/robertteleng/aria-guard', label:'↗ code on GitHub'}],
+      prev: '← Previous', next: 'Next →', end: 'End ✓',
+      phase: 'Phase', summaryKicker: 'Summary', progress: (a, b) => a === 0 ? `Summary · ${b} phases` : `Phase ${a} of ${b}`,
+      qaHeading: 'Questions I ask myself, with answers',
+      tags: {entender:'Understand', simular:'Simulate', escribir:'Write', medir:'Measure', mirar:'Look back'},
+      mapLabel: 'Global system map with this phase highlighted',
+      zoom: 'zoom', close: 'Close (Esc)',
+      langLabel: 'Language', conceptsCheck: 'I can explain it', conceptsPending: 'pending',
+      mapCaption: 'orange marks the part of the system this phase covers. Click a box to jump to its phase.'
+    }
+  },
+  map: {
+    es: {
+      nodes: [
+        {id:'captar', t:'Captar', d:'gafas Aria · VRS'},
+        {id:'detectar', t:'Detectar', d:'YOLO26 · 24 clases'},
+        {id:'profundidad', t:'Profundidad', d:'Depth Anything V2'},
+        {id:'mirada', t:'Mirada', d:'cámaras de ojos'},
+        {id:'camino', t:'¿En mi camino?', d:'suelo + IMU + altura'},
+        {id:'arbitro', t:'Árbitro', d:'qué avisar y cuándo'},
+        {id:'avisar', t:'Avisar', d:'voz y pitidos'}
+      ],
+      bands: [
+        {id:'medir', t:'Medir', d:'reproducción · JSON · p50 y p95'},
+        {id:'verificar', t:'Verificar', d:'pytest · criterio escrito antes'}
+      ]
+    },
+    en: {
+      nodes: [
+        {id:'captar', t:'Capture', d:'Aria glasses · VRS'},
+        {id:'detectar', t:'Detect', d:'YOLO26 · 24 classes'},
+        {id:'profundidad', t:'Depth', d:'Depth Anything V2'},
+        {id:'mirada', t:'Gaze', d:'eye cameras'},
+        {id:'camino', t:'In my path?', d:'ground + IMU + height'},
+        {id:'arbitro', t:'Arbiter', d:'what to warn, when'},
+        {id:'avisar', t:'Warn', d:'speech and beeps'}
+      ],
+      bands: [
+        {id:'medir', t:'Measure', d:'replay · JSON · p50 and p95'},
+        {id:'verificar', t:'Verify', d:'pytest · criterion written first'}
+      ]
+    }
+  },
+  steps: {}
+};
+
+
+const POLYA_FIG = (labels, caption, loop) => fig(`
+    ${labels.map(([t,d],i)=>{
+      const x = 16 + i*186;
+      return `<rect class="s-box" x="${x}" y="20" width="160" height="56" rx="7"/>
+      <text class="s-t" x="${x+80}" y="44" text-anchor="middle">${t}</text>
+      <text class="s-d" x="${x+80}" y="62" text-anchor="middle">${d}</text>
+      ${i<4?`<line class="s-line" x1="${x+160}" y1="48" x2="${x+183}" y2="48" marker-end="url(#arrow)"/>`:''}`;}).join('')}
+    <path class="s-line" d="M 840 76 C 840 118, 96 118, 96 80" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+    <text class="s-d" x="468" y="112" text-anchor="middle">${loop}</text>
+  `, '0 0 950 126', caption, labels.map(l => l[0]).join(', '));
+
+PAGE.steps.es = [
+/* 0 · RESUMEN */
+{
+  id: 'resumen', label: 'El proyecto en 2 minutos', date: 'jun 2026 → sep 2026', focus: 'all',
+  title: 'Avisar de obstáculos al andar, y medir si el aviso sirve de algo',
+  sub: 'aria-guard mira por las cámaras de unas gafas Meta Project Aria y avisa por voz de lo que se cruza en el camino. Esta bitácora cuenta cómo se construyó, cómo se midió en un PC y en una Jetson Orin Nano, y por qué la pregunta difícil no era la velocidad sino si los avisos eran ciertos.',
+  intro: `
+  <div class="pitch">
+    <span class="lbl">Pitch</span>
+    <p><strong>Problema.</strong> Una persona ciega o con baja visión que camina por la calle necesita saber qué tiene delante <em>antes</em> de llegar. Un sistema así tiene dos formas de fracasar: ir demasiado lento para avisar a tiempo, o avisar de cosas que no importan hasta que dejas de hacerle caso.</p>
+    <p><strong>Qué hice.</strong> Una tubería completa sobre grabaciones reales: detección de objetos, profundidad, mirada, un árbitro que decide qué decir, y voz. Todo medido con el mismo protocolo en una RTX 5060 Ti y en una Jetson Orin Nano. Y, sobre todo, una evaluación automática de si los avisos correspondían a obstáculos que de verdad estaban en el camino, usando la trayectoria que la persona recorrió después.</p>
+    <p><strong>Resultado honesto.</strong> En el PC va sobrado; en la Jetson llega a 24,5 FPS pero no cumple el objetivo de latencia que me había fijado. Y los avisos empezaron siendo ciertos solo el 10 % de las veces. Midiendo, cambiando el criterio de «está en mi camino» y corrigiendo un error que inflaba mis propias cifras, acabé en 24 %. Está publicado con ese número, no con el bonito.</p>
+  </div>
+  ${stats([
+    {num:'24,5 FPS', lbl:'en Jetson, desde 13', good:true},
+    {num:'136 ms', lbl:'p95 · objetivo era 100'},
+    {num:'24 %', lbl:'avisos sobre algo real en el camino', good:true},
+    {num:'36,9 min', lbl:'seis grabaciones reales'}
+  ])}
+  ${explain('Cómo leer esta web: el método de 5 pasos', `<p>Cada fase se cuenta con una adaptación de <em>How to Solve It</em> de Pólya (1945). Las cifras salen de los JSON de <code>benchmarks/</code> y de <code>docs/ALERT_EVALUATION.md</code>; cuando un número no tiene procedimiento registrado, se dice.</p>`)}
+  ${POLYA_FIG([['1 · Entender','qué problema es'],['2 · Simular','un caso con números'],['3 · Escribir','código y decisión'],['4 · Medir','qué salió y cómo'],['5 · Mirar atrás','qué cambiaría']], 'Pólya tenía cuatro pasos. «Concebir un plan» se convierte en simular un caso concreto, y «examinar la solución» se parte en medir y mirar atrás, porque el código se puede ejecutar y contradecir.', 'lo aprendido alimenta la siguiente vuelta')}
+  `,
+  beats: [],
+  qa: [
+    {q:'¿Cómo explico este proyecto en dos minutos?', a:`<p><strong>Entender:</strong> unas gafas con cámara pueden avisar de obstáculos, pero solo sirven si avisan a tiempo y si el aviso es cierto. <strong>Decisión clave:</strong> no fiarme de mirarlo por encima; construir una referencia automática con la trayectoria real que la persona recorrió, para poder puntuar cada aviso sin etiquetar nada a mano. <strong>Medir:</strong> el mismo protocolo en PC y en Jetson, con percentiles, y el criterio de éxito escrito antes de calcularlo. <strong>Resultados:</strong> 24,5 FPS en la Jetson pero latencia por encima del objetivo, y una precisión de avisos del 24 % tras corregir un error que me la había inflado al 38 %.</p>`},
+    {q:'¿Qué parte es la más interesante técnicamente?', a:`<p>Que <strong>la pregunta difícil no era la velocidad</strong>. Optimizar la Jetson fue trabajo conocido: perfilar, ver que el cuello era la CPU descomprimiendo JPEG y no la red, y quitar una configuración global que otra librería había cambiado por detrás. Lo interesante fue darme cuenta de que el sistema no sabía <em>qué estaba en el camino</em>: usaba los tercios de la imagen como si fueran geometría. Sustituir eso por una medida real —dónde toca el suelo cada caja, usando la gravedad del IMU y la altura de los ojos— casi dobló la precisión.</p>`},
+    {q:'¿Qué haría distinto si empezara de nuevo?', a:`<p>Construiría la referencia <strong>antes</strong> que el sistema. Pasé semanas afinando avisos sin poder decir si mejoraban, y cuando por fin los medí descubrí que la lógica de base estaba equivocada de raíz. También habría comprobado antes que mi referencia no compartía errores con lo que estaba midiendo: no lo hice, y por eso publiqué unas cifras que tuve que corregir a la baja tres horas después.</p>`}
+  ]
+},
+
+/* 1 · LA TUBERÍA */
+{
+  id: 'tuberia', label: 'De las gafas al aviso hablado', date: 'jun 2026', focus: ['captar','detectar','profundidad','mirada','arbitro','avisar'],
+  title: 'Seis piezas entre la cámara y la voz',
+  sub: 'Cada fotograma pasa por detección, profundidad y mirada; un seguidor une lo que ve entre fotogramas y un árbitro decide si merece la pena hablar. La parte difícil no es ninguna pieza: es lo que hacen juntas.',
+  beats: [
+    {tag:'entender', h:'Avisar de todo es no avisar de nada', body:`<p>Detectar objetos es un problema resuelto. El problema abierto es <strong>qué decir en voz alta</strong>. Una calle tiene decenas de objetos por fotograma; si el sistema los nombra, la persona se quita los auriculares a los dos minutos. Cada aviso gasta un recurso que no se recupera: la atención de quien anda.</p>`},
+    {tag:'simular', h:'El recorrido de un fotograma', body:`${fig(`
+      <rect class="s-box" x="12" y="60" width="118" height="54" rx="7"/><text class="s-t" x="71" y="83" text-anchor="middle">Gafas Aria</text><text class="s-d" x="71" y="101" text-anchor="middle">RGB + ojos + IMU</text>
+      <line class="s-line" x1="130" y1="87" x2="160" y2="87" marker-end="url(#arrow)"/>
+      <rect class="s-box" x="162" y="16" width="120" height="46" rx="7"/><text class="s-t" x="222" y="36" text-anchor="middle">Detectar</text><text class="s-d" x="222" y="52" text-anchor="middle">YOLO26 · 24 clases</text>
+      <rect class="s-box" x="162" y="66" width="120" height="46" rx="7"/><text class="s-t" x="222" y="86" text-anchor="middle">Profundidad</text><text class="s-d" x="222" y="102" text-anchor="middle">1 de cada 5</text>
+      <rect class="s-box" x="162" y="116" width="120" height="46" rx="7"/><text class="s-t" x="222" y="136" text-anchor="middle">Mirada</text><text class="s-d" x="222" y="152" text-anchor="middle">1 de cada 2</text>
+      <line class="s-line" x1="282" y1="39" x2="320" y2="80" marker-end="url(#arrow)"/>
+      <line class="s-line" x1="282" y1="89" x2="320" y2="89" marker-end="url(#arrow)"/>
+      <line class="s-line" x1="282" y1="139" x2="320" y2="98" marker-end="url(#arrow)"/>
+      <rect class="s-box" x="322" y="62" width="118" height="54" rx="7"/><text class="s-t" x="381" y="85" text-anchor="middle">Seguidor</text><text class="s-d" x="381" y="103" text-anchor="middle">une entre fotogramas</text>
+      <line class="s-line" x1="440" y1="89" x2="470" y2="89" marker-end="url(#arrow)"/>
+      <rect class="s-box" x="472" y="62" width="118" height="54" rx="7"/><text class="s-t" x="531" y="85" text-anchor="middle">Árbitro</text><text class="s-d" x="531" y="103" text-anchor="middle">6 avisos / 30 s</text>
+      <line class="s-line" x1="590" y1="89" x2="620" y2="89" marker-end="url(#arrow)"/>
+      <rect class="s-box-ok" x="622" y="62" width="108" height="54" rx="7"/><text class="s-t" x="676" y="85" text-anchor="middle">Voz</text><text class="s-d" x="676" y="103" text-anchor="middle">y pitidos</text>
+    `, '0 0 750 178', 'La profundidad y la mirada no se calculan en todos los fotogramas: cuestan demasiado. Se reutiliza el último valor conocido, que es una aproximación aceptable mientras se anda.', 'Diagrama de la tubería completa')}`},
+    {tag:'escribir', h:'Reproducir la grabación como si fuera en vivo', body:`<p>Para poder repetir las medidas hace falta que las grabaciones entren por el <strong>mismo camino</strong> que las gafas en directo: imágenes RGB y de los ojos con sus tiempos reales, no un vídeo suelto. El banco de pruebas lee los ficheros VRS originales y los va entregando al ritmo del reloj de la grabación.</p>
+    ${code('scripts/replay_benchmark.sh', 'uso', `./scripts/replay_benchmark.sh ~/Datasets/aria/ritw benchmarks/replay`)}`},
+    {tag:'medir', h:'Lo que cuesta cada pieza', body:`<p>Con todo enchufado, en el PC el detector completo tarda 4,2 ms de mediana y en la Jetson 24,7 ms. Pero el reparto por etapas es lo que manda la decisión de qué optimizar.</p>
+    ${table(['Etapa (ms, mediana de p50)','PC · RTX 5060 Ti','Jetson Orin Nano'], [
+      ['Descomprimir VRS','16,23','39,26'],
+      ['Detección (YOLO)','3,08','18,36'],
+      ['Profundidad (1 de 5)','9,82','62,49'],
+      ['Mirada (1 de 2)','0,77','5,33'],
+      ['Seguidor + árbitro','0,29','0,88']
+    ])}`},
+    {tag:'mirar', h:'Lo que esta tubería no sabe', body:`${caveat('La profundidad no da metros', `<p>El modelo de profundidad devuelve valores <strong>relativos</strong>, renormalizados en cada fotograma: dice qué está más cerca que qué, no a cuántos metros. Eso basta para ordenar objetos, pero no para decir «a dos pasos». Toda la lógica de peligro que se construyó encima arrastra esa limitación, y es el origen del problema de la fase 4.</p>`)}`}
+  ],
+  qa: [
+    {q:'¿Por qué no calcular profundidad y mirada en todos los fotogramas?', a:`<p>Porque no cabe en el tiempo disponible. En la Jetson la profundidad cuesta 62 ms; a 24 FPS solo hay 41 ms por fotograma. Calcularla una de cada cinco y reutilizar el último valor es una aproximación razonable andando, donde la escena cambia despacio. El precio es que un objeto que aparece de golpe puede llevar hasta cuatro fotogramas con la profundidad del anterior.</p>`},
+    {q:'¿Por qué usar la mirada si la persona es ciega?', a:`<p>Porque «ciego» abarca mucho: hay baja visión, visión periférica y resto visual útil. Si la persona ya está orientada hacia el obstáculo, el aviso sobra. En la práctica la mirada aporta menos de lo que esperaba, y es una de las cosas que mediría por separado si volviera a empezar.</p>`},
+    {q:'¿Por qué un tope de 6 avisos cada 30 segundos?', a:`<p>Es un límite puesto a mano contra la fatiga. Tiene un efecto secundario que tardé en ver: al limitar por arriba, la métrica «menos de 12 avisos por minuto» se cumplía <strong>por construcción</strong>, no por mérito del sistema. Un criterio que no puedes fallar no mide nada.</p>`}
+  ]
+},
+
+/* 2 · MEDIR */
+{
+  id: 'medir', label: 'Medir sin engañarme', date: 'sep 2026', focus: ['medir','verificar'],
+  title: 'Dos máquinas, el mismo protocolo, y el reloj mandando',
+  sub: 'Procesar una grabación despacio y contar los fotogramas no dice si el sistema sirve. Lo que importa es qué pasa cuando el reloj no espera.',
+  beats: [
+    {tag:'entender', h:'Dos formas de medir, una honesta', body:`<p>Se puede reproducir una grabación de dos maneras. <strong>Procesándolo todo</strong>, tarde lo que tarde: sale un número bonito y falso. O <strong>al ritmo real</strong>, descartando lo que no da tiempo a procesar: sale lo que la persona notaría. Solo la segunda responde a «¿sirve andando?».</p>`},
+    {tag:'simular', h:'Qué significa descartar el 56 %', body:`${fig(`
+      <text class="s-t" x="20" y="30">PC · RTX 5060 Ti</text>
+      <rect class="s-box-ok" x="20" y="42" width="560" height="26" rx="5"/><text class="s-d" x="300" y="59" text-anchor="middle">30 FPS · 0 % descartados</text>
+      <text class="s-t" x="20" y="104">Jetson · antes de optimizar</text>
+      <rect class="s-box-ok" x="20" y="116" width="244" height="26" rx="5"/><rect class="s-box" x="264" y="116" width="316" height="26" rx="5" stroke-dasharray="4 3"/>
+      <text class="s-d" x="142" y="133" text-anchor="middle">13 FPS procesados</text><text class="s-d" x="422" y="133" text-anchor="middle">56 % descartados</text>
+      <text class="s-t" x="20" y="178">Jetson · después</text>
+      <rect class="s-box-ok" x="20" y="190" width="462" height="26" rx="5"/><rect class="s-box" x="482" y="190" width="98" height="26" rx="5" stroke-dasharray="4 3"/>
+      <text class="s-d" x="251" y="207" text-anchor="middle">24,5 FPS procesados</text><text class="s-d" x="531" y="207" text-anchor="middle">17,5 %</text>
+    `, '0 0 600 232', 'Cada barra es la misma grabación reproducida a su ritmo real. Lo rayado es lo que el sistema no llegó a mirar: fotogramas en los que, si hubiera aparecido un obstáculo, nadie se habría enterado.', 'Comparación de fotogramas descartados')}`},
+    {tag:'escribir', h:'Un JSON por ejecución, y la tabla se genera sola', body:`<p>Cada reproducción escribe un JSON con la máquina, el commit, el modelo, los percentiles por etapa y los avisos emitidos. Las tablas del README no se escriben a mano: salen de esos ficheros. Si una cifra de la web no tiene JSON detrás, es que no está medida.</p>
+    ${code('scripts/replay_table.py', 'genera las tablas del README', `python3 scripts/replay_table.py benchmarks/replay/*.json`)}`},
+    {tag:'medir', h:'La línea base, en las dos máquinas', body:`${table(['Máquina','FPS efectivos','Descartados','p50 (ms)','p95 (ms)'], [
+      ['PC · RTX 5060 Ti','30,0','0,0 %','20,9','31,6'],
+      ['Jetson · línea base','13,0','56,4 %','146,3','255,4'],
+      ['Jetson · optimizada','24,5','17,5 %','101,8','136,4']
+    ])}
+    <p>Las seis grabaciones dan el mismo resultado en las tres filas: no hay una grabación fácil que esté salvando la media.</p>`},
+    {tag:'mirar', h:'Seis grabaciones no son un estudio', body:`${caveat('Una sola persona, andando de día', `<p>Las seis grabaciones son de exterior, de día y de una persona vidente andando con normalidad. No hay noche, ni lluvia, ni multitudes, ni la marcha distinta de quien usa bastón. Todo lo que sigue vale <strong>dentro de esas condiciones</strong>, y no se puede extrapolar sin volver a medir.</p>`)}`}
+  ],
+  qa: [
+    {q:'¿Por qué el p95 y no la media?', a:`<p>Porque el fallo que se nota es el peor caso, no el promedio. Si de cada 100 fotogramas 95 tardan 100 ms y 5 tardan 250, la media dice 107 ms y parece bien; pero esos 5 son medio segundo de ceguera del sistema justo cuando algo se cruza. La media esconde exactamente lo que buscas.</p>`},
+    {q:'¿Por qué fijar el objetivo de latencia antes de medir?', a:`<p>Para no poder moverlo después. Escribí «p95 por debajo de 100 ms» antes de tener resultados. Me quedé en 136 ms. Si hubiera decidido el umbral al ver el número, habría salido un 150 ms muy convincente. El objetivo incumplido está en el README.</p>`},
+    {q:'¿Cómo sé que comparo lo mismo en las dos máquinas?', a:`<p>Mismo script, mismas grabaciones, mismo modelo y el commit anotado en cada JSON. Lo que no es igual es el entorno: en la Jetson se ejecuta dentro de un contenedor con TensorRT 10.3 y en el PC con 10.16. Esa diferencia está registrada en la tabla, no escondida.</p>`}
+  ]
+},
+
+/* 3 · JETSON */
+{
+  id: 'jetson', label: 'La Jetson: de 13 a 24,5 FPS', date: 'sep 2026', focus: ['detectar','profundidad','medir'],
+  title: 'El cuello no era la red neuronal',
+  sub: 'Perfilando por etapas aparecieron tres cosas: la CPU descomprimiendo imágenes, una librería que cambiaba la configuración de otra por detrás, y una GPU que se enfriaba entre fotogramas.',
+  beats: [
+    {tag:'entender', h:'Optimizar lo que no es el cuello no sirve de nada', body:`<p>La reacción natural ante 13 FPS es acelerar el modelo. Pero el motor de detección aislado ya tardaba <strong>4 ms</strong>: aunque fuera instantáneo, el sistema seguiría en unos 20 FPS. El tiempo estaba en otro sitio, y sin perfilar por etapas no se ve.</p>`},
+    {tag:'simular', h:'Dónde se va el tiempo en la Jetson', body:`${fig(`
+      <rect class="s-box" x="20" y="24" width="180" height="26" rx="5"/><text class="s-d" x="110" y="41" text-anchor="middle">Descomprimir JPEG · 39 ms</text>
+      <rect class="s-box-ok" x="20" y="60" width="86" height="26" rx="5"/><text class="s-d" x="63" y="77" text-anchor="middle">YOLO · 18 ms</text>
+      <rect class="s-box" x="20" y="96" width="290" height="26" rx="5"/><text class="s-d" x="165" y="113" text-anchor="middle">Profundidad · 62 ms (1 de cada 5)</text>
+      <rect class="s-box-ok" x="20" y="132" width="26" height="26" rx="5"/><text class="s-d" x="70" y="149">Mirada · 5 ms</text>
+      <text class="s-d" x="340" y="41">← CPU, un solo hilo</text>
+      <text class="s-d" x="340" y="77">← GPU, ya optimizado</text>
+      <text class="s-d" x="340" y="113">← GPU, se reparte entre fotogramas</text>
+    `, '0 0 620 178', 'Las barras están a escala. La etapa más cara de todas (la profundidad) solo se paga una vez de cada cinco fotogramas; la de descomprimir se paga siempre, y es pura CPU.', 'Reparto de tiempo por etapa en la Jetson')}`},
+    {tag:'escribir', h:'Tres cambios, uno de ellos tonto', body:`<p>El primero fue ejecutar la detección directamente sobre TensorRT en vez de a través de la librería intermedia, y calcular la profundidad sin bloquear el resto. El segundo fue el hallazgo: <strong>importar <code>ultralytics</code> dejaba OpenCV configurado con un solo hilo</strong>, y eso multiplicaba por cinco el coste de redimensionar imágenes (de 1,2 a 6,6 ms). Restaurar los hilos después de importar es una línea.</p>
+    ${code('src/detection/', 'el arreglo, en esencia', `import ultralytics            # deja OpenCV a 1 hilo\ncv2.setNumThreads(n_hilos)    # se restaura a mano`)}`},
+    {tag:'medir', h:'24,5 FPS, y un objetivo sin cumplir', body:`${stats([
+      {num:'13 → 24,5', lbl:'FPS efectivos', good:true},
+      {num:'146 → 102 ms', lbl:'p50 captura→detecciones', good:true},
+      {num:'255 → 136 ms', lbl:'p95 · objetivo era 100'},
+      {num:'56 → 17,5 %', lbl:'fotogramas descartados', good:true}
+    ])}
+    <p>El objetivo de fotogramas por segundo se cumplió; el de latencia no. Queda a 36 ms de la meta que me había puesto, y el responsable sigue siendo descomprimir imágenes en la CPU.</p>`},
+    {tag:'mirar', h:'La GPU se enfría entre fotogramas', body:`${caveat('Medido, pero no resuelto', `<p>Al medir el motor de detección en bucle continuo tarda 6,7 ms; con pausas de 40 ms entre llamadas, 11,3 ms. Es la GPU bajando su frecuencia al quedarse ociosa. Fijar los relojes al máximo requiere permisos de administrador en la máquina, así que <strong>las cifras publicadas son sin fijarlos</strong>: son conservadoras, y así está anotado.</p>`)}`}
+  ],
+  qa: [
+    {q:'¿Por qué no descomprimir las imágenes en la GPU?', a:`<p>Es la siguiente optimización evidente, y está pendiente. En una reproducción se leen ficheros VRS, pero en vivo el flujo llega ya comprimido, así que el problema es el mismo. Moverlo a la GPU o a un proceso aparte es lo que podría llevar el p95 por debajo de 100 ms.</p>`},
+    {q:'¿Por qué el motor de TensorRT no se puede copiar del PC a la Jetson?', a:`<p>Porque TensorRT compila para una arquitectura de GPU concreta y una versión de la librería. El motor del PC no arranca en la Jetson: hay que compilarlo allí, lo que tarda varios minutos la primera vez. Por eso los ficheros <code>.engine</code> no van en el repositorio.</p>`},
+    {q:'¿Cómo di con lo de los hilos de OpenCV?', a:`<p>Perfilando etapa por etapa y viendo un número que no cuadraba: redimensionar una imagen pequeña no puede costar 6,6 ms. Comparé el mismo código sin importar la librería de detección y bajó a 1,2 ms. La lección es general: <strong>una librería puede cambiar la configuración global de otra</strong>, y eso no aparece en ningún perfilado de tu propio código.</p>`}
+  ]
+},
+
+/* 4 · ALERTAS */
+{
+  id: 'alertas', label: '¿Los avisos sirven de algo?', date: 'sep 2026', focus: ['arbitro','verificar','medir'],
+  title: 'Construir una referencia para poder suspender',
+  sub: 'Hasta aquí todo eran milisegundos. La pregunta de verdad era otra: de todo lo que el sistema decía en voz alta, ¿cuánto era cierto? Para responderla hacía falta una vara de medir que no fuese mi opinión.',
+  beats: [
+    {tag:'entender', h:'Sin referencia, cualquier cambio parece una mejora', body:`<p>Estuve semanas ajustando umbrales mirando vídeos y diciendo «ahora va mejor». Eso no es medir. Necesitaba algo que, para cada instante de cada grabación, dijera si había de verdad un obstáculo en el camino, <strong>sin que lo decidiera yo</strong>.</p>`},
+    {tag:'simular', h:'El futuro como respuesta correcta', body:`${fig(`
+      <rect class="s-box" x="16" y="20" width="150" height="50" rx="7"/><text class="s-t" x="91" y="41" text-anchor="middle">Trayectoria real</text><text class="s-d" x="91" y="59" text-anchor="middle">por dónde pasó luego</text>
+      <rect class="s-box" x="16" y="86" width="150" height="50" rx="7"/><text class="s-t" x="91" y="107" text-anchor="middle">Puntos 3D</text><text class="s-d" x="91" y="125" text-anchor="middle">nube del entorno</text>
+      <line class="s-line" x1="166" y1="45" x2="210" y2="72" marker-end="url(#arrow)"/>
+      <line class="s-line" x1="166" y1="111" x2="210" y2="84" marker-end="url(#arrow)"/>
+      <rect class="s-box-ok" x="212" y="52" width="170" height="52" rx="7"/><text class="s-t" x="297" y="74" text-anchor="middle">Episodios de peligro</text><text class="s-d" x="297" y="92" text-anchor="middle">qué hubo y cuándo</text>
+      <line class="s-line" x1="382" y1="78" x2="424" y2="78" marker-end="url(#arrow)"/>
+      <rect class="s-box" x="426" y="52" width="150" height="52" rx="7"/><text class="s-t" x="501" y="74" text-anchor="middle">Nota del sistema</text><text class="s-d" x="501" y="92" text-anchor="middle">acierto · fallo · sobra</text>
+    `, '0 0 600 156', 'La clave es que la referencia usa información que el sistema no tiene en ese momento: por dónde acabó pasando la persona. Es hacer el examen con las respuestas del futuro.', 'Diagrama de la referencia automática')}`},
+    {tag:'escribir', h:'El criterio, escrito antes de calcular', body:`<p>Antes de ejecutar nada dejé por escrito en <code>docs/ALERT_EVALUATION.md</code> qué contaría como acierto, qué como aviso sobrante y qué diferencia consideraría una mejora real y no ruido. Así el resultado no se puede reinterpretar a posteriori.</p>
+    ${code('docs/ALERT_EVALUATION.md', 'qué se fija antes de medir', `precisión · exhaustividad · antelación · avisos sobrantes por minuto`)}`},
+    {tag:'medir', h:'El 10 %', body:`<p>La primera medida fue un jarro de agua fría: con la lógica original, <strong>uno de cada diez avisos</strong> correspondía a algo que de verdad estaba en el camino. Y ampliar el pasillo considerado no lo arreglaba: seguía en torno al 35 % incluso con cinco metros de ancho, lo que descartaba que fuera un problema de ajuste.</p>
+    ${table(['Métrica','Lógica original'], [
+      ['Avisos sobre algo real en el camino','10 %'],
+      ['Episodios de peligro avisados','17 %'],
+      ['Avisos sobrantes por minuto','9,1']
+    ])}`},
+    {tag:'mirar', h:'El diagnóstico', body:`${caveat('No era el umbral: era el concepto', `<p>La conclusión fue que <strong>el sistema no sabía qué estaba en su camino</strong>. Decidía con los tercios de la imagen (izquierda, centro, derecha) y una profundidad relativa que se renormaliza en cada fotograma. Eso no es geometría: un árbol al fondo del centro de la imagen puntuaba igual que una farola a dos metros. Arreglarlo era cambiar la idea, no el número.</p>`)}`}
+  ],
+  qa: [
+    {q:'¿Por qué no etiquetar a mano unos cuantos vídeos?', a:`<p>Por tiempo y por sesgo. Son 36,9 minutos a 30 fotogramas por segundo: decenas de miles de imágenes. Y etiquetar «esto era peligroso» a posteriori, sabiendo lo que el sistema dijo, contamina el resultado. La trayectoria real es objetiva y no la elijo yo.</p>`},
+    {q:'¿Es justo usar el futuro como referencia?', a:`<p>Es justo para <em>puntuar</em>, no para decidir. El sistema nunca ve esa información: solo se usa después, para corregir el examen. Es lo mismo que hacer una previsión meteorológica y luego mirar si llovió.</p>`},
+    {q:'¿Por qué publicar un 10 % en vez de callarlo?', a:`<p>Porque es el resultado. Un repositorio que solo enseña las cifras buenas no dice nada de cómo trabaja quien lo escribió. Además el 10 % es el punto de partida que da sentido a la fase siguiente: sin él, pasar al 24 % no significa nada.</p>`}
+  ]
+},
+
+/* 5 · EN MI CAMINO */
+{
+  id: 'camino', label: '“En mi camino”, pero de verdad', date: 'sep 2026', focus: ['camino','arbitro'],
+  title: 'Dónde toca el suelo cada caja',
+  sub: 'Sustituir los tercios de la imagen por una medida física: usando la gravedad del sensor de movimiento y una altura de ojos fija, se puede estimar a qué distancia y a qué lado está cada objeto, en metros.',
+  beats: [
+    {tag:'entender', h:'La imagen no es el mundo', body:`<p>Que algo esté en el centro de la imagen no quiere decir que esté en tu camino: depende de a qué altura y a qué distancia esté. Pero hay una pista muy fuerte y gratis: <strong>casi todo lo que te puede estorbar toca el suelo</strong>. Si sabes dónde está el suelo en la imagen, la base de cada caja te dice a qué distancia está el objeto.</p>`},
+    {tag:'simular', h:'Tres datos y una cuenta', body:`${fig(`
+      <rect class="s-box" x="16" y="18" width="164" height="44" rx="7"/><text class="s-t" x="98" y="38" text-anchor="middle">Gravedad (IMU)</text><text class="s-d" x="98" y="54" text-anchor="middle">dónde está el suelo</text>
+      <rect class="s-box" x="16" y="72" width="164" height="44" rx="7"/><text class="s-t" x="98" y="92" text-anchor="middle">Altura de ojos</text><text class="s-d" x="98" y="108" text-anchor="middle">1,6 m fijos</text>
+      <rect class="s-box" x="16" y="126" width="164" height="44" rx="7"/><text class="s-t" x="98" y="146" text-anchor="middle">Base de la caja</text><text class="s-d" x="98" y="162" text-anchor="middle">dónde toca el suelo</text>
+      <line class="s-line" x1="180" y1="40" x2="228" y2="84" marker-end="url(#arrow)"/>
+      <line class="s-line" x1="180" y1="94" x2="228" y2="94" marker-end="url(#arrow)"/>
+      <line class="s-line" x1="180" y1="148" x2="228" y2="104" marker-end="url(#arrow)"/>
+      <rect class="s-box-ok" x="230" y="68" width="186" height="52" rx="7"/><text class="s-t" x="323" y="90" text-anchor="middle">Distancia y desvío</text><text class="s-d" x="323" y="108" text-anchor="middle">en metros, no en píxeles</text>
+      <line class="s-line" x1="416" y1="94" x2="458" y2="94" marker-end="url(#arrow)"/>
+      <rect class="s-box" x="460" y="68" width="150" height="52" rx="7"/><text class="s-t" x="535" y="90" text-anchor="middle">¿Está en el camino?</text><text class="s-d" x="535" y="108" text-anchor="middle">sí / no</text>
+    `, '0 0 634 190', 'La altura de los ojos es fija: 1,6 m. Es la simplificación que hace que la cuenta funcione sin calibrar nada, y también la que introduce el error sistemático que se explica más abajo.', 'Diagrama del modelo métrico de camino')}`},
+    {tag:'escribir', h:'Una mejora cada vez, escrita antes', body:`<p>El cambio se registró como candidato antes de medirlo, con la regla de qué lo haría aceptable: mejorar la exhaustividad <strong>sin</strong> aumentar los avisos sobrantes por minuto. Si hubiera subido los aciertos a costa de hablar más, se descartaba.</p>`},
+    {tag:'medir', h:'Mejor en las seis grabaciones', body:`${table(['Métrica','Por tercios','Modelo métrico'], [
+      ['Avisos sobre algo real','9,7 %','20,4 %'],
+      ['Episodios avisados','17,2 %','29,1 %'],
+      ['Avisos sobrantes / min','9,06','6,89']
+    ])}
+    <p>Mejor en las tres métricas a la vez y en las seis grabaciones, no de media. Que no haya ninguna grabación en la que empeore es lo que hace creíble el cambio.</p>`},
+    {tag:'mirar', h:'Lo que la altura fija se lleva por delante', body:`${caveat('Distancias cortas y un punto ciego', `<p>Suponer 1,6 m de altura de ojos para todo el mundo hace que las distancias salgan entre 0,4 y 2,9 m <strong>más cortas</strong> que las de la referencia. Y hay un punto ciego de raíz: lo que <em>no toca el suelo</em> —una rama a la altura de la cabeza, un toldo, un camión mal aparcado— no se mide bien con este método. Es el motivo principal para la profundidad en metros que queda pendiente.</p>`)}`}
+  ],
+  qa: [
+    {q:'¿Por qué no medir la altura de ojos de cada persona?', a:`<p>Está en la lista de mejoras y es fácil: las gafas tienen calibración. No lo hice porque quería un cambio cada vez y medirlo aislado. Mezclar dos mejoras en una medición impide saber cuál funcionó.</p>`},
+    {q:'¿Qué pasa con los obstáculos que no tocan el suelo?', a:`<p>Que este método no los ve bien, y es su límite más serio. Lo honesto es decirlo en la misma frase que la mejora: pasé del 10 % al 20 % <em>y</em> me quedé sin cubrir un caso que para una persona ciega es exactamente de los peligrosos.</p>`},
+    {q:'¿No es hacer trampa usar el IMU, que la referencia también usa?', a:`<p>Es una preocupación legítima y la dejé anotada: la independencia entre lo que mido y la vara de medir es <strong>parcial</strong>. La referencia usa la trayectoria futura y el suelo reconstruido; el sistema usa la gravedad instantánea. No son lo mismo, pero comparten familia, y eso hay que decirlo.</p>`}
+  ]
+},
+
+/* 6 · LAS MANOS */
+{
+  id: 'manos', label: 'Mis propias manos eran obstáculos', date: 'sep 2026 · tarde', focus: ['detectar','verificar'],
+  title: 'El error que descubrí después de publicar',
+  sub: 'Las cifras publicadas por la mañana decían 38 % de precisión. Por la tarde descubrí que el detector contaba las manos del propio usuario como obstáculos, y que mi referencia hacía lo mismo. Las cifras buenas eran 24 %.',
+  beats: [
+    {tag:'entender', h:'Cuando el examinador comparte el error del examinado', body:`<p>El detector veía la mano o el brazo del usuario entrando en el campo de visión y los marcaba como <em>persona</em>. Un obstáculo enorme, muy cerca y justo en el centro: el sistema avisaba. Lo grave es que <strong>la referencia usaba el mismo detector</strong>, así que también lo contaba como peligro real, y el aviso salía premiado en vez de penalizado.</p>`},
+    {tag:'simular', h:'Cómo se infla una cifra sin mentir', body:`${fig(`
+      <rect class="s-box" x="16" y="20" width="160" height="46" rx="7"/><text class="s-t" x="96" y="40" text-anchor="middle">Mano del usuario</text><text class="s-d" x="96" y="56" text-anchor="middle">detectada como persona</text>
+      <line class="s-line" x1="176" y1="43" x2="216" y2="43" marker-end="url(#arrow)"/>
+      <rect class="s-box" x="218" y="20" width="150" height="46" rx="7"/><text class="s-t" x="293" y="40" text-anchor="middle">El sistema avisa</text><text class="s-d" x="293" y="56" text-anchor="middle">“persona muy cerca”</text>
+      <line class="s-line" x1="368" y1="43" x2="408" y2="43" marker-end="url(#arrow)"/>
+      <rect class="s-box" x="410" y="20" width="164" height="46" rx="7"/><text class="s-t" x="492" y="40" text-anchor="middle">La referencia</text><text class="s-d" x="492" y="56" text-anchor="middle">también la ve como peligro</text>
+      <line class="s-line" x1="492" y1="66" x2="492" y2="96" marker-end="url(#arrow)"/>
+      <rect class="s-box" x="386" y="98" width="212" height="44" rx="7"/><text class="s-t" x="492" y="118" text-anchor="middle">Acierto falso</text><text class="s-d" x="492" y="134" text-anchor="middle">la precisión sube sin motivo</text>
+    `, '0 0 620 162', 'El bucle se cierra solo: el mismo error aparece en lo que se mide y en lo que mide, así que en vez de restar, suma. Por eso la independencia de la referencia no es un detalle académico.', 'Diagrama del error de las manos')}`},
+    {tag:'escribir', h:'Enmienda, no borrado', body:`<p>Lo primero fue escribir la enmienda en <code>docs/ALERT_EVALUATION.md</code>: qué estaba mal, por qué, y qué se iba a recalcular — <strong>antes</strong> de recalcular nada. Después, una referencia nueva que usa el seguimiento de manos de Meta para descartar las detecciones que contienen la muñeca del usuario, y un filtro angular en el sistema en vivo.</p>`},
+    {tag:'medir', h:'Las cifras honestas', body:`${table(['Variante','Avisos reales','Episodios avisados','Sobrantes / min'], [
+      ['Por tercios (original)','9,7 %','17,2 %','9,06'],
+      ['Modelo métrico','20,4 %','29,1 %','6,89'],
+      ['Métrico + filtro de cuerpo','24,0 %','29,5 %','5,67']
+    ])}
+    <p>La última fila es la que está publicada y la que va activa en vivo. Las cifras de la mañana (38 % y 33 %) están marcadas como erróneas en el propio documento, no eliminadas.</p>`},
+    {tag:'mirar', h:'Lo que el filtro todavía no arregla', body:`${caveat('Sigue habiendo cuerpo sin filtrar', `<p>La referencia corregida solo descarta <strong>manos</strong>: si la persona mira hacia abajo, sus piernas o su torso siguen contando como obstáculo. El filtro angular elimina en torno al 47 % de las manos, no todas. Y en una muestra revisada de 15 casos, quitó una persona real: el filtro tiene coste. Todo eso está en el documento.</p>`)}`}
+  ],
+  qa: [
+    {q:'¿Por qué no rehacer el historial y publicar solo las cifras buenas?', a:`<p>Porque el repositorio ya era público y había registros que citaban esos commits. Borrarlo habría roto las referencias y, sobre todo, habría escondido la parte más útil: cómo se detecta y se corrige un error de medición. Una enmienda fechada vale más que un historial impecable.</p>`},
+    {q:'¿Cómo lo detecté?', a:`<p>Mirando vídeos de los casos que el sistema contaba como acierto, que es justo lo que uno no suele revisar: se revisan los fallos. Aparecía una mano enorme en primer plano marcada como persona, una y otra vez.</p>`},
+    {q:'¿Qué regla me llevo de aquí?', a:`<p>Que <strong>hay que revisar los aciertos, no solo los fallos</strong>, y que antes de fiarme de una referencia tengo que preguntarme explícitamente qué errores comparte con lo que estoy midiendo. Si comparten detector, comparten ceguera.</p>`}
+  ]
+},
+
+/* 7 · MIRAR ATRÁS */
+{
+  id: 'mirar-atras', label: 'Mirar atrás: qué cambiaría', date: 'sep 2026', focus: 'all',
+  title: 'Qué haría distinto, por orden de importancia',
+  sub: 'Primero lo que afecta a si los números son ciertos; después lo que afecta a si el sistema es rápido; al final lo que lo haría un producto.',
+  beats: [
+    {tag:'mirar', h:'1 · La referencia, antes que el sistema', body:`<p>Construí la vara de medir en la fase 4, después de meses de ajustes a ojo. Si la hubiera construido primero, cada cambio habría tenido un número desde el principio y no habría afinado durante semanas una lógica que estaba mal de concepto.</p>`},
+    {tag:'mirar', h:'2 · Preguntar qué comparte la referencia con el sistema', body:`<p>El error de las manos se habría evitado con una pregunta de cinco minutos: «¿qué usa mi referencia que también use el sistema?». Compartían detector, y por eso el fallo se premiaba solo.</p>`},
+    {tag:'mirar', h:'3 · Episodios demasiado cortos', body:`<p>El 67 % de los episodios de peligro de la referencia dura menos de 0,3 s. Muchos son ruido, no peligros. Midiendo solo los de 0,3 s o más, la exhaustividad sube del 30 % al 47 %: la misma realidad, contada con un criterio más sensato. Está anotado como el primer cambio a probar.</p>`},
+    {tag:'mirar', h:'4 · Lo que se mide mal todavía', body:`${table(['Qué falla','Cuánto pesa','Causa'], [
+      ['Objetos lejos del camino marcados en él','38 % de los sobrantes','altura de ojos fija, base de la caja tapada'],
+      ['Cuerpo del propio usuario','26 % de los sobrantes','sin clase propia en el detector'],
+      ['Escaleras','solo 21 % detectadas','pocos ejemplos de entrenamiento']
+    ])}`},
+    {tag:'mirar', h:'5 · Lo único que valida de verdad', body:`${caveat('Seis grabaciones tienen techo', `<p>Se puede seguir afinando sobre las mismas seis grabaciones durante meses y el número subirá, pero cada vez significará menos: es ajustar a un examen conocido. Lo que falta no es otra iteración, es <strong>una sesión en vivo con las gafas puestas</strong>, y con personas que de verdad lo necesiten. Todo lo demás es preparación para eso.</p>`)}`}
+  ],
+  qa: [
+    {q:'¿Está esto terminado?', a:`<p>Está medido y publicado con sus límites, que no es lo mismo. Funciona sobre grabaciones; el paso pendiente es probarlo en vivo. Prefiero un repositorio que dice exactamente hasta dónde llegó a uno que insinúa que llegó más lejos.</p>`},
+    {q:'¿Serviría hoy a una persona ciega?', a:`<p>No como producto. Con un acierto de uno de cada cuatro avisos, la fatiga sería alta. Sirve como base medida sobre la que mejorar, y sirve para saber <em>qué</em> mejorar, que era el objetivo.</p>`},
+    {q:'¿Qué me llevo de todo esto?', a:`<p>Que la parte difícil de un sistema de percepción no suele ser el modelo, sino decidir qué cuenta como acierto, y montar algo que lo diga sin que opine yo. Casi todo el progreso real de este proyecto vino de medir mejor, no de programar mejor.</p>`}
+  ]
+},
+
+/* 8 · GLOSARIO */
+{
+  id: 'glosario', label: 'Conceptos: lo que me enseñó', date: '7 fases', focus: 'all', kicker: 'Glosario',
+  title: 'Glosario del proyecto',
+  sub: 'Los conceptos de todas las fases en un sitio, para repasar y marcar lo que sé explicar sin mirar.',
+  intro: conceptsHtml('es'),
+  beats: [],
+  qa: []
+}
+];
+PAGE.steps.en = [
+/* 0 · SUMMARY */
+{
+  id: 'resumen', label: 'The project in 2 minutes', date: 'Jun 2026 → Sep 2026', focus: 'all',
+  title: 'Warning about obstacles while walking, and measuring whether the warning is any use',
+  sub: 'aria-guard looks through the cameras of a pair of Meta Project Aria glasses and speaks up about what gets in the way. This logbook covers how it was built, how it was measured on a PC and on a Jetson Orin Nano, and why the hard question was not speed but whether the warnings were true.',
+  intro: `
+  <div class="pitch">
+    <span class="lbl">Pitch</span>
+    <p><strong>Problem.</strong> A blind or low-vision person walking outdoors needs to know what is ahead <em>before</em> reaching it. Such a system can fail in two ways: being too slow to warn in time, or warning about things that do not matter until you stop listening.</p>
+    <p><strong>What I did.</strong> A full pipeline over real recordings: object detection, depth, gaze, an arbiter deciding what to say, and speech. All measured with the same protocol on an RTX 5060 Ti and on a Jetson Orin Nano. And, above all, an automatic evaluation of whether the warnings matched obstacles that really were in the path, using the trajectory the person actually walked afterwards.</p>
+    <p><strong>Honest result.</strong> On the PC it runs comfortably; on the Jetson it reaches 24.5 FPS but misses the latency target I had set myself. And the warnings started out being true only 10 % of the time. By measuring, changing what "in my path" means and fixing an error that was inflating my own numbers, I ended at 24 %. That is the number it ships with, not the flattering one.</p>
+  </div>
+  ${stats([
+    {num:'24.5 FPS', lbl:'on Jetson, up from 13', good:true},
+    {num:'136 ms', lbl:'p95 · target was 100'},
+    {num:'24 %', lbl:'warnings about something real', good:true},
+    {num:'36.9 min', lbl:'six real recordings'}
+  ])}
+  ${explain('How to read this site: the 5-step method', `<p>Each phase follows an adaptation of Pólya's <em>How to Solve It</em> (1945). The numbers come from the JSON files in <code>benchmarks/</code> and from <code>docs/ALERT_EVALUATION.md</code>; where a number has no recorded procedure, it says so.</p>`)}
+  ${POLYA_FIG([['1 · Understand','what the problem is'],['2 · Simulate','one case with numbers'],['3 · Write','code and decision'],['4 · Measure','what came out, and how'],['5 · Look back','what I would change']], 'Pólya had four steps. "Devising a plan" becomes simulating a concrete case, and "examining the solution" splits into measuring and looking back, because code can be run and can contradict you.', 'what you learn feeds the next pass')}
+  `,
+  beats: [],
+  qa: [
+    {q:'How do I explain this project in two minutes?', a:`<p><strong>Understand:</strong> camera glasses can warn about obstacles, but only if they warn in time and the warning is true. <strong>Key decision:</strong> not to trust eyeballing it; build an automatic reference from the trajectory the person really walked, so every warning can be graded without hand-labelling anything. <strong>Measure:</strong> the same protocol on PC and Jetson, with percentiles, and the success criterion written before computing it. <strong>Results:</strong> 24.5 FPS on the Jetson but latency above target, and 24 % alert precision after fixing an error that had inflated it to 38 %.</p>`},
+    {q:'Which part is the most interesting technically?', a:`<p>That <strong>the hard question was not speed</strong>. Optimising the Jetson was known work: profile, find the bottleneck was the CPU decoding JPEG rather than the network, and undo a global setting another library had changed behind my back. The interesting part was realising the system did not know <em>what was in the path</em>: it was using image thirds as if they were geometry. Replacing that with a real measurement — where each box meets the ground, using IMU gravity and eye height — nearly doubled precision.</p>`},
+    {q:'What would I do differently from scratch?', a:`<p>Build the reference <strong>before</strong> the system. I spent weeks tuning warnings without being able to say whether they improved, and when I finally measured I found the core logic was wrong in concept. I would also have checked earlier that my reference did not share errors with what it was measuring: I did not, and that is why I published numbers I had to revise downwards three hours later.</p>`}
+  ]
+},
+
+/* 1 · THE PIPELINE */
+{
+  id: 'tuberia', label: 'From glasses to spoken warning', date: 'Jun 2026', focus: ['captar','detectar','profundidad','mirada','arbitro','avisar'],
+  title: 'Six pieces between camera and voice',
+  sub: 'Every frame goes through detection, depth and gaze; a tracker links what it sees across frames and an arbiter decides whether it is worth speaking. The hard part is not any single piece: it is what they do together.',
+  beats: [
+    {tag:'entender', h:'Warning about everything is warning about nothing', body:`<p>Detecting objects is a solved problem. The open problem is <strong>what to say out loud</strong>. A street holds dozens of objects per frame; name them and the person takes the earphones off within two minutes. Every warning spends a resource you cannot get back: the attention of the person walking.</p>`},
+    {tag:'simular', h:'One frame’s journey', body:`${fig(`
+      <rect class="s-box" x="12" y="60" width="118" height="54" rx="7"/><text class="s-t" x="71" y="83" text-anchor="middle">Aria glasses</text><text class="s-d" x="71" y="101" text-anchor="middle">RGB + eyes + IMU</text>
+      <line class="s-line" x1="130" y1="87" x2="160" y2="87" marker-end="url(#arrow)"/>
+      <rect class="s-box" x="162" y="16" width="120" height="46" rx="7"/><text class="s-t" x="222" y="36" text-anchor="middle">Detect</text><text class="s-d" x="222" y="52" text-anchor="middle">YOLO26 · 24 classes</text>
+      <rect class="s-box" x="162" y="66" width="120" height="46" rx="7"/><text class="s-t" x="222" y="86" text-anchor="middle">Depth</text><text class="s-d" x="222" y="102" text-anchor="middle">1 frame in 5</text>
+      <rect class="s-box" x="162" y="116" width="120" height="46" rx="7"/><text class="s-t" x="222" y="136" text-anchor="middle">Gaze</text><text class="s-d" x="222" y="152" text-anchor="middle">1 frame in 2</text>
+      <line class="s-line" x1="282" y1="39" x2="320" y2="80" marker-end="url(#arrow)"/>
+      <line class="s-line" x1="282" y1="89" x2="320" y2="89" marker-end="url(#arrow)"/>
+      <line class="s-line" x1="282" y1="139" x2="320" y2="98" marker-end="url(#arrow)"/>
+      <rect class="s-box" x="322" y="62" width="118" height="54" rx="7"/><text class="s-t" x="381" y="85" text-anchor="middle">Tracker</text><text class="s-d" x="381" y="103" text-anchor="middle">links across frames</text>
+      <line class="s-line" x1="440" y1="89" x2="470" y2="89" marker-end="url(#arrow)"/>
+      <rect class="s-box" x="472" y="62" width="118" height="54" rx="7"/><text class="s-t" x="531" y="85" text-anchor="middle">Arbiter</text><text class="s-d" x="531" y="103" text-anchor="middle">6 warnings / 30 s</text>
+      <line class="s-line" x1="590" y1="89" x2="620" y2="89" marker-end="url(#arrow)"/>
+      <rect class="s-box-ok" x="622" y="62" width="108" height="54" rx="7"/><text class="s-t" x="676" y="85" text-anchor="middle">Speech</text><text class="s-d" x="676" y="103" text-anchor="middle">and beeps</text>
+    `, '0 0 750 178', 'Depth and gaze are not computed on every frame: they cost too much. The last known value is reused, an acceptable approximation while walking.', 'Diagram of the full pipeline')}`},
+    {tag:'escribir', h:'Replaying a recording as if it were live', body:`<p>To repeat measurements, recordings have to enter through the <strong>same path</strong> the live glasses use: RGB and eye images with their real timestamps, not a plain video. The benchmark reads the original VRS files and feeds them at the recording’s own clock.</p>
+    ${code('scripts/replay_benchmark.sh', 'usage', `./scripts/replay_benchmark.sh ~/Datasets/aria/ritw benchmarks/replay`)}`},
+    {tag:'medir', h:'What each piece costs', body:`<p>With everything wired up, the full detector takes 4.2 ms median on the PC and 24.7 ms on the Jetson. But the per-stage split is what drives the decision of what to optimise.</p>
+    ${table(['Stage (ms, median p50)','PC · RTX 5060 Ti','Jetson Orin Nano'], [
+      ['VRS decode','16.23','39.26'],
+      ['Detection (YOLO)','3.08','18.36'],
+      ['Depth (1 in 5)','9.82','62.49'],
+      ['Gaze (1 in 2)','0.77','5.33'],
+      ['Tracker + arbiter','0.29','0.88']
+    ])}`},
+    {tag:'mirar', h:'What this pipeline does not know', body:`${caveat('Depth is not in metres', `<p>The depth model returns <strong>relative</strong> values, renormalised on every frame: it says what is nearer than what, not how many metres away. That is enough to rank objects, not to say "two steps ahead". All the hazard logic built on top inherits that limitation, and it is the root of the problem in phase 4.</p>`)}`}
+  ],
+  qa: [
+    {q:'Why not compute depth and gaze on every frame?', a:`<p>Because they do not fit in the time available. On the Jetson depth costs 62 ms; at 24 FPS there are only 41 ms per frame. Computing it one frame in five and reusing the last value is a reasonable approximation while walking, where the scene changes slowly. The price is that an object appearing suddenly can carry up to four frames of stale depth.</p>`},
+    {q:'Why use gaze if the person is blind?', a:`<p>Because "blind" covers a lot: low vision, peripheral vision and useful residual sight all exist. If the person is already oriented towards the obstacle, the warning is redundant. In practice gaze contributes less than I expected, and it is one of the things I would measure separately if starting over.</p>`},
+    {q:'Why cap warnings at 6 per 30 seconds?', a:`<p>It is a hand-set limit against fatigue. It has a side effect I was slow to see: by capping from above, the "under 12 warnings per minute" criterion was met <strong>by construction</strong>, not on merit. A criterion you cannot fail measures nothing.</p>`}
+  ]
+},
+
+/* 2 · MEASURING */
+{
+  id: 'medir', label: 'Measuring without fooling myself', date: 'Sep 2026', focus: ['medir','verificar'],
+  title: 'Two machines, one protocol, and the clock in charge',
+  sub: 'Processing a recording slowly and counting frames does not tell you whether the system works. What matters is what happens when the clock does not wait.',
+  beats: [
+    {tag:'entender', h:'Two ways to measure, one honest', body:`<p>A recording can be replayed two ways. <strong>Processing everything</strong>, however long it takes: a pretty, false number. Or <strong>at real pace</strong>, dropping whatever cannot be processed in time: what the person would actually notice. Only the second answers "is it any use while walking?".</p>`},
+    {tag:'simular', h:'What dropping 56 % means', body:`${fig(`
+      <text class="s-t" x="20" y="30">PC · RTX 5060 Ti</text>
+      <rect class="s-box-ok" x="20" y="42" width="560" height="26" rx="5"/><text class="s-d" x="300" y="59" text-anchor="middle">30 FPS · 0 % dropped</text>
+      <text class="s-t" x="20" y="104">Jetson · before optimising</text>
+      <rect class="s-box-ok" x="20" y="116" width="244" height="26" rx="5"/><rect class="s-box" x="264" y="116" width="316" height="26" rx="5" stroke-dasharray="4 3"/>
+      <text class="s-d" x="142" y="133" text-anchor="middle">13 FPS processed</text><text class="s-d" x="422" y="133" text-anchor="middle">56 % dropped</text>
+      <text class="s-t" x="20" y="178">Jetson · after</text>
+      <rect class="s-box-ok" x="20" y="190" width="462" height="26" rx="5"/><rect class="s-box" x="482" y="190" width="98" height="26" rx="5" stroke-dasharray="4 3"/>
+      <text class="s-d" x="251" y="207" text-anchor="middle">24.5 FPS processed</text><text class="s-d" x="531" y="207" text-anchor="middle">17.5 %</text>
+    `, '0 0 600 232', 'Each bar is the same recording replayed at its real pace. The hatched part is what the system never looked at: frames where, had an obstacle appeared, nobody would have known.', 'Comparison of dropped frames')}`},
+    {tag:'escribir', h:'One JSON per run, and the table writes itself', body:`<p>Every replay writes a JSON with the machine, the commit, the model, per-stage percentiles and the warnings issued. The README tables are not hand-written: they are generated from those files. If a number on this site has no JSON behind it, it is not measured.</p>
+    ${code('scripts/replay_table.py', 'generates the README tables', `python3 scripts/replay_table.py benchmarks/replay/*.json`)}`},
+    {tag:'medir', h:'The baseline, on both machines', body:`${table(['Machine','Effective FPS','Dropped','p50 (ms)','p95 (ms)'], [
+      ['PC · RTX 5060 Ti','30.0','0.0 %','20.9','31.6'],
+      ['Jetson · baseline','13.0','56.4 %','146.3','255.4'],
+      ['Jetson · optimised','24.5','17.5 %','101.8','136.4']
+    ])}
+    <p>All six recordings give the same result in all three rows: there is no easy recording rescuing the average.</p>`},
+    {tag:'mirar', h:'Six recordings are not a study', body:`${caveat('One person, walking in daylight', `<p>The six recordings are outdoors, in daylight, from one sighted person walking normally. No night, no rain, no crowds, and none of the different gait of someone using a cane. Everything that follows holds <strong>within those conditions</strong> and cannot be extrapolated without measuring again.</p>`)}`}
+  ],
+  qa: [
+    {q:'Why p95 and not the mean?', a:`<p>Because the failure you notice is the worst case, not the average. If 95 of 100 frames take 100 ms and 5 take 250, the mean says 107 ms and looks fine; but those 5 are half a second of system blindness exactly when something cuts across. The mean hides precisely what you are looking for.</p>`},
+    {q:'Why set the latency target before measuring?', a:`<p>So I could not move it afterwards. I wrote "p95 under 100 ms" before having results. I landed at 136 ms. Had I picked the threshold after seeing the number, a very convincing 150 ms would have appeared. The missed target is in the README.</p>`},
+    {q:'How do I know I am comparing like with like?', a:`<p>Same script, same recordings, same model, and the commit recorded in every JSON. What is not identical is the environment: the Jetson runs inside a container with TensorRT 10.3 and the PC with 10.16. That difference is in the table, not hidden.</p>`}
+  ]
+},
+
+/* 3 · JETSON */
+{
+  id: 'jetson', label: 'The Jetson: 13 to 24.5 FPS', date: 'Sep 2026', focus: ['detectar','profundidad','medir'],
+  title: 'The bottleneck was not the neural network',
+  sub: 'Profiling by stage turned up three things: the CPU decompressing images, one library silently changing another’s configuration, and a GPU cooling down between frames.',
+  beats: [
+    {tag:'entender', h:'Optimising what is not the bottleneck achieves nothing', body:`<p>The natural reaction to 13 FPS is to speed up the model. But the detection engine in isolation already took <strong>4 ms</strong>: even instantaneous, the system would still sit around 20 FPS. The time was elsewhere, and without per-stage profiling you cannot see it.</p>`},
+    {tag:'simular', h:'Where the time goes on the Jetson', body:`${fig(`
+      <rect class="s-box" x="20" y="24" width="180" height="26" rx="5"/><text class="s-d" x="110" y="41" text-anchor="middle">JPEG decode · 39 ms</text>
+      <rect class="s-box-ok" x="20" y="60" width="86" height="26" rx="5"/><text class="s-d" x="63" y="77" text-anchor="middle">YOLO · 18 ms</text>
+      <rect class="s-box" x="20" y="96" width="290" height="26" rx="5"/><text class="s-d" x="165" y="113" text-anchor="middle">Depth · 62 ms (1 frame in 5)</text>
+      <rect class="s-box-ok" x="20" y="132" width="26" height="26" rx="5"/><text class="s-d" x="70" y="149">Gaze · 5 ms</text>
+      <text class="s-d" x="340" y="41">← CPU, single thread</text>
+      <text class="s-d" x="340" y="77">← GPU, already optimised</text>
+      <text class="s-d" x="340" y="113">← GPU, spread across frames</text>
+    `, '0 0 620 178', 'Bars are to scale. The most expensive stage (depth) is only paid one frame in five; decoding is paid on every frame, and it is pure CPU.', 'Per-stage time split on the Jetson')}`},
+    {tag:'escribir', h:'Three changes, one of them silly', body:`<p>First, running detection directly on TensorRT instead of through the wrapper library, and computing depth without blocking everything else. Second, the find: <strong>importing <code>ultralytics</code> left OpenCV configured with a single thread</strong>, multiplying the cost of resizing images by five (1.2 to 6.6 ms). Restoring the thread count after the import is one line.</p>
+    ${code('src/detection/', 'the fix, in essence', `import ultralytics            # leaves OpenCV on 1 thread\ncv2.setNumThreads(n_threads)  # restored by hand`)}`},
+    {tag:'medir', h:'24.5 FPS, and a missed target', body:`${stats([
+      {num:'13 → 24.5', lbl:'effective FPS', good:true},
+      {num:'146 → 102 ms', lbl:'p50 capture→detections', good:true},
+      {num:'255 → 136 ms', lbl:'p95 · target was 100'},
+      {num:'56 → 17.5 %', lbl:'frames dropped', good:true}
+    ])}
+    <p>The frames-per-second target was met; the latency one was not. It sits 36 ms short of the goal I had set, and the culprit is still decoding images on the CPU.</p>`},
+    {tag:'mirar', h:'The GPU cools down between frames', body:`${caveat('Measured, not solved', `<p>Measured in a continuous loop the detection engine takes 6.7 ms; with 40 ms pauses between calls, 11.3 ms. That is the GPU dropping its clock while idle. Locking the clocks at maximum needs administrator rights on the machine, so <strong>the published numbers are without locking them</strong>: they are conservative, and recorded as such.</p>`)}`}
+  ],
+  qa: [
+    {q:'Why not decode the images on the GPU?', a:`<p>It is the obvious next optimisation and it is pending. A replay reads VRS files, but live the stream arrives already compressed, so the problem is the same. Moving it to the GPU or to a separate process is what could bring p95 below 100 ms.</p>`},
+    {q:'Why can the TensorRT engine not be copied from PC to Jetson?', a:`<p>Because TensorRT compiles for a specific GPU architecture and library version. The PC engine will not start on the Jetson: it has to be built there, which takes several minutes the first time. That is why <code>.engine</code> files are not in the repository.</p>`},
+    {q:'How did I find the OpenCV thread issue?', a:`<p>By profiling stage by stage and seeing a number that made no sense: resizing a small image cannot cost 6.6 ms. I ran the same code without importing the detection library and it dropped to 1.2 ms. The lesson generalises: <strong>a library can change another library’s global configuration</strong>, and that shows up in no profile of your own code.</p>`}
+  ]
+},
+
+/* 4 · ALERTS */
+{
+  id: 'alertas', label: 'Are the warnings any use?', date: 'Sep 2026', focus: ['arbitro','verificar','medir'],
+  title: 'Building a reference so I could fail',
+  sub: 'So far everything was milliseconds. The real question was different: of everything the system said out loud, how much was true? Answering it needed a yardstick that was not my opinion.',
+  beats: [
+    {tag:'entender', h:'Without a reference, every change looks like an improvement', body:`<p>I spent weeks tuning thresholds while watching videos and saying "better now". That is not measuring. I needed something that, for every instant of every recording, would say whether there really was an obstacle in the path, <strong>without me deciding</strong>.</p>`},
+    {tag:'simular', h:'The future as the right answer', body:`${fig(`
+      <rect class="s-box" x="16" y="20" width="150" height="50" rx="7"/><text class="s-t" x="91" y="41" text-anchor="middle">Real trajectory</text><text class="s-d" x="91" y="59" text-anchor="middle">where they went next</text>
+      <rect class="s-box" x="16" y="86" width="150" height="50" rx="7"/><text class="s-t" x="91" y="107" text-anchor="middle">3D points</text><text class="s-d" x="91" y="125" text-anchor="middle">cloud of the scene</text>
+      <line class="s-line" x1="166" y1="45" x2="210" y2="72" marker-end="url(#arrow)"/>
+      <line class="s-line" x1="166" y1="111" x2="210" y2="84" marker-end="url(#arrow)"/>
+      <rect class="s-box-ok" x="212" y="52" width="170" height="52" rx="7"/><text class="s-t" x="297" y="74" text-anchor="middle">Hazard episodes</text><text class="s-d" x="297" y="92" text-anchor="middle">what happened, and when</text>
+      <line class="s-line" x1="382" y1="78" x2="424" y2="78" marker-end="url(#arrow)"/>
+      <rect class="s-box" x="426" y="52" width="150" height="52" rx="7"/><text class="s-t" x="501" y="74" text-anchor="middle">System grade</text><text class="s-d" x="501" y="92" text-anchor="middle">hit · miss · spurious</text>
+    `, '0 0 600 156', 'The key is that the reference uses information the system does not have at that moment: where the person ended up walking. It is marking the exam with the future as the answer sheet.', 'Diagram of the automatic reference')}`},
+    {tag:'escribir', h:'The criterion, written before computing', body:`<p>Before running anything I wrote down in <code>docs/ALERT_EVALUATION.md</code> what would count as a hit, what as a spurious warning, and what difference I would consider a real improvement rather than noise. That way the result cannot be reinterpreted afterwards.</p>
+    ${code('docs/ALERT_EVALUATION.md', 'fixed before measuring', `precision · recall · lead time · spurious warnings per minute`)}`},
+    {tag:'medir', h:'The 10 %', body:`<p>The first measurement was a cold shower: with the original logic, <strong>one warning in ten</strong> matched something really in the path. And widening the corridor did not fix it: it stayed around 35 % even at five metres wide, which ruled out a tuning problem.</p>
+    ${table(['Metric','Original logic'], [
+      ['Warnings about something really in path','10 %'],
+      ['Hazard episodes warned about','17 %'],
+      ['Spurious warnings per minute','9.1']
+    ])}`},
+    {tag:'mirar', h:'The diagnosis', body:`${caveat('Not the threshold: the concept', `<p>The conclusion was that <strong>the system did not know what was in its path</strong>. It decided using image thirds (left, centre, right) and a relative depth renormalised on every frame. That is not geometry: a tree in the background of the centre scored the same as a lamppost two metres away. Fixing it meant changing the idea, not the number.</p>`)}`}
+  ],
+  qa: [
+    {q:'Why not hand-label a few videos?', a:`<p>Time and bias. That is 36.9 minutes at 30 frames per second: tens of thousands of images. And labelling "this was dangerous" after the fact, knowing what the system said, contaminates the result. The real trajectory is objective and I do not choose it.</p>`},
+    {q:'Is using the future as reference fair?', a:`<p>It is fair for <em>grading</em>, not for deciding. The system never sees that information: it is only used afterwards, to mark the exam. It is the same as making a weather forecast and then checking whether it rained.</p>`},
+    {q:'Why publish a 10 % instead of hiding it?', a:`<p>Because it is the result. A repository that only shows the good numbers says nothing about how its author works. And the 10 % is the starting point that gives the next phase meaning: without it, reaching 24 % means nothing.</p>`}
+  ]
+},
+
+/* 5 · IN MY PATH */
+{
+  id: 'camino', label: '"In my path", for real', date: 'Sep 2026', focus: ['camino','arbitro'],
+  title: 'Where each box meets the ground',
+  sub: 'Replacing image thirds with a physical measurement: using gravity from the motion sensor and a fixed eye height, you can estimate how far away and how far to the side each object is, in metres.',
+  beats: [
+    {tag:'entender', h:'The image is not the world', body:`<p>Something being in the centre of the image does not mean it is in your way: it depends on how high and how far it is. But there is a strong, free clue: <strong>almost anything that can get in your way touches the ground</strong>. If you know where the ground is in the image, the bottom of each box tells you how far the object is.</p>`},
+    {tag:'simular', h:'Three inputs and one calculation', body:`${fig(`
+      <rect class="s-box" x="16" y="18" width="164" height="44" rx="7"/><text class="s-t" x="98" y="38" text-anchor="middle">Gravity (IMU)</text><text class="s-d" x="98" y="54" text-anchor="middle">where the ground is</text>
+      <rect class="s-box" x="16" y="72" width="164" height="44" rx="7"/><text class="s-t" x="98" y="92" text-anchor="middle">Eye height</text><text class="s-d" x="98" y="108" text-anchor="middle">fixed at 1.6 m</text>
+      <rect class="s-box" x="16" y="126" width="164" height="44" rx="7"/><text class="s-t" x="98" y="146" text-anchor="middle">Box bottom</text><text class="s-d" x="98" y="162" text-anchor="middle">where it meets ground</text>
+      <line class="s-line" x1="180" y1="40" x2="228" y2="84" marker-end="url(#arrow)"/>
+      <line class="s-line" x1="180" y1="94" x2="228" y2="94" marker-end="url(#arrow)"/>
+      <line class="s-line" x1="180" y1="148" x2="228" y2="104" marker-end="url(#arrow)"/>
+      <rect class="s-box-ok" x="230" y="68" width="186" height="52" rx="7"/><text class="s-t" x="323" y="90" text-anchor="middle">Distance and offset</text><text class="s-d" x="323" y="108" text-anchor="middle">in metres, not pixels</text>
+      <line class="s-line" x1="416" y1="94" x2="458" y2="94" marker-end="url(#arrow)"/>
+      <rect class="s-box" x="460" y="68" width="150" height="52" rx="7"/><text class="s-t" x="535" y="90" text-anchor="middle">In the path?</text><text class="s-d" x="535" y="108" text-anchor="middle">yes / no</text>
+    `, '0 0 634 190', 'Eye height is fixed at 1.6 m. That is the simplification that makes the calculation work without calibrating anything, and also the one that introduces the systematic error explained below.', 'Diagram of the metric in-path model')}`},
+    {tag:'escribir', h:'One improvement at a time, written first', body:`<p>The change was registered as a candidate before being measured, with the rule for accepting it: improve recall <strong>without</strong> increasing spurious warnings per minute. Had it raised hits at the cost of talking more, it would have been rejected.</p>`},
+    {tag:'medir', h:'Better on all six recordings', body:`${table(['Metric','Image thirds','Metric model'], [
+      ['Warnings about something real','9.7 %','20.4 %'],
+      ['Episodes warned about','17.2 %','29.1 %'],
+      ['Spurious warnings / min','9.06','6.89']
+    ])}
+    <p>Better on all three metrics at once and on all six recordings, not on average. That there is no recording where it gets worse is what makes the change credible.</p>`},
+    {tag:'mirar', h:'What the fixed height costs', body:`${caveat('Short distances and a blind spot', `<p>Assuming 1.6 m of eye height for everyone makes distances come out 0.4 to 2.9 m <strong>shorter</strong> than the reference. And there is a blind spot by construction: anything that <em>does not touch the ground</em> — a branch at head height, an awning, a badly parked lorry — is not measured well by this method. It is the main reason metric depth is still on the list.</p>`)}`}
+  ],
+  qa: [
+    {q:'Why not measure each person’s eye height?', a:`<p>It is on the improvement list and it is easy: the glasses are calibrated. I did not do it because I wanted one change at a time, measured in isolation. Mixing two improvements into one measurement makes it impossible to know which one worked.</p>`},
+    {q:'What about obstacles that do not touch the ground?', a:`<p>This method does not see them well, and that is its most serious limit. The honest thing is to say it in the same sentence as the improvement: I went from 10 % to 20 % <em>and</em> left uncovered a case that is, for a blind person, exactly one of the dangerous ones.</p>`},
+    {q:'Is it cheating to use the IMU, which the reference also uses?', a:`<p>It is a legitimate worry and I recorded it: independence between what I measure and the yardstick is <strong>partial</strong>. The reference uses the future trajectory and the reconstructed ground; the system uses instantaneous gravity. They are not the same, but they are related, and that has to be said.</p>`}
+  ]
+},
+
+/* 6 · THE HANDS */
+{
+  id: 'manos', label: 'My own hands were obstacles', date: 'Sep 2026 · afternoon', focus: ['detectar','verificar'],
+  title: 'The error I found after publishing',
+  sub: 'The numbers published that morning said 38 % precision. By the afternoon I had found that the detector counted the wearer’s own hands as obstacles, and that my reference did the same. The right numbers were 24 %.',
+  beats: [
+    {tag:'entender', h:'When the examiner shares the examinee’s error', body:`<p>The detector saw the wearer’s hand or arm entering the field of view and labelled it <em>person</em>. A huge obstacle, very close and dead centre: the system warned. What makes it serious is that <strong>the reference used the same detector</strong>, so it also counted it as a real hazard, and the warning was rewarded instead of penalised.</p>`},
+    {tag:'simular', h:'How a number inflates without lying', body:`${fig(`
+      <rect class="s-box" x="16" y="20" width="160" height="46" rx="7"/><text class="s-t" x="96" y="40" text-anchor="middle">Wearer’s hand</text><text class="s-d" x="96" y="56" text-anchor="middle">detected as a person</text>
+      <line class="s-line" x1="176" y1="43" x2="216" y2="43" marker-end="url(#arrow)"/>
+      <rect class="s-box" x="218" y="20" width="150" height="46" rx="7"/><text class="s-t" x="293" y="40" text-anchor="middle">System warns</text><text class="s-d" x="293" y="56" text-anchor="middle">"person very close"</text>
+      <line class="s-line" x1="368" y1="43" x2="408" y2="43" marker-end="url(#arrow)"/>
+      <rect class="s-box" x="410" y="20" width="164" height="46" rx="7"/><text class="s-t" x="492" y="40" text-anchor="middle">The reference</text><text class="s-d" x="492" y="56" text-anchor="middle">also calls it a hazard</text>
+      <line class="s-line" x1="492" y1="66" x2="492" y2="96" marker-end="url(#arrow)"/>
+      <rect class="s-box" x="386" y="98" width="212" height="44" rx="7"/><text class="s-t" x="492" y="118" text-anchor="middle">False hit</text><text class="s-d" x="492" y="134" text-anchor="middle">precision rises for no reason</text>
+    `, '0 0 620 162', 'The loop closes on itself: the same error appears in what is measured and in what measures, so instead of subtracting it adds. That is why reference independence is not an academic detail.', 'Diagram of the hands error')}`},
+    {tag:'escribir', h:'Amend, do not delete', body:`<p>The first step was writing the amendment into <code>docs/ALERT_EVALUATION.md</code>: what was wrong, why, and what would be recomputed — <strong>before</strong> recomputing anything. Then a new reference using Meta’s hand tracking to discard detections containing the wearer’s wrist, plus an angular filter in the live system.</p>`},
+    {tag:'medir', h:'The honest numbers', body:`${table(['Variant','Real warnings','Episodes warned','Spurious / min'], [
+      ['Image thirds (original)','9.7 %','17.2 %','9.06'],
+      ['Metric model','20.4 %','29.1 %','6.89'],
+      ['Metric + body filter','24.0 %','29.5 %','5.67']
+    ])}
+    <p>The last row is what ships and what runs live. The morning’s numbers (38 % and 33 %) are marked as wrong in the document itself, not deleted.</p>`},
+    {tag:'mirar', h:'What the filter still does not fix', body:`${caveat('There is still unfiltered body', `<p>The corrected reference only discards <strong>hands</strong>: if the person looks down, their legs or torso still count as obstacles. The angular filter removes around 47 % of hands, not all of them. And in a reviewed sample of 15 cases it removed one real person: the filter has a cost. All of that is in the document.</p>`)}`}
+  ],
+  qa: [
+    {q:'Why not rewrite history and publish only the good numbers?', a:`<p>Because the repository was already public and there were records citing those commits. Deleting it would have broken the references and, above all, hidden the most useful part: how a measurement error is found and corrected. A dated amendment is worth more than a spotless history.</p>`},
+    {q:'How did I find it?', a:`<p>By watching videos of the cases the system counted as <em>hits</em>, which is exactly what nobody reviews: people review failures. A huge hand in the foreground, labelled as a person, came up again and again.</p>`},
+    {q:'What rule do I take from this?', a:`<p>That <strong>you have to review the hits, not just the misses</strong>, and that before trusting a reference I must explicitly ask what errors it shares with what I am measuring. If they share a detector, they share a blind spot.</p>`}
+  ]
+},
+
+/* 7 · LOOKING BACK */
+{
+  id: 'mirar-atras', label: 'Looking back: what I would change', date: 'Sep 2026', focus: 'all',
+  title: 'What I would do differently, in order of importance',
+  sub: 'First what affects whether the numbers are true; then what affects whether the system is fast; last what would make it a product.',
+  beats: [
+    {tag:'mirar', h:'1 · The reference before the system', body:`<p>I built the yardstick in phase 4, after months of tuning by eye. Had I built it first, every change would have had a number from the start and I would not have spent weeks refining logic that was conceptually wrong.</p>`},
+    {tag:'mirar', h:'2 · Ask what the reference shares with the system', body:`<p>The hands error would have been avoided by a five-minute question: "what does my reference use that the system also uses?". They shared a detector, and that is why the failure rewarded itself.</p>`},
+    {tag:'mirar', h:'3 · Episodes that are too short', body:`<p>67 % of the reference’s hazard episodes last under 0.3 s. Many are noise, not hazards. Measuring only those of 0.3 s or longer, recall rises from 30 % to 47 %: the same reality, counted with a saner criterion. It is recorded as the first change to try.</p>`},
+    {tag:'mirar', h:'4 · What is still measured badly', body:`${table(['What fails','How much','Cause'], [
+      ['Objects far from the path marked as in it','38 % of spurious','fixed eye height, occluded box bottom'],
+      ['The wearer’s own body','26 % of spurious','no dedicated class in the detector'],
+      ['Stairs','only 21 % detected','few training examples']
+    ])}`},
+    {tag:'mirar', h:'5 · The only thing that really validates', body:`${caveat('Six recordings have a ceiling', `<p>You can keep tuning on the same six recordings for months and the number will rise, but it will mean less each time: it is fitting to a known exam. What is missing is not another iteration, it is <strong>a live session with the glasses on</strong>, and with people who actually need them. Everything else is preparation for that.</p>`)}`}
+  ],
+  qa: [
+    {q:'Is this finished?', a:`<p>It is measured and published with its limits, which is not the same thing. It works over recordings; the pending step is live testing. I prefer a repository that says exactly how far it got over one that implies it got further.</p>`},
+    {q:'Would it help a blind person today?', a:`<p>Not as a product. With one warning in four being right, fatigue would be high. It works as a measured baseline to improve on, and it tells you <em>what</em> to improve, which was the goal.</p>`},
+    {q:'What do I take away from all this?', a:`<p>That the hard part of a perception system is usually not the model but deciding what counts as a hit, and building something that says so without my opinion. Almost all the real progress in this project came from measuring better, not from coding better.</p>`}
+  ]
+},
+
+/* 8 · GLOSSARY */
+{
+  id: 'glosario', label: 'Concepts: what it taught me', date: '7 phases', focus: 'all', kicker: 'Glossary',
+  title: 'Project glossary',
+  sub: 'The concepts from every phase in one place, to review and check what I can explain.',
+  intro: conceptsHtml('en'),
+  beats: [],
+  qa: []
+}
+];
+/* ===== Explainer engine (shared across repos) =====
+   Content lives in PAGE (defined above): PAGE.ui.{es,en}, PAGE.steps.{es,en}.
+   Beat tags follow the 5-step method: entender · simular · escribir · medir · mirar */
+let currentLang = 'es';
+let current = 0;
+const KEY = 'explainer-' + PAGE.slug;
+
+function activeSteps(){ return PAGE.steps[currentLang]; }
+
+function renderQA(stepIdx, qaList){
+  if (!qaList || !qaList.length) return '';
+  const t = PAGE.ui[currentLang];
+  return `<div class="qa-section">
+    <div class="qa-section-head"><span class="icon">Q&amp;A</span><h3>${t.qaHeading}</h3></div>
+    ${qaList.map((item, i) => `
+      <div class="qa-item" id="qa-${stepIdx}-${i}">
+        <button class="qa-q" data-qa="${stepIdx}-${i}" aria-expanded="false">
+          <span class="qmark">Q${i+1}</span><span class="qtext">${item.q}</span><span class="chev">›</span>
+        </button>
+        <div class="qa-a">${item.a}</div>
+      </div>`).join('')}
+  </div>`;
+}
+
+/* Global map: the whole system, with this phase's part highlighted (zoom out ↔ zoom in) */
+function renderMap(stepIdx, focus){
+  const m = PAGE.map[currentLang], t = PAGE.ui[currentLang];
+  const on = id => focus === 'all' || (focus || []).includes(id);
+  const W = 124, G = 18, X0 = 14;
+  const nodes = m.nodes.map((n, i) => {
+    const x = X0 + i * (W + G);
+    return `<g class="map-node ${on(n.id) ? 'm-on' : 'm-off'}" data-node="${n.id}" tabindex="0" role="button" aria-label="${n.t}">
+      <rect x="${x}" y="14" width="${W}" height="52" rx="7"/>
+      <text class="mt" x="${x + W/2}" y="37" text-anchor="middle">${n.t}</text>
+      <text class="md" x="${x + W/2}" y="54" text-anchor="middle">${n.d}</text></g>
+      ${i < m.nodes.length - 1 ? `<line class="s-line" x1="${x + W}" y1="40" x2="${x + W + G - 3}" y2="40" marker-end="url(#arrow-map-${stepIdx})"/>` : ''}`;
+  }).join('');
+  const total = m.nodes.length * W + (m.nodes.length - 1) * G;
+  const bw = (total - G) / 2;
+  const bands = m.bands.map((b, i) => {
+    const x = X0 + i * (bw + G);
+    return `<g class="map-node ${on(b.id) ? 'm-on' : 'm-off'}" data-node="${b.id}" tabindex="0" role="button" aria-label="${b.t}">
+      <rect x="${x}" y="84" width="${bw}" height="32" rx="7" stroke-dasharray="4 3"/>
+      <text class="mt" x="${x + bw/2}" y="104" text-anchor="middle">${b.t} <tspan class="md">· ${b.d}</tspan></text></g>`;
+  }).join('');
+  return `<figure class="fig map"><div class="fig-card map-card">
+    <svg viewBox="0 0 ${total + 2*X0} 128" role="img" aria-label="${t.mapLabel}">
+      <defs><marker id="arrow-map-${stepIdx}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+      ${nodes}${bands}</svg></div>
+    <figcaption>${t.mapCaption}</figcaption></figure>`;
+}
+
+function render(){
+  const t = PAGE.ui[currentLang];
+  const steps = activeSteps();
+  const stepsEl = document.getElementById('steps');
+  const panelsEl = document.getElementById('panels');
+  stepsEl.innerHTML = ''; panelsEl.innerHTML = '';
+
+  document.title = t.docTitle;
+  document.documentElement.lang = currentLang;
+  document.getElementById('rail').setAttribute('aria-label', t.railAria);
+  document.getElementById('railEyebrow').textContent = t.railEyebrow;
+  document.getElementById('railTitle').textContent = t.railTitle;
+  document.getElementById('railFoot').innerHTML = t.railFoot;
+  document.getElementById('railLinks').innerHTML = t.links.map(l => `<a href="${l.href}">${l.label}</a>`).join('');
+  document.getElementById('langEs').className = currentLang === 'es' ? 'on' : '';
+  document.getElementById('langEn').className = currentLang === 'en' ? 'on' : '';
+
+  steps.forEach((s, i) => {
+    const li = document.createElement('li');
+    li.className = 'step-item' + (i === current ? ' active' : '') + (i < current ? ' done' : '');
+    li.innerHTML = `<button class="step-btn"><span class="step-dot"></span>
+        <span class="step-num">${String(i).padStart(2,'0')} / ${String(steps.length-1).padStart(2,'0')}</span>
+        <div class="step-label">${s.label}</div></button>`;
+    li.querySelector('button').addEventListener('click', () => go(i));
+    stepsEl.appendChild(li);
+
+    const panel = document.createElement('section');
+    panel.className = 'panel' + (i === current ? ' active' : '');
+    panel.id = 'panel-' + s.id;
+    const kicker = s.kicker || (i === 0 ? t.summaryKicker : `${t.phase} ${i}`);
+    panel.innerHTML = `
+      <p class="kicker">${kicker} <span class="date">· ${s.date}</span></p>
+      <h1 class="panel-title">${s.title}</h1>
+      <p class="panel-sub">${s.sub}</p>
+      ${renderMap(i, s.focus)}
+      ${s.intro || ''}
+      ${s.beats && s.beats.length ? `<div class="polya">${['entender','simular','escribir','medir','mirar'].map(k => `<span class="${k}">${t.tags[k]}</span>`).join('')}</div>` : ''}
+      ${(s.beats || []).map(b => `
+        <div class="beat">
+          <div class="beat-tag ${b.tag}">${t.tags[b.tag]}</div>
+          <div class="beat-body"><h3>${b.h}</h3>${b.body}
+            ${b.chips ? `<div>${b.chips.map(c => { const [hash, ...rest] = c.split(' ');
+              return `<span class="commit-chip"><span class="hash">${hash}</span>${rest.join(' ')}</span>`; }).join('')}</div>` : ''}
+          </div>
+        </div>`).join('')}
+      ${renderQA(i, s.qa)}`;
+    panelsEl.appendChild(panel);
+  });
+
+  panelsEl.querySelectorAll('.map-node').forEach(g => {
+    const jump = () => { const id = g.dataset.node;
+      const idx = activeSteps().findIndex((st, k) => k > 0 && Array.isArray(st.focus) && st.focus.includes(id));
+      if (idx >= 0) go(idx); };
+    g.addEventListener('click', jump);
+    g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); jump(); } });
+  });
+
+  panelsEl.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => {
+    const idx = activeSteps().findIndex(st => st.id === b.dataset.go); if (idx >= 0) go(idx);
+  }));
+  let known = {};
+  try { known = JSON.parse(localStorage.getItem(KEY + '-concepts') || '{}'); } catch(e) {}
+  const boxes = panelsEl.querySelectorAll('input[data-concept]');
+  const updateCount = () => {
+    const enabled = [...boxes].filter(x => !x.disabled);
+    const n = enabled.filter(x => x.checked).length;
+    panelsEl.querySelectorAll('.c-count').forEach(el => el.textContent = conceptCountLabel(currentLang, n, enabled.length));
+  };
+  boxes.forEach(x => {
+    x.checked = !!known[x.dataset.concept];
+    x.closest('.concept').classList.toggle('known', x.checked);
+    x.addEventListener('change', () => {
+      known[x.dataset.concept] = x.checked;
+      x.closest('.concept').classList.toggle('known', x.checked);
+      try { localStorage.setItem(KEY + '-concepts', JSON.stringify(known)); } catch(e) {}
+      updateCount();
+    });
+  });
+  if (boxes.length) updateCount();
+
+  panelsEl.querySelectorAll('.fig').forEach(f => {
+    const card = f.querySelector('.fig-card'); if (!card) return;
+    const b = document.createElement('button');
+    b.className = 'fig-zoom'; b.type = 'button'; b.textContent = '⤢ ' + t.zoom; b.setAttribute('aria-label', t.zoom);
+    b.addEventListener('click', () => openLightbox(f));
+    card.appendChild(b);
+  });
+
+  panelsEl.querySelectorAll('.qa-q').forEach(btn => btn.addEventListener('click', () => {
+    const item = btn.parentElement; const open = item.classList.toggle('open');
+    btn.setAttribute('aria-expanded', String(open));
+  }));
+
+  const prev = document.getElementById('prevBtn'), next = document.getElementById('nextBtn');
+  prev.textContent = t.prev; prev.disabled = current === 0;
+  next.textContent = current === steps.length - 1 ? t.end : t.next; next.disabled = current === steps.length - 1;
+  document.getElementById('progressText').textContent = t.progress(current, steps.length - 1);
+  try { localStorage.setItem(KEY + '-step', String(current)); localStorage.setItem(KEY + '-lang', currentLang); } catch(e) {}
+}
+
+function openLightbox(figEl){
+  const lb = document.getElementById('lightbox');
+  const svg = figEl.querySelector('svg').cloneNode(true);
+  const cap = figEl.querySelector('figcaption');
+  lb.querySelector('.lb-card').replaceChildren(svg);
+  lb.querySelector('.lb-cap').innerHTML = cap ? cap.innerHTML : '';
+  lb.querySelector('.lb-close').textContent = PAGE.ui[currentLang].close;
+  lb.hidden = false; lb.querySelector('.lb-close').focus();
+  // clicking a map node inside the lightbox also jumps
+  svg.querySelectorAll('.map-node').forEach(g => g.addEventListener('click', () => {
+    closeLightbox(); const id = g.dataset.node;
+    const idx = activeSteps().findIndex((st, k) => k > 0 && Array.isArray(st.focus) && st.focus.includes(id));
+    if (idx >= 0) go(idx);
+  }));
+}
+function closeLightbox(){ document.getElementById('lightbox').hidden = true; }
+
+function go(i){
+  if (i < 0 || i >= activeSteps().length) return;
+  current = i; render();
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+document.getElementById('langToggle').addEventListener('click', () => { currentLang = currentLang === 'es' ? 'en' : 'es'; render(); });
+document.getElementById('prevBtn').addEventListener('click', () => go(current - 1));
+document.getElementById('nextBtn').addEventListener('click', () => go(current + 1));
+document.getElementById('lightbox').addEventListener('click', e => { if (e.target.id === 'lightbox' || e.target.classList.contains('lb-close')) closeLightbox(); });
+document.addEventListener('keydown', e => {
+  if (!document.getElementById('lightbox').hidden) { if (e.key === 'Escape') closeLightbox(); return; }
+  if (e.target.closest && e.target.closest('input,textarea')) return;
+  if (e.key === 'ArrowRight') go(current + 1);
+  if (e.key === 'ArrowLeft') go(current - 1);
+});
+
+(function init(){
+  const params = new URLSearchParams(location.search);
+  const qLang = params.get('lang');
+  try {
+    const savedLang = localStorage.getItem(KEY + '-lang');
+    if (savedLang === 'es' || savedLang === 'en') currentLang = savedLang;
+    else if ((navigator.language || '').slice(0,2) !== 'es') currentLang = 'en';
+  } catch(e) {}
+  if (qLang === 'es' || qLang === 'en') currentLang = qLang;
+  try {
+    const saved = localStorage.getItem(KEY + '-step');
+    if (saved !== null) current = Math.min(parseInt(saved, 10) || 0, activeSteps().length - 1);
+  } catch(e) {}
+  render();
+})();
+
+</script>
+</body>
+</html>
